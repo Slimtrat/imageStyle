@@ -53,7 +53,7 @@ def frame_to_qimage(frame: np.ndarray) -> QImage:
 class PreviewWorker(QObject):
     """Build a small in-memory animation without invoking the video encoder."""
 
-    ready = Signal(int, object, object, str)
+    ready = Signal(int, object, object, object, str)
     scene_ready = Signal(int, object)
     failed = Signal(int, object)
     finished = Signal(int)
@@ -85,6 +85,7 @@ class PreviewWorker(QObject):
             renderer = ArtworkRenderer(analysis, self.config)
             self.scene_ready.emit(self.revision, build_studio_scene_data(renderer))
             frames: list[QImage] = []
+            studio_frames: list[QImage] = []
             progresses: list[float] = []
             for seconds in np.linspace(
                 0.0,
@@ -95,7 +96,13 @@ class PreviewWorker(QObject):
                     logger.info("Prérendu obsolète annulé pendant la composition")
                     return
                 sample_time = float(seconds)
-                frames.append(frame_to_qimage(renderer.frame_at(sample_time)))
+                flat_frame = renderer.frame_at(sample_time, presentation="2d")
+                frames.append(frame_to_qimage(flat_frame))
+                if self.config.effect == "paint_drop":
+                    texture = renderer.frame_at(sample_time, presentation="texture")
+                    studio_frames.append(frame_to_qimage(texture))
+                else:
+                    studio_frames.append(frame_to_qimage(flat_frame))
                 progresses.append(renderer.global_progress_at(sample_time))
             quality = (
                 f"Prérendu {renderer.width}×{renderer.height} · "
@@ -103,7 +110,11 @@ class PreviewWorker(QObject):
             )
             logger.info("Prérendu prêt : %s", quality)
             self.ready.emit(
-                self.revision, tuple(frames), tuple(progresses), quality
+                self.revision,
+                tuple(frames),
+                tuple(studio_frames),
+                tuple(progresses),
+                quality,
             )
         except Exception as exc:
             logger.exception("Échec du prérendu")

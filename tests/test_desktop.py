@@ -12,6 +12,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
+from artanimate import __version__
 from artanimate.desktop.app import MainWindow
 
 
@@ -25,11 +26,23 @@ def app(tmp_path_factory):
 
 def test_mode_switch_changes_visible_parameters_and_config(app) -> None:
     window = MainWindow()
+    assert window.version_badge.text() == f"VERSION {__version__}"
+    assert __version__ in window.windowTitle()
+    assert __version__ in window._settings_dialogs["effect"].windowTitle()
+    assert window._settings_dialogs["effect"].content.objectName() == "settingsContent"
+    assert window._settings_dialogs["effect"].scroll.viewport().objectName() == "settingsViewport"
     assert window.effect_combo.currentData() == "sand"
     assert window.mode_stack.currentIndex() == 0
     window.effect_combo.setCurrentIndex(1)
     assert window.effect_combo.currentData() == "wave"
     assert window.mode_stack.currentIndex() == 1
+    halo_index = window.effect_combo.findData("vertical_halo")
+    window.effect_combo.setCurrentIndex(halo_index)
+    halo_direction = window._effect_controls["vertical_halo"]["halo_direction"]
+    right_index = halo_direction.findData("right")
+    halo_direction.setCurrentIndex(right_index)
+    assert window.studio_3d._effect_direction == "right"
+    window.effect_combo.setCurrentIndex(1)
     config = window.build_config()
     assert config.effect == "wave"
     assert config.direction == "left"

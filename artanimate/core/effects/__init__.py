@@ -32,6 +32,7 @@ from .factory import create_effect, effect_descriptors, effect_keys, register_ef
 from .reveal import reveal_opacity
 from .sand import SandEffect, sand_field
 from .wave import WaveEffect, wave_field
+from .paint_drop import PaintDropEffect, paint_drop_field, paint_drop_target
 from .rgb_fade import RgbFadeEffect, rgb_channel_weights
 from .vertical_halo import VerticalHaloEffect
 from .screenprint import ScreenPrintEffect
@@ -50,6 +51,7 @@ __all__ = [
     "FrameDecorationContext",
     "LayerFrameState",
     "ParameterDocumentation",
+    "PaintDropEffect",
     "RgbFadeEffect",
     "SandEffect",
     "ScreenPrintEffect",
@@ -62,6 +64,8 @@ __all__ = [
     "effect_descriptors",
     "effect_keys",
     "load_effect_documentation",
+    "paint_drop_field",
+    "paint_drop_target",
     "register_effect",
     "reveal_opacity",
     "rgb_channel_weights",

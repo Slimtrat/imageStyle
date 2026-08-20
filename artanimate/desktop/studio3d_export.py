@@ -110,7 +110,7 @@ class Studio3DFrameWorker(QObject):
             self.scene_ready.emit(build_studio_scene_data(renderer))
             total = renderer.frame_count
             self.prepared.emit(total, renderer.width, renderer.height)
-            for index, frame in enumerate(renderer.frames()):
+            for index, frame in enumerate(renderer.frames(presentation="texture")):
                 if self._cancelled.is_set():
                     raise RenderCancelled("Rendu 3D annulé")
                 progress = effect_progress(self.config, index, total)

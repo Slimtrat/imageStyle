@@ -15,6 +15,9 @@ def test_package_cli_and_windows_metadata_share_the_release_version() -> None:
         encoding="utf-8"
     )
 
-    assert version == artanimate.__version__ == "2.5.0"
+    assert version == artanimate.__version__ == "2.6.0"
     assert f'ArtAnimate {version}' in cli
     assert f"'ProductVersion', '{version}'" in windows
+    numeric = ", ".join(version.split(".")) + ", 0"
+    assert f"filevers=({numeric})" in windows
+    assert f"prodvers=({numeric})" in windows

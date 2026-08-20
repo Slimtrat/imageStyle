@@ -73,6 +73,9 @@ class ArtworkRenderer:
                 height=self.height,
                 seed=layer_seed,
                 config=config,
+                layer_mask=layer.mask,
+                layer_color=layer.color,
+                is_outline=layer.is_outline,
             )
             field = self.effect.create_field(context)
             self.fields[layer.key] = field
@@ -232,7 +235,7 @@ class ArtworkRenderer:
                     background * (1.0 - alpha) + foreground * alpha
                 ).astype(np.uint8)
 
-    def frame_at(self, seconds: float) -> np.ndarray:
+    def frame_at(self, seconds: float, presentation: str = "2d") -> np.ndarray:
         seconds = float(np.clip(seconds, 0.0, self.config.duration))
         global_progress = self.global_progress_at(seconds)
         if global_progress >= 1.0:
@@ -283,6 +286,7 @@ class ArtworkRenderer:
                     config=self.config,
                     progress=global_progress,
                     layers=states,
+                    presentation=presentation,
                 ),
             )
         return frame
@@ -291,23 +295,26 @@ class ArtworkRenderer:
     def frame_count(self) -> int:
         return max(2, int(round(self.config.duration * self.config.fps)))
 
-    def _studio_frame_at(self, seconds: float) -> np.ndarray:
+    def _studio_frame_at(self, seconds: float, presentation: str = "2d") -> np.ndarray:
         """Integrate three subframes over a cinematic 270° shutter."""
         shutter = 0.75 / self.config.fps
         offsets = np.linspace(-0.5, 0.5, 3, dtype=np.float32) * shutter
         return exposure_average(
-            self.frame_at(float(np.clip(seconds + offset, 0.0, self.config.duration)))
+            self.frame_at(
+                float(np.clip(seconds + offset, 0.0, self.config.duration)),
+                presentation=presentation,
+            )
             for offset in offsets
         )
 
-    def frames(self) -> Iterator[np.ndarray]:
+    def frames(self, presentation: str = "2d") -> Iterator[np.ndarray]:
         count = self.frame_count
         for index in range(count):
             seconds = self.config.duration * index / (count - 1)
             if self.config.quality == "studio" and 0 < index < count - 1:
-                yield self._studio_frame_at(seconds)
+                yield self._studio_frame_at(seconds, presentation=presentation)
             else:
-                yield self.frame_at(seconds)
+                yield self.frame_at(seconds, presentation=presentation)
 
 
 def render_video(

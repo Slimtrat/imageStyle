@@ -12,6 +12,15 @@ QLabel#brand {
     font-size: 25px;
     font-weight: 700;
 }
+QLabel#versionBadge {
+    color: #4050c2;
+    background: #eef0ff;
+    border: 1px solid #d8dcff;
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 800;
+}
 QLabel#tagline, QLabel#muted, QLabel#pathText {
     color: #6b7280;
 }
@@ -120,6 +129,17 @@ QProgressBar::chunk {
 QScrollArea {
     border: none;
     background: transparent;
+}
+QScrollArea#settingsScroll, QWidget#settingsViewport,
+QWidget#settingsContent, QStackedWidget#effectModeStack,
+QWidget#effectModePage {
+    color: #172033;
+    background-color: #f4f6fa;
+}
+QLabel#parameterHelp {
+    color: #4e5870;
+    background-color: transparent;
+    padding: 0 0 7px 0;
 }
 QFrame#sequenceCard {
     background: #f8f9fd;

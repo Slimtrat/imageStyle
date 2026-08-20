@@ -129,6 +129,60 @@
         }
       ]
     },
+    "paint_drop": {
+      "selector_label": "Pinceau & goutte — peinture liquide",
+      "description": "Un pinceau géant se place au-dessus de chaque vraie zone colorée, libère une goutte de sa couleur, puis la peinture remplit la forme depuis l’impact.",
+      "parameters": [
+        {
+          "key": "paint_brush_width",
+          "label": "Largeur du pinceau",
+          "control": "slider",
+          "minimum": 0.18,
+          "maximum": 0.65,
+          "default": 0.34,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Largeur du pinceau par rapport à l’œuvre. 0,34 crée un outil imposant sans masquer la zone d’impact."
+        },
+        {
+          "key": "paint_drop_size",
+          "label": "Taille de la goutte",
+          "control": "slider",
+          "minimum": 0.006,
+          "maximum": 0.06,
+          "default": 0.024,
+          "step": 0.002,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Diamètre visuel de la goutte. 0,024 correspond à environ 2,4 % du petit côté de l’image."
+        },
+        {
+          "key": "paint_fall_ratio",
+          "label": "Temps de chute",
+          "control": "slider",
+          "minimum": 0.15,
+          "maximum": 0.55,
+          "default": 0.3,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Part de chaque passage réservée à la chute avant que la forme commence à se remplir. 0,30 donne un impact lisible sans ralentir l’ensemble."
+        },
+        {
+          "key": "paint_flow",
+          "label": "Fluidité du remplissage",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 0.35,
+          "default": 0.14,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Irrégularité organique du front de peinture. À zéro l’expansion est circulaire ; plus haut elle épouse une matière liquide vivante."
+        }
+      ]
+    },
     "rgb_fade": {
       "selector_label": "Fondu RGB — lumière numérique",
       "description": "L’œuvre naît depuis le noir par montée lumineuse simultanée ou par superposition progressive des canaux rouge, vert puis bleu.",
@@ -152,9 +206,25 @@
       ]
     },
     "vertical_halo": {
-      "selector_label": "Halo vertical — activation couleur",
-      "description": "Un rideau lumineux vertical traverse l’œuvre et active chaque famille de couleurs dans l’ordre choisi.",
+      "selector_label": "Halo vertical — rideau de révélation",
+      "description": "Un unique rideau lumineux traverse l’œuvre : seule la partie située derrière son passage devient visible.",
       "parameters": [
+        {
+          "key": "halo_direction",
+          "label": "Sens du passage",
+          "control": "choice",
+          "description": "Choisit le bord de départ du halo et donc le côté qui reste révélé derrière lui.",
+          "choices": [
+            {
+              "value": "left",
+              "label": "Gauche → droite"
+            },
+            {
+              "value": "right",
+              "label": "Droite → gauche"
+            }
+          ]
+        },
         {
           "key": "halo_width",
           "label": "Largeur du halo",
@@ -165,7 +235,7 @@
           "step": 0.005,
           "decimals": 3,
           "suffix": "",
-          "description": "Épaisseur du rideau lumineux. La valeur est une part de la largeur de l’image : 0,075 correspond à environ 7,5 %. Plus bas donne une ligne précise ; plus haut enveloppe davantage les formes."
+          "description": "Épaisseur du rideau lumineux. 0,075 correspond à environ 7,5 % de l’œuvre ; la zone non encore traversée reste masquée."
         },
         {
           "key": "halo_intensity",
@@ -177,7 +247,7 @@
           "step": 0.05,
           "decimals": 2,
           "suffix": "",
-          "description": "Puissance de la lumière pendant le passage. 0 désactive l’éclat, 1 reste naturel et les valeurs supérieures créent un flash plus spectaculaire, sans modifier l’image finale."
+          "description": "Puissance de la lumière sur la frontière déjà franchie. Elle n’expose jamais les pixels situés devant le halo."
         },
         {
           "key": "soft_edge",
@@ -189,7 +259,7 @@
           "step": 0.001,
           "decimals": 3,
           "suffix": "",
-          "description": "Fondu au bord de la zone révélée. 0,012 représente environ 1,2 % du mouvement : faible donne une coupe nette, élevé rend la transition plus douce."
+          "description": "Fondu très local au bord du passage. Une faible valeur garde une séparation nette entre révélé et caché."
         }
       ]
     },

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__
 from ..branding import LOGO_PATH
 from ..core.config import RenderConfig
 from ..core.effects import EffectCapability, EffectDescriptor, effect_descriptors
@@ -65,7 +66,7 @@ class MainWindow(QMainWindow):
         history_root: Path | None = None,
     ):
         super().__init__()
-        self.setWindowTitle("ArtAnimate — Atelier d’animation")
+        self.setWindowTitle(f"ArtAnimate {__version__} — Atelier d’animation")
         self.setWindowIcon(QIcon(str(LOGO_PATH)))
         self.setMinimumSize(1100, 760)
         self.resize(1420, 900)
@@ -81,6 +82,7 @@ class MainWindow(QMainWindow):
         self._preview_revision = 0
         self._preview_pending = False
         self._preview_frames: tuple[QImage, ...] = ()
+        self._studio_preview_frames: tuple[QImage, ...] = ()
         self._preview_progresses: tuple[float, ...] = ()
         self._preview_frame_index = 0
         self._closing_for_preview = False
@@ -282,6 +284,10 @@ class MainWindow(QMainWindow):
         tagline = QLabel("Transformez une œuvre en film chromatique, directement sur votre ordinateur.")
         tagline.setObjectName("tagline")
         text.addWidget(brand)
+        self.version_badge = QLabel(f"VERSION {__version__}")
+        self.version_badge.setObjectName("versionBadge")
+        self.version_badge.setToolTip("Version installée d’ArtAnimate")
+        text.addWidget(self.version_badge)
         text.addWidget(tagline)
         layout.addLayout(text)
         layout.addStretch(1)
@@ -441,6 +447,7 @@ class MainWindow(QMainWindow):
         self.order_description.setWordWrap(True)
 
         self.mode_stack = QStackedWidget()
+        self.mode_stack.setObjectName("effectModeStack")
         self._effect_controls: dict[str, dict[str, QWidget]] = {}
         self._effect_page_indexes: dict[str, int] = {}
         for descriptor in descriptors:
@@ -619,6 +626,7 @@ class MainWindow(QMainWindow):
     ) -> tuple[QWidget, dict[str, QWidget]]:
         """Build one effect page entirely from its validated JSON documentation."""
         page = QWidget()
+        page.setObjectName("effectModePage")
         form = QFormLayout(page)
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(9)
@@ -1002,9 +1010,14 @@ class MainWindow(QMainWindow):
         direction = "left"
         rgb_control = self._effect_controls.get("rgb_fade", {}).get("rgb_mode")
         direction_control = self._effect_controls.get("wave", {}).get("direction")
+        halo_control = self._effect_controls.get("vertical_halo", {}).get(
+            "halo_direction"
+        )
         if isinstance(rgb_control, QComboBox):
             rgb_mode = str(rgb_control.currentData())
-        if isinstance(direction_control, QComboBox):
+        if effect == "vertical_halo" and isinstance(halo_control, QComboBox):
+            direction = str(halo_control.currentData())
+        elif isinstance(direction_control, QComboBox):
             direction = str(direction_control.currentData())
         self.studio_3d.set_effect(effect, rgb_mode, direction)
 
@@ -1032,8 +1045,8 @@ class MainWindow(QMainWindow):
         }
         if direct_compositor:
             self.order_description.setText(
-                "Le Fondu RGB compose l’image entière : ordre chromatique, neutres "
-                "et contours ne sont pas utilisés."
+                f"{descriptor.selector_label} compose l’image entière : ordre chromatique, "
+                "neutres et contours ne sont pas utilisés."
             )
         else:
             self.order_description.setText(descriptions[order])
@@ -1155,6 +1168,7 @@ class MainWindow(QMainWindow):
         self.player.stop()
         self._preview_playback.stop()
         self._preview_frames = ()
+        self._studio_preview_frames = ()
         self._preview_progresses = ()
         self.output_stack.setCurrentWidget(self.live_preview)
         self.video_actions.hide()
@@ -1186,17 +1200,21 @@ class MainWindow(QMainWindow):
         self,
         revision: int,
         frames: object,
+        studio_frames: object,
         progresses: object,
         quality: str,
     ) -> None:
         if (
             revision != self._preview_revision
             or not isinstance(frames, tuple)
+            or not isinstance(studio_frames, tuple)
             or not isinstance(progresses, tuple)
             or len(frames) != len(progresses)
+            or len(studio_frames) != len(progresses)
         ):
             return
         self._preview_frames = frames
+        self._studio_preview_frames = studio_frames
         self._preview_progresses = progresses
         self._preview_frame_index = 0
         self.output_heading.setText("Prérendu de l’effet")
@@ -1224,9 +1242,10 @@ class MainWindow(QMainWindow):
             return
         frame_index = self._preview_frame_index
         frame = self._preview_frames[frame_index]
+        studio_frame = self._studio_preview_frames[frame_index]
         self.live_preview.set_image(QPixmap.fromImage(frame))
         self.studio_3d.set_frame(
-            frame,
+            studio_frame,
             frame_index,
             len(self._preview_frames),
             self._preview_progresses[frame_index],
@@ -1254,6 +1273,7 @@ class MainWindow(QMainWindow):
         self._preview_debounce.stop()
         self._preview_playback.stop()
         self._preview_frames = ()
+        self._studio_preview_frames = ()
         self._preview_progresses = ()
         if self._preview_worker is not None:
             self._preview_worker.cancel()
@@ -1373,7 +1393,7 @@ class MainWindow(QMainWindow):
         if self._preview_frames:
             frame_index = self._preview_frame_index % len(self._preview_frames)
             self.studio_3d.set_frame(
-                self._preview_frames[frame_index],
+                self._studio_preview_frames[frame_index],
                 frame_index,
                 len(self._preview_frames),
                 self._preview_progresses[frame_index],
@@ -1461,7 +1481,12 @@ class MainWindow(QMainWindow):
         self._studio_pending_frame = None
         self._studio_capture_retries = 0
         self._studio_output_size = (settings.width, settings.height)
-        self.studio_3d.set_effect(config.effect, config.rgb_mode, config.direction)
+        studio_direction = (
+            config.halo_direction
+            if config.effect == "vertical_halo"
+            else config.direction
+        )
+        self.studio_3d.set_effect(config.effect, config.rgb_mode, studio_direction)
         self.studio_3d.begin_export(total)
         self._set_studio_running(True)
         self.status_label.setText("Rendu du Studio 3D en cours…")
@@ -1933,6 +1958,7 @@ class MainWindow(QMainWindow):
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ArtAnimate")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("ArtAnimate")
     app.setWindowIcon(QIcon(str(LOGO_PATH)))
     app.setStyleSheet(APP_STYLESHEET)

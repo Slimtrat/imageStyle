@@ -29,7 +29,9 @@ clé de configuration
 ```
 
 Un effet peut uniquement produire un champ, composer une frame complète avec
-`frame_compositor`, ou ajouter un outil lumineux avec `frame_decorator`. Le contrat
+`frame_compositor`, ou ajouter un outil lumineux/physique avec `frame_decorator`. Le
+contexte de champ expose le masque réel de la couche lorsqu’un impact doit viser la
+bonne forme. Le contrat
 valide dimensions et type RGB `uint8`. `ArtworkRenderer` retourne toujours la source
 exacte à la fin, les halos et lasers ne pouvant donc altérer l’œuvre finale.
 
@@ -70,6 +72,13 @@ En 2D, le faisceau est un champ spatial indépendant des masques de segmentation
 couleurs déposées créent une sous-encre douce jusque sous le futur contour noir, puis la
 passe laser la remplace progressivement. Ce raccord transitoire masque les coutures de
 segmentation sans modifier la frame finale, qui reste toujours la source exacte.
+
+Le halo vertical suit un autre contrat visuel : c’est un compositeur global, donc un
+seul front sépare à tout instant la partie révélée derrière le halo de la partie encore
+cachée devant lui. Pour `paint_drop`, le renderer calcule un pixel d’impact appartenant
+réellement à chaque masque. La présentation 2D dessine le pinceau dans la frame ; la
+texture Studio l’omet et laisse la scène 3D afficher le pinceau, la goutte et l’impact
+comme géométrie physique, sans double outil incrusté dans l’œuvre.
 
 ## 4. Atelier desktop et coût du prérendu
 

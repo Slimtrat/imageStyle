@@ -14,6 +14,7 @@ NEUTRAL_POSITIONS = ("first", "last")
 OUTLINE_MODES = ("first", "last", "together")
 QUALITY_PROFILES = ("fast", "studio")
 RGB_MODES = ("channels", "together")
+HALO_DIRECTIONS = ("left", "right")
 DIRECTIONS = ("left", "right", "top", "bottom", "diagonal", "radial")
 
 
@@ -24,6 +25,7 @@ class RenderConfig:
     outline: str = "together"
     direction: str = "left"
     rgb_mode: str = "channels"
+    halo_direction: str = "left"
     duration: float = 18.0
     fps: int = 30
     width: int = 1280
@@ -48,6 +50,10 @@ class RenderConfig:
     screenprint_width: float = 0.12
     laser_width: float = 0.018
     laser_intensity: float = 1.35
+    paint_brush_width: float = 0.34
+    paint_drop_size: float = 0.024
+    paint_fall_ratio: float = 0.30
+    paint_flow: float = 0.14
     seed: int = 7
     crf: int = 16
     quality: str = "studio"
@@ -76,6 +82,10 @@ class RenderConfig:
             raise ValueError(f"direction doit être l'une de : {', '.join(DIRECTIONS)}")
         if self.rgb_mode not in RGB_MODES:
             raise ValueError(f"rgb_mode doit être l'un de : {', '.join(RGB_MODES)}")
+        if self.halo_direction not in HALO_DIRECTIONS:
+            raise ValueError(
+                f"halo_direction doit être l'une de : {', '.join(HALO_DIRECTIONS)}"
+            )
         if self.duration <= 0 or self.fps <= 0:
             raise ValueError("duration et fps doivent être strictement positifs")
         if self.width < 64:
@@ -106,6 +116,14 @@ class RenderConfig:
             raise ValueError("laser_width doit être compris entre 0.002 et 0.10")
         if not 0.0 <= self.laser_intensity <= 4.0:
             raise ValueError("laser_intensity doit être compris entre 0 et 4")
+        if not 0.18 <= self.paint_brush_width <= 0.65:
+            raise ValueError("paint_brush_width doit être compris entre 0.18 et 0.65")
+        if not 0.006 <= self.paint_drop_size <= 0.06:
+            raise ValueError("paint_drop_size doit être compris entre 0.006 et 0.06")
+        if not 0.15 <= self.paint_fall_ratio <= 0.55:
+            raise ValueError("paint_fall_ratio doit être compris entre 0.15 et 0.55")
+        if not 0.0 <= self.paint_flow <= 0.35:
+            raise ValueError("paint_flow doit être compris entre 0 et 0.35")
         if not 0 <= self.crf <= 51:
             raise ValueError("crf doit être compris entre 0 et 51")
         return self

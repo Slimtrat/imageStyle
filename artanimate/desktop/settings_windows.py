@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+
+from .. import __version__
 from PySide6.QtWidgets import (
     QCommandLinkButton,
     QDialog,
@@ -48,7 +50,7 @@ class SettingsDialog(QDialog):
         minimum_width: int = 520,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"{title} — ArtAnimate")
+        self.setWindowTitle(f"{title} — ArtAnimate {__version__}")
         self.setWindowModality(Qt.WindowModality.NonModal)
         self.setMinimumWidth(minimum_width)
         self.resize(max(minimum_width, 560), 650)
@@ -68,6 +70,8 @@ class SettingsDialog(QDialog):
 
         self.scroll = QScrollArea()
         self.scroll.setObjectName("settingsScroll")
+        self.scroll.viewport().setObjectName("settingsViewport")
+        content.setObjectName("settingsContent")
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff

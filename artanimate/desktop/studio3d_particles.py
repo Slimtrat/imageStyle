@@ -7,6 +7,7 @@ from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
 from ..core.effects import EffectCapability
+from ..core.effects.paint_drop import paint_drop_target
 from ..core.renderer import ArtworkRenderer
 
 
@@ -25,12 +26,25 @@ class StudioParticleRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class StudioToolStageRecord:
+    """One physical tool target derived from an analyzed renderer stage."""
+
+    target_u: float
+    target_v: float
+    color: tuple[int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
 class StudioSceneData:
     """Analysis metadata shared by the interactive preview and final export."""
 
     particles: tuple[StudioParticleRecord, ...]
     stage_count: int
     outline_stage: int
+    tool_stages: tuple[StudioToolStageRecord, ...] = ()
+    paint_brush_width: float = 0.34
+    paint_drop_size: float = 0.024
+    paint_fall_ratio: float = 0.30
 
 
 def _inverse_ease(values: np.ndarray) -> np.ndarray:
@@ -55,8 +69,34 @@ def build_studio_scene_data(
         (index for index, layer in enumerate(renderer.stages) if layer.is_outline),
         -1,
     )
+    height, width = renderer.analysis.source.shape[:2]
+    tool_stages: tuple[StudioToolStageRecord, ...] = ()
+    if renderer.config.effect == "paint_drop":
+        records: list[StudioToolStageRecord] = []
+        for layer in renderer.stages:
+            x, y = paint_drop_target(layer.mask)
+            records.append(
+                StudioToolStageRecord(
+                    target_u=(x + 0.5) / width,
+                    target_v=(y + 0.5) / height,
+                    color=tuple(int(channel) for channel in layer.color),
+                )
+            )
+        tool_stages = tuple(records)
+
+    def scene(particles: tuple[StudioParticleRecord, ...]) -> StudioSceneData:
+        return StudioSceneData(
+            particles,
+            len(renderer.stages),
+            outline_stage,
+            tool_stages,
+            renderer.config.paint_brush_width,
+            renderer.config.paint_drop_size,
+            renderer.config.paint_fall_ratio,
+        )
+
     if not renderer.effect.supports(EffectCapability.FALLING_PARTICLES):
-        return StudioSceneData((), len(renderer.stages), outline_stage)
+        return scene(())
 
     height, width = renderer.analysis.source.shape[:2]
     settlement = np.full((height, width), np.nan, dtype=np.float32)
@@ -75,7 +115,7 @@ def build_studio_scene_data(
 
     coordinates = np.argwhere(np.isfinite(settlement))
     if not len(coordinates) or particle_count <= 0:
-        return StudioSceneData((), len(renderer.stages), outline_stage)
+        return scene(())
     rng = np.random.default_rng(renderer.config.seed + 104729)
     count = min(int(particle_count), len(coordinates))
     selected = coordinates[rng.choice(len(coordinates), size=count, replace=False)]
@@ -95,7 +135,7 @@ def build_studio_scene_data(
                 size=float(rng.uniform(0.48, 0.92)),
             )
         )
-    return StudioSceneData(tuple(records), len(renderer.stages), outline_stage)
+    return scene(tuple(records))
 
 
 class StudioParticleModel(QAbstractListModel):

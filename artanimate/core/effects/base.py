@@ -49,10 +49,15 @@ class EffectContext:
     height: int
     seed: int
     config: RenderConfig
+    layer_mask: np.ndarray | None = None
+    layer_color: tuple[int, int, int] | None = None
+    is_outline: bool = False
 
     def __post_init__(self) -> None:
         if self.width <= 0 or self.height <= 0:
             raise ValueError("Les dimensions du contexte d’effet doivent être positives")
+        if self.layer_mask is not None and self.layer_mask.shape != (self.height, self.width):
+            raise ValueError("Le masque de couche doit correspondre aux dimensions du contexte")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +97,11 @@ class FrameDecorationContext:
     config: RenderConfig
     progress: float
     layers: tuple[LayerFrameState, ...]
+    presentation: str = "2d"
+
+    def __post_init__(self) -> None:
+        if self.presentation not in {"2d", "texture"}:
+            raise ValueError("La présentation doit être '2d' ou 'texture'")
 
 
 class AnimationEffect(ABC):

@@ -52,7 +52,7 @@ def test_preview_configuration_is_bounded_but_preserves_effect() -> None:
 def test_preview_worker_builds_an_in_memory_animation(tmp_path: Path) -> None:
     source = tmp_path / "artwork.png"
     make_source(source)
-    ready: list[tuple[int, tuple[QImage, ...], tuple[float, ...], str]] = []
+    ready: list[tuple[int, tuple[QImage, ...], tuple[QImage, ...], tuple[float, ...], str]] = []
     finished: list[int] = []
     worker = PreviewWorker(
         source,
@@ -60,8 +60,8 @@ def test_preview_worker_builds_an_in_memory_animation(tmp_path: Path) -> None:
         revision=7,
     )
     worker.ready.connect(
-        lambda revision, frames, progresses, quality: ready.append(
-            (revision, frames, progresses, quality)
+        lambda revision, frames, studio_frames, progresses, quality: ready.append(
+            (revision, frames, studio_frames, progresses, quality)
         )
     )
     worker.finished.connect(finished.append)
@@ -70,10 +70,12 @@ def test_preview_worker_builds_an_in_memory_animation(tmp_path: Path) -> None:
 
     assert finished == [7]
     assert len(ready) == 1
-    revision, frames, progresses, quality = ready[0]
+    revision, frames, studio_frames, progresses, quality = ready[0]
     assert revision == 7
     assert len(frames) == PREVIEW_FRAME_COUNT
     assert all(not frame.isNull() for frame in frames)
+    assert len(studio_frames) == PREVIEW_FRAME_COUNT
+    assert all(not frame.isNull() for frame in studio_frames)
     assert frames[0] != frames[len(frames) // 2]
     assert len(progresses) == PREVIEW_FRAME_COUNT
     assert progresses[0] == 0.0

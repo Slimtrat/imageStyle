@@ -43,6 +43,9 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "LASER DES CONTOURS NOIRS" in scene
     assert "root.artworkDepth / 2 + 7" in scene
     assert "id: effectLaserEmitter" in scene
+    assert "id: paintBrushDeck" in scene
+    assert "GOUTTE EN CHUTE" in scene
+    assert "paintStageTargetU" in scene
     assert "artworkSource" in scene
     assert "MouseArea" in scene
     assert "effectKind" in scene

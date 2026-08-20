@@ -38,6 +38,22 @@ def test_every_studio_grain_uses_a_real_source_pixel_and_timing(tmp_path: Path) 
     assert len(settlements) > 12
 
 
+def test_paint_drop_stages_target_real_analyzed_pixels(tmp_path: Path) -> None:
+    source = tmp_path / "paint.png"
+    _artwork(source)
+    config = RenderConfig(effect="paint_drop", width=100, colors=6)
+    analysis = analyze_artwork(source, config)
+    renderer = ArtworkRenderer(analysis, config)
+    scene = build_studio_scene_data(renderer)
+
+    assert len(scene.tool_stages) == len(renderer.stages)
+    for stage, layer in zip(scene.tool_stages, renderer.stages, strict=True):
+        x = min(renderer.width - 1, int(stage.target_u * renderer.width))
+        y = min(renderer.height - 1, int(stage.target_v * renderer.height))
+        assert layer.mask[y, x]
+        assert stage.color == layer.color
+
+
 def test_non_particle_effect_clears_the_studio_particle_bank(tmp_path: Path) -> None:
     source = tmp_path / "artwork.png"
     _artwork(source)

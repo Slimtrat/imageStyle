@@ -18,6 +18,12 @@ Item {
     property real effectProgress: 0.0
     property int effectStageCount: 1
     property int effectOutlineStage: -1
+    property var paintStageTargetU: []
+    property var paintStageTargetV: []
+    property var paintStageColors: []
+    property real paintBrushWidth: 0.34
+    property real paintDropSize: 0.024
+    property real paintFallRatio: 0.30
     property real outputAspect: 16 / 9
     property bool showHud: true
 
@@ -32,6 +38,7 @@ Item {
     readonly property real lampCrossWave: Math.sin(effectProgress * Math.PI * 2 - 1.15)
     readonly property bool strictToolEffect: effectKind === "screenprint"
         || effectKind === "screenprint_laser"
+        || effectKind === "paint_drop"
     readonly property real toolTimeline: strictToolEffect
         ? Math.min(effectStageCount - 0.0001, effectProgress * effectStageCount)
         : effectProgress
@@ -42,6 +49,12 @@ Item {
     readonly property real effectToolProgress: strictToolEffect
         ? smootherstep(effectToolLinearProgress) : effectToolLinearProgress
     readonly property bool effectToolIsOutline: effectToolStage === effectOutlineStage
+    readonly property real paintTargetU: effectToolStage < paintStageTargetU.length
+        ? paintStageTargetU[effectToolStage] : 0.5
+    readonly property real paintTargetV: effectToolStage < paintStageTargetV.length
+        ? paintStageTargetV[effectToolStage] : 0.5
+    readonly property color paintActiveColor: effectToolStage < paintStageColors.length
+        ? paintStageColors[effectToolStage] : "#d94c4c"
     readonly property bool satelliteView: cameraPitch < -48
 
     function smootherstep(value) {
@@ -379,6 +392,9 @@ Item {
                     || (root.effectKind === "screenprint_laser"
                         && root.effectToolIsOutline)
                 readonly property real halfWidth: isLaser ? 1.4 : (isScreen ? 8 : 5)
+                readonly property real travelProgress: isHalo
+                    && root.effectDirection === "right"
+                    ? 1.0 - root.effectToolProgress : root.effectToolProgress
                 visible: (isHalo || isScreen || isLaser)
                     && root.effectToolProgress > 0.005
                     && root.effectToolProgress < 0.995
@@ -389,7 +405,7 @@ Item {
                     Math.min(
                         root.artworkWidth / 2 - halfWidth,
                         -root.artworkWidth / 2
-                            + root.artworkWidth * root.effectToolProgress
+                            + root.artworkWidth * effectToolDeck.travelProgress
                     )
                 )
 
@@ -474,6 +490,154 @@ Item {
                     quadraticFade: 0.00009
                 }
             }
+
+            // A real oversized flat brush drops the analyzed layer color onto its true zone.
+            Node {
+                id: paintBrushDeck
+                visible: root.effectKind === "paint_drop"
+                    && root.effectProgress > 0.005
+                    && root.effectProgress < 0.995
+                x: -root.artworkWidth / 2 + root.artworkWidth * root.paintTargetU
+                z: root.artworkCenterZ
+                eulerRotation.y: -3
+                readonly property real targetZ: (root.paintTargetV - 0.5)
+                    * root.artworkDepth
+                readonly property real fallProgress: Math.min(
+                    1.0,
+                    root.effectToolLinearProgress / Math.max(root.paintFallRatio, 0.001)
+                )
+                readonly property real dropScale: Math.max(
+                    0.045,
+                    Math.min(root.artworkWidth, root.artworkDepth)
+                        * root.paintDropSize / 100.0
+                )
+
+                Model {
+                    y: root.artworkSurfaceY + 132
+                    z: paintBrushDeck.targetZ
+                    source: "#Cylinder"
+                    scale: Qt.vector3d(0.105, 1.02, 0.105)
+                    materials: PrincipledMaterial {
+                        baseColor: "#7b4328"
+                        roughness: 0.38
+                        metalness: 0.05
+                    }
+                }
+                Model {
+                    y: root.artworkSurfaceY + 72
+                    z: paintBrushDeck.targetZ
+                    source: "#Cube"
+                    scale: Qt.vector3d(
+                        root.artworkWidth * root.paintBrushWidth / 100,
+                        0.16,
+                        0.20
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: "#d3b27a"
+                        metalness: 0.62
+                        roughness: 0.24
+                    }
+                }
+                Model {
+                    y: root.artworkSurfaceY + 43
+                    z: paintBrushDeck.targetZ + 1.6
+                    source: "#Cube"
+                    scale: Qt.vector3d(
+                        root.artworkWidth * root.paintBrushWidth * 0.84 / 100,
+                        0.235,
+                        0.115
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: Qt.darker(root.paintActiveColor, 2.15)
+                        roughness: 0.98
+                    }
+                }
+                Repeater3D {
+                    model: 13
+                    delegate: Model {
+                        required property int index
+                        x: (index - 6) * root.artworkWidth
+                            * root.paintBrushWidth * 0.061
+                        y: root.artworkSurfaceY + 42
+                            - Math.abs(index - 6) * 0.42
+                            + Math.sin(index * 1.7) * 0.9
+                        z: paintBrushDeck.targetZ + Math.sin(index * 2.1) * 1.3
+                        source: "#Cube"
+                        scale: Qt.vector3d(
+                            0.024,
+                            0.255 + Math.sin(index * 1.3) * 0.018,
+                            0.145
+                        )
+                        materials: PrincipledMaterial {
+                            baseColor: Qt.darker(root.paintActiveColor, 1.72)
+                            roughness: 0.96
+                        }
+                    }
+                }
+                Model {
+                    y: root.artworkSurfaceY + 28
+                    z: paintBrushDeck.targetZ
+                    source: "#Cube"
+                    scale: Qt.vector3d(
+                        root.artworkWidth * root.paintBrushWidth * 0.82 / 100,
+                        0.035,
+                        0.17
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: root.paintActiveColor
+                        roughness: 0.16
+                        clearcoatAmount: 0.64
+                        clearcoatRoughnessAmount: 0.10
+                    }
+                }
+                Model {
+                    visible: root.effectToolLinearProgress < root.paintFallRatio
+                    y: root.artworkSurfaceY + 3
+                        + 22 * (1.0 - root.smootherstep(paintBrushDeck.fallProgress))
+                    z: paintBrushDeck.targetZ
+                    source: "#Sphere"
+                    scale: Qt.vector3d(
+                        paintBrushDeck.dropScale,
+                        paintBrushDeck.dropScale * 1.45,
+                        paintBrushDeck.dropScale
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: root.paintActiveColor
+                        roughness: 0.12
+                        clearcoatAmount: 0.72
+                        clearcoatRoughnessAmount: 0.08
+                    }
+                }
+                Model {
+                    visible: root.effectToolLinearProgress >= root.paintFallRatio
+                        && root.effectToolLinearProgress < root.paintFallRatio + 0.24
+                    readonly property real bloom: Math.max(
+                        0.0,
+                        (root.effectToolLinearProgress - root.paintFallRatio) / 0.24
+                    )
+                    y: root.artworkSurfaceY + 1.2
+                    z: paintBrushDeck.targetZ
+                    source: "#Cylinder"
+                    scale: Qt.vector3d(
+                        0.05 + bloom * 0.34,
+                        0.006,
+                        0.05 + bloom * 0.34
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: root.paintActiveColor
+                        opacity: Math.max(0.0, 0.52 * (1.0 - bloom))
+                        roughness: 0.24
+                    }
+                }
+                PointLight {
+                    y: root.artworkSurfaceY + 48
+                    z: paintBrushDeck.targetZ
+                    color: root.paintActiveColor
+                    brightness: 0.22
+                    quadraticFade: 0.00034
+                }
+            }
+
 
             // Wave fronts skim a few millimetres above the horizontal artwork.
             Model {
@@ -649,7 +813,8 @@ Item {
             && (root.effectKind === "vertical_halo"
                 || root.effectKind === "screenprint"
                 || root.effectKind === "contour_laser"
-                || root.effectKind === "screenprint_laser")
+                || root.effectKind === "screenprint_laser"
+                || root.effectKind === "paint_drop")
             && root.effectProgress > 0.005
             && root.effectProgress < 0.995
         anchors.top: parent.top
@@ -657,7 +822,9 @@ Item {
         anchors.margins: 18
         radius: 8
         color: "#d0161b25"
-        border.color: root.effectToolIsOutline ? "#5adff4" : "#c99a67"
+        border.color: root.effectKind === "paint_drop"
+            ? root.paintActiveColor
+            : (root.effectToolIsOutline ? "#5adff4" : "#c99a67")
         border.width: 1
         width: effectActText.implicitWidth + 26
         height: 34
@@ -666,7 +833,12 @@ Item {
             id: effectActText
             anchors.centerIn: parent
             color: root.effectToolIsOutline ? "#9af2ff" : "#ffe0b9"
-            text: root.effectKind === "screenprint_laser"
+            text: root.effectKind === "paint_drop"
+                ? "COUCHE " + (root.effectToolStage + 1) + "/"
+                    + root.effectStageCount + " · "
+                    + (root.effectToolLinearProgress < root.paintFallRatio
+                        ? "GOUTTE EN CHUTE" : "PEINTURE EN EXPANSION")
+                : root.effectKind === "screenprint_laser"
                 ? (root.effectToolIsOutline
                     ? "ACTE 2 · LASER DES CONTOURS NOIRS"
                     : "ACTE 1 · SÉRIGRAPHIE COULEUR "
@@ -676,7 +848,9 @@ Item {
                     ? "SÉRIGRAPHIE · COUCHE " + (root.effectToolStage + 1)
                     : root.effectKind === "contour_laser"
                         ? "LASER · TRACÉ DES CONTOURS"
-                        : "HALO VERTICAL · ACTIVATION DES COULEURS"
+                        : (root.effectDirection === "right"
+                            ? "HALO VERTICAL · RÉVÉLATION DROITE → GAUCHE"
+                            : "HALO VERTICAL · RÉVÉLATION GAUCHE → DROITE")
             font.pixelSize: 11
             font.bold: true
             font.letterSpacing: 0.55
