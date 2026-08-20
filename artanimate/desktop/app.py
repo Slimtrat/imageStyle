@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         self._preview_revision = 0
         self._preview_pending = False
         self._preview_frames: tuple[QImage, ...] = ()
+        self._preview_progresses: tuple[float, ...] = ()
         self._preview_frame_index = 0
         self._closing_for_preview = False
         self._render_source: Path | None = None
@@ -1111,6 +1112,7 @@ class MainWindow(QMainWindow):
         self.player.stop()
         self._preview_playback.stop()
         self._preview_frames = ()
+        self._preview_progresses = ()
         self.output_stack.setCurrentWidget(self.live_preview)
         self.video_actions.hide()
         self.output_heading.setText("Prérendu de l’effet")
@@ -1125,21 +1127,34 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.ready.connect(self._preview_ready)
+        worker.scene_ready.connect(self._preview_scene_ready)
         worker.failed.connect(self._preview_failed)
         worker.finished.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(self._preview_thread_finished)
         thread.start()
 
+    def _preview_scene_ready(self, revision: int, scene_data: object) -> None:
+        if revision != self._preview_revision:
+            return
+        self.studio_3d.set_scene_data(scene_data)
+
     def _preview_ready(
         self,
         revision: int,
         frames: object,
+        progresses: object,
         quality: str,
     ) -> None:
-        if revision != self._preview_revision or not isinstance(frames, tuple):
+        if (
+            revision != self._preview_revision
+            or not isinstance(frames, tuple)
+            or not isinstance(progresses, tuple)
+            or len(frames) != len(progresses)
+        ):
             return
         self._preview_frames = frames
+        self._preview_progresses = progresses
         self._preview_frame_index = 0
         self.output_heading.setText("Prérendu de l’effet")
         self.preview_quality.setText(quality)
@@ -1164,10 +1179,14 @@ class MainWindow(QMainWindow):
     def _advance_preview(self) -> None:
         if not self._preview_frames:
             return
-        frame = self._preview_frames[self._preview_frame_index]
+        frame_index = self._preview_frame_index
+        frame = self._preview_frames[frame_index]
         self.live_preview.set_image(QPixmap.fromImage(frame))
         self.studio_3d.set_frame(
-            frame, self._preview_frame_index, len(self._preview_frames)
+            frame,
+            frame_index,
+            len(self._preview_frames),
+            self._preview_progresses[frame_index],
         )
         self._preview_frame_index = (self._preview_frame_index + 1) % len(
             self._preview_frames
@@ -1192,6 +1211,7 @@ class MainWindow(QMainWindow):
         self._preview_debounce.stop()
         self._preview_playback.stop()
         self._preview_frames = ()
+        self._preview_progresses = ()
         if self._preview_worker is not None:
             self._preview_worker.cancel()
 
@@ -1313,6 +1333,7 @@ class MainWindow(QMainWindow):
                 self._preview_frames[frame_index],
                 frame_index,
                 len(self._preview_frames),
+                self._preview_progresses[frame_index],
             )
         elif self.source_zone.path is not None:
             self._schedule_preview(0)
@@ -1417,6 +1438,7 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.prepared.connect(self._studio_render_prepared)
+        worker.scene_ready.connect(self.studio_3d.set_scene_data)
         worker.frame_ready.connect(self._studio_frame_ready)
         worker.finished.connect(self._studio_render_finished)
         worker.cancelled.connect(self._studio_render_cancelled)

@@ -59,3 +59,36 @@ def test_wave_renderer_is_reproducible(tmp_path: Path) -> None:
     first = ArtworkRenderer(analysis, config).frame_at(1.0)
     second = ArtworkRenderer(analysis, config).frame_at(1.0)
     assert np.array_equal(first, second)
+
+
+def test_screenprint_laser_keeps_black_outline_for_the_final_act(tmp_path: Path) -> None:
+    path = tmp_path / "signature.png"
+    make_source(path)
+    config = RenderConfig(
+        effect="screenprint_laser",
+        outline="together",
+        width=96,
+        colors=6,
+        duration=4,
+        fps=8,
+    )
+    analysis = analyze_artwork(path, config)
+    renderer = ArtworkRenderer(analysis, config)
+
+    assert analysis.outline is not None
+    assert renderer.stages[-1].is_outline
+    assert renderer.stage_stride() == 1.0
+    assert not np.array_equal(renderer.frame_at(2.0), analysis.source)
+    assert np.array_equal(renderer.frame_at(4.0), analysis.source)
+
+
+def test_decorated_effects_remain_deterministic(tmp_path: Path) -> None:
+    path = tmp_path / "decorated.png"
+    make_source(path)
+    for effect in ("vertical_halo", "screenprint", "contour_laser", "screenprint_laser"):
+        config = RenderConfig(effect=effect, width=96, colors=6, duration=3, fps=8)
+        analysis = analyze_artwork(path, config)
+        first = ArtworkRenderer(analysis, config).frame_at(1.35)
+        second = ArtworkRenderer(analysis, config).frame_at(1.35)
+        assert np.array_equal(first, second), effect
+        assert first.dtype == np.uint8

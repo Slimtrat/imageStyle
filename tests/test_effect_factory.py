@@ -15,7 +15,15 @@ from artanimate.core.effects import (
 
 
 def test_factory_is_the_single_source_of_registered_effects() -> None:
-    assert effect_keys() == EFFECTS == ("sand", "wave", "rgb_fade")
+    assert effect_keys() == EFFECTS == (
+        "sand",
+        "wave",
+        "rgb_fade",
+        "vertical_halo",
+        "screenprint",
+        "contour_laser",
+        "screenprint_laser",
+    )
     assert [descriptor.key for descriptor in effect_descriptors()] == list(EFFECTS)
 
 
@@ -46,9 +54,18 @@ def test_effect_metadata_is_documented_and_references_real_config_fields() -> No
 
 def test_effect_capabilities_match_their_composition_model() -> None:
     descriptors = {item.key: item for item in effect_descriptors()}
-    for key in ("sand", "wave"):
+    for key in (
+        "sand",
+        "wave",
+        "vertical_halo",
+        "screenprint",
+        "contour_laser",
+        "screenprint_laser",
+    ):
         assert descriptors[key].supports(EffectCapability.CHROMATIC_SEQUENCE)
         assert not descriptors[key].supports(EffectCapability.FRAME_COMPOSITOR)
+    for key in ("vertical_halo", "screenprint", "contour_laser", "screenprint_laser"):
+        assert descriptors[key].supports(EffectCapability.FRAME_DECORATOR)
     assert descriptors["rgb_fade"].supports(EffectCapability.FRAME_COMPOSITOR)
     assert not descriptors["rgb_fade"].supports(EffectCapability.CHROMATIC_SEQUENCE)
 

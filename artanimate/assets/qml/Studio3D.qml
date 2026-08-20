@@ -8,12 +8,16 @@ Item {
     property real cameraYaw: -18
     property real cameraPitch: -22
     property real cameraDistance: 950
+    property real cameraPivotY: 48
+    property real cameraOrbitTurns: 0
     property real lampBrightness: 2.4
     property real lampMotion: 0.65
     property string effectKind: "sand"
     property string rgbMode: "channels"
     property string effectDirection: "left"
     property real effectProgress: 0.0
+    property int effectStageCount: 1
+    property int effectOutlineStage: -1
     property real outputAspect: 16 / 9
     property bool showHud: true
 
@@ -26,6 +30,21 @@ Item {
     readonly property real artworkCenterZ: -8
     readonly property real lampWave: Math.sin(effectProgress * Math.PI * 2)
     readonly property real lampCrossWave: Math.sin(effectProgress * Math.PI * 2 - 1.15)
+    readonly property bool strictToolEffect: effectKind === "screenprint"
+        || effectKind === "screenprint_laser"
+    readonly property real toolTimeline: strictToolEffect
+        ? Math.min(effectStageCount - 0.0001, effectProgress * effectStageCount)
+        : effectProgress
+    readonly property int effectToolStage: strictToolEffect
+        ? Math.floor(toolTimeline) : 0
+    readonly property real effectToolProgress: strictToolEffect
+        ? toolTimeline - effectToolStage : effectProgress
+    readonly property bool effectToolIsOutline: effectToolStage === effectOutlineStage
+    readonly property bool satelliteView: cameraPitch < -48
+
+    function wrapAngle(value) {
+        return ((value + 180) % 360 + 360) % 360 - 180
+    }
 
     function rgbWeight(channel) {
         if (rgbMode === "together")
@@ -66,9 +85,10 @@ Item {
 
             Node {
                 id: cameraRig
-                y: 48
+                y: root.cameraPivotY
                 eulerRotation.x: root.cameraPitch
                 eulerRotation.y: root.cameraYaw
+                    + root.cameraOrbitTurns * 360 * root.effectProgress
                 PerspectiveCamera {
                     id: camera
                     z: root.cameraDistance - Math.sin(root.effectProgress * Math.PI) * 12
@@ -302,43 +322,75 @@ Item {
                 }
             }
 
-            // Pigment falls vertically and settles into coordinates on the horizontal canvas.
+            // Every grain comes from a real analyzed pixel and settles at its 2D time.
             Repeater3D {
-                model: 240
+                model: sandParticleModel
                 delegate: Model {
-                    required property int index
-                    readonly property real targetX: -root.artworkWidth / 2
-                        + (((index * 73) % 241) / 240) * root.artworkWidth
-                    readonly property real targetZ: root.artworkCenterZ - root.artworkDepth / 2
-                        + (((index * 47) % 239) / 238) * root.artworkDepth
-                    readonly property real birth: (((index * 37) % 241) / 240) * 0.79
+                    required property real targetU
+                    required property real targetV
+                    required property color particleColor
+                    required property real birthProgress
+                    required property real settleProgress
+                    required property real driftX
+                    required property real driftZ
+                    required property real particleSize
                     readonly property real travel: Math.max(0, Math.min(1,
-                        (root.effectProgress - birth) / 0.22))
+                        (root.effectProgress - birthProgress)
+                        / Math.max(0.0001, settleProgress - birthProgress)))
                     readonly property real fall: travel * travel
                     visible: root.effectKind === "sand"
                         && travel > 0.0 && travel < 1.0
-                    x: targetX
-                        + Math.sin(index * 1.73 + travel * 6.28)
-                        * (1 - fall) * (4 + index % 5)
+                    x: (targetU - 0.5) * root.artworkWidth
+                        + driftX * (1 - fall)
+                        + Math.sin(targetU * 91 + targetV * 57 + travel * 6.28)
+                        * (1 - fall) * 3.2
                     y: root.artworkSurfaceY + 245 * (1 - fall)
-                    z: targetZ
-                        + Math.cos(index * 1.27 + travel * 5.1)
-                        * (1 - fall) * (3 + index % 4)
+                    z: root.artworkCenterZ + (targetV - 0.5) * root.artworkDepth
+                        + driftZ * (1 - fall)
                     source: "#Sphere"
                     scale: Qt.vector3d(
-                        0.0055 + (index % 4) * 0.0014,
-                        0.017 + (index % 5) * 0.0036,
-                        0.0055 + (index % 4) * 0.0014
+                        particleSize * 1.55 / 100,
+                        particleSize * 3.8 / 100,
+                        particleSize * 1.55 / 100
                     )
                     materials: PrincipledMaterial {
-                        baseColor: index % 6 === 0 ? "#d98a45"
-                            : index % 6 === 1 ? "#d3aa68"
-                            : index % 6 === 2 ? "#a4523e"
-                            : index % 6 === 3 ? "#557180"
-                            : index % 6 === 4 ? "#6d5876" : "#292420"
-                        opacity: 0.78
-                        roughness: 0.86
+                        baseColor: particleColor
+                        opacity: 0.82
+                        roughness: 0.84
                     }
+                }
+            }
+
+            // Physical light tools mirror the analyzed 2D halo/laser passes.
+            Model {
+                readonly property bool isHalo: root.effectKind === "vertical_halo"
+                readonly property bool isScreen: root.effectKind === "screenprint"
+                    || (root.effectKind === "screenprint_laser"
+                        && !root.effectToolIsOutline)
+                readonly property bool isLaser: root.effectKind === "contour_laser"
+                    || (root.effectKind === "screenprint_laser"
+                        && root.effectToolIsOutline)
+                visible: (isHalo || isScreen || isLaser)
+                    && root.effectToolProgress > 0.01
+                    && root.effectToolProgress < 0.99
+                x: -root.artworkWidth / 2
+                    + root.artworkWidth * root.effectToolProgress
+                y: root.artworkSurfaceY + (isLaser ? 5.2 : 3.0)
+                z: root.artworkCenterZ
+                source: "#Cube"
+                scale: Qt.vector3d(
+                    isLaser ? 0.018 : (isScreen ? 0.16 : 0.09),
+                    isLaser ? 0.022 : 0.012,
+                    root.artworkDepth / 100
+                )
+                materials: PrincipledMaterial {
+                    baseColor: isLaser ? "#81eeff"
+                        : (isScreen ? "#ffd49a" : "#fff0cf")
+                    emissiveFactor: isLaser
+                        ? Qt.vector3d(0.55, 1.0, 1.0)
+                        : Qt.vector3d(0.45, 0.34, 0.20)
+                    opacity: isLaser ? 0.92 : 0.48
+                    roughness: 0.14
                 }
             }
 
@@ -444,6 +496,7 @@ Item {
 
                 Model {
                     id: overheadLampCable
+                    visible: !root.satelliteView
                     y: -86
                     source: "#Cylinder"
                     scale: Qt.vector3d(0.024, 1.72, 0.024)
@@ -455,6 +508,7 @@ Item {
                 }
                 Model {
                     id: overheadLamp
+                    visible: !root.satelliteView
                     y: -182
                     source: "#Cone"
                     scale: Qt.vector3d(1.46, 0.66, 1.46)
@@ -465,6 +519,7 @@ Item {
                     }
                 }
                 Model {
+                    visible: !root.satelliteView
                     y: -214
                     source: "#Cylinder"
                     scale: Qt.vector3d(1.46, 0.035, 1.46)
@@ -475,6 +530,7 @@ Item {
                     }
                 }
                 Model {
+                    visible: !root.satelliteView
                     y: -223
                     source: "#Sphere"
                     scale: Qt.vector3d(0.16, 0.16, 0.16)
@@ -520,15 +576,15 @@ Item {
         onPositionChanged: function(mouse) {
             if (!pressed)
                 return
-            root.cameraYaw = Math.max(-75, Math.min(75,
-                root.cameraYaw + (mouse.x - lastX) * 0.28))
-            root.cameraPitch = Math.max(-38, Math.min(2,
+            root.cameraYaw = root.wrapAngle(
+                root.cameraYaw + (mouse.x - lastX) * 0.28)
+            root.cameraPitch = Math.max(-82, Math.min(5,
                 root.cameraPitch + (mouse.y - lastY) * 0.2))
             lastX = mouse.x
             lastY = mouse.y
         }
         onWheel: function(wheel) {
-            root.cameraDistance = Math.max(560, Math.min(1180,
+            root.cameraDistance = Math.max(420, Math.min(1400,
                 root.cameraDistance - wheel.angleDelta.y * 0.45))
             wheel.accepted = true
         }

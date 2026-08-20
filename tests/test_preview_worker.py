@@ -52,7 +52,7 @@ def test_preview_configuration_is_bounded_but_preserves_effect() -> None:
 def test_preview_worker_builds_an_in_memory_animation(tmp_path: Path) -> None:
     source = tmp_path / "artwork.png"
     make_source(source)
-    ready: list[tuple[int, tuple[QImage, ...], str]] = []
+    ready: list[tuple[int, tuple[QImage, ...], tuple[float, ...], str]] = []
     finished: list[int] = []
     worker = PreviewWorker(
         source,
@@ -60,7 +60,9 @@ def test_preview_worker_builds_an_in_memory_animation(tmp_path: Path) -> None:
         revision=7,
     )
     worker.ready.connect(
-        lambda revision, frames, quality: ready.append((revision, frames, quality))
+        lambda revision, frames, progresses, quality: ready.append(
+            (revision, frames, progresses, quality)
+        )
     )
     worker.finished.connect(finished.append)
 
@@ -68,9 +70,13 @@ def test_preview_worker_builds_an_in_memory_animation(tmp_path: Path) -> None:
 
     assert finished == [7]
     assert len(ready) == 1
-    revision, frames, quality = ready[0]
+    revision, frames, progresses, quality = ready[0]
     assert revision == 7
     assert len(frames) == PREVIEW_FRAME_COUNT
     assert all(not frame.isNull() for frame in frames)
     assert frames[0] != frames[len(frames) // 2]
+    assert len(progresses) == PREVIEW_FRAME_COUNT
+    assert progresses[0] == 0.0
+    assert progresses[-1] == 1.0
+    assert list(progresses) == sorted(progresses)
     assert "Prérendu" in quality

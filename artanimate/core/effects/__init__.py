@@ -18,6 +18,8 @@ from .base import (
     EffectContext,
     EffectDescriptor,
     FrameCompositionContext,
+    FrameDecorationContext,
+    LayerFrameState,
 )
 from .documentation import (
     ChoiceDocumentation,
@@ -31,6 +33,10 @@ from .reveal import reveal_opacity
 from .sand import SandEffect, sand_field
 from .wave import WaveEffect, wave_field
 from .rgb_fade import RgbFadeEffect, rgb_channel_weights
+from .vertical_halo import VerticalHaloEffect
+from .screenprint import ScreenPrintEffect
+from .contour_laser import ContourLaserEffect
+from .screenprint_laser import ScreenPrintLaserEffect
 
 
 __all__ = [
@@ -41,9 +47,15 @@ __all__ = [
     "EffectDescriptor",
     "EffectDocumentation",
     "FrameCompositionContext",
+    "FrameDecorationContext",
+    "LayerFrameState",
     "ParameterDocumentation",
     "RgbFadeEffect",
     "SandEffect",
+    "ScreenPrintEffect",
+    "ScreenPrintLaserEffect",
+    "ContourLaserEffect",
+    "VerticalHaloEffect",
     "WaveEffect",
     "create_effect",
     "documentation_for",

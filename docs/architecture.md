@@ -1,20 +1,22 @@
 # Architecture ArtAnimate
 
-ArtAnimate sépare volontairement trois décisions qui évoluent indépendamment.
+ArtAnimate sépare la séquence chromatique, l’effet de matière et la présentation vidéo.
 
 ## 1. Séquence chromatique
 
 La séquence décide **quand** chaque famille de couleurs apparaît. La roue chromatique,
 son sens, son angle de départ et la position des neutres appartiennent à cette couche.
-Ils ne sont pas des effets. Les effets Sable et Vague déclarent tous deux la capacité
-`chromatic_sequence` dans leur contrat.
+Tous les effets par couches déclarent la capacité `chromatic_sequence`; `rgb_fade`
+utilise son propre compositeur d’image complète.
 
-## 2. Effet de matière
+Les capacités `strict_sequence` et `outline_finale` expriment deux contraintes métier
+sans créer de branche par nom d’effet dans le renderer. Le mode signature peut ainsi
+terminer toutes les couleurs avant d’autoriser la passe des contours noirs.
 
-Un effet décide **comment** une couche devient visible. Chaque effet vit dans son propre
-fichier sous `artanimate/core/effects/` et implémente `AnimationEffect`.
+## 2. Contrat d’effet
 
-Le cycle est le suivant :
+Chaque effet vit dans son propre fichier sous `artanimate/core/effects/` et implémente
+`AnimationEffect`. La factory est l’unique registre public.
 
 ```text
 clé de configuration
@@ -23,75 +25,61 @@ clé de configuration
   → AnimationEffect.create_field()
   → champ de révélation normalisé [0, 1]
   → composition fidèle par ArtworkRenderer
+  → décoration transitoire validée (optionnelle)
 ```
+
+Un effet peut uniquement produire un champ, composer une frame complète avec
+`frame_compositor`, ou ajouter un outil lumineux avec `frame_decorator`. Le contrat
+valide dimensions et type RGB `uint8`. `ArtworkRenderer` retourne toujours la source
+exacte à la fin, les halos et lasers ne pouvant donc altérer l’œuvre finale.
 
 Pour ajouter un effet :
 
 1. créer un module dédié dans `artanimate/core/effects/` ;
 2. hériter de `AnimationEffect` et implémenter `build_field()` ;
-3. déclarer les capacités et les champs de configuration ;
-4. utiliser `@register_effect` ;
-5. importer le module dans `effects/__init__.py` ;
-6. ajouter sa documentation et son schéma de paramètres dans
-   `artanimate/assets/docs/effects.fr.json`.
+3. déclarer capacités et champs de configuration ;
+4. implémenter `decorate_frame()` si `frame_decorator` est déclaré ;
+5. utiliser `@register_effect` et importer le module dans `effects/__init__.py` ;
+6. documenter exactement les paramètres dans `assets/docs/effects.fr.json`.
 
-La factory vérifie au démarrage que le code et la documentation JSON décrivent les
-mêmes paramètres. L’interface construit ensuite automatiquement les contrôles et les
-infobulles depuis ce JSON.
+La factory refuse au démarrage un décorateur non implémenté ou une divergence entre
+le code et le JSON. L’interface fabrique automatiquement sliders, choix et infobulles.
 
-## 3. Présentation vidéo
+## 3. Présentation 2D et Studio 3D
 
-La présentation décide **où et comment** l’animation est filmée. Elle est distincte de
-l’effet : un même rendu Sable ou Vague doit fonctionner en 2D directe et dans une scène
-3D sans duplication.
+`ArtworkRenderer` produit les textures animées utilisées à la fois par l’export 2D et
+par la scène Qt Quick 3D. Cette scène existe aujourd’hui : pièce vide, meuble en noyer,
+œuvre horizontale, ombre de contact, suspension oscillante et caméra orbitale.
 
-Aujourd’hui, `ArtworkRenderer` fournit directement les frames 2D et respecte le contrat
-`FrameSource` utilisé par l’encodeur vidéo.
+Le Studio propose quatre presets, dont un satellite animé sur 360°, plus les réglages
+d’azimut, élévation, distance, nombre de tours et lumière. Le cadre affiché correspond
+au ratio réellement capturé par l’encodeur MP4, MOV ou WebM.
 
-La V2 ajoutera une factory de présentations avec au moins :
+Pour le sable, `build_studio_scene_data()` échantillonne uniquement les masques analysés.
+Chaque grain conserve les coordonnées normalisées du pixel source, sa couleur RGB exacte
+et le temps de dépôt obtenu en inversant la même courbe quintique que le renderer. Le
+prérendu et l’export final reçoivent ces mêmes données via leurs workers respectifs.
 
-- `direct_2d` : l’œuvre animée remplit le cadre ;
-- `room_3d` : l’œuvre devient une texture animée dans une pièce légèrement éclairée.
+Les effets de lumière restent synchronisés avec la chronologie des passes. Pour un effet
+strict, la scène reçoit le nombre de stages et l’index du contour final afin que l’outil
+3D distingue la sérigraphie de la passe laser.
 
-La scène `room_3d` comportera une table, un cadre ou support d’œuvre, une lampe locale,
-une lumière ambiante contrôlée et une caméra déplaçable. Ses paramètres seront séparés :
-
-- azimut, élévation, distance et focale de la caméra ;
-- position, température et intensité de la lampe ;
-- exposition ambiante et matériaux de la pièce ;
-- placement, inclinaison et dimensions de l’œuvre ;
-- mouvement de caméra éventuel entre une pose de départ et une pose d’arrivée.
-
-Le renderer 3D consommera les frames de `ArtworkRenderer` comme texture, composera la
-scène, puis exposera à son tour `FrameSource`. L’encodeur et les effets resteront donc
-inchangés.
-
-
-## Atelier desktop et coût du prérendu
+## 4. Atelier desktop et coût du prérendu
 
 L’interface ne lance pas FFmpeg lorsqu’un réglage change. Après un debounce, un worker
-annulable analyse une version plafonnée à 384 px et compose 20 images en mémoire. Les
+annulable analyse une version plafonnée à 384 px et compose 24 images en mémoire. Les
 changements plus récents invalident les résultats obsolètes ; le thread graphique ne
-fait que lire la boucle d’images reçue.
+fait que lire la boucle reçue.
 
 Une génération n’entre dans l’historique qu’après la réussite de l’encodage final. La
 banque conserve un manifeste JSON atomique, les paramètres et une vignette limitée à
-480 × 270 px. Elle référence la vidéo dans son dossier de destination au lieu de la
-dupliquer. La suppression du fichier reste une action explicite, confirmée et journalisée.
+480 × 270 px. Elle référence la vidéo dans son dossier de destination et la suppression
+reste explicite, confirmée et journalisée.
 
-Le client expose déjà un onglet `Studio 3D · Coming soon`, mais aucun contrôle 3D ne sera
-activé avant l’existence de la factory de présentations et du renderer `room_3d` décrits
-ci-dessus.
+## 5. Frontière d’erreurs utilisateur
 
-
-## Frontière d’erreurs utilisateur
-
-Le module `desktop/problems.py` est l’unique traducteur entre les exceptions techniques
-et l’expérience utilisateur. Il valide les chemins avant le lancement, les workers les
-revalident au moment de l’usage, puis les erreurs résiduelles sont converties en un
-`UserProblem` structuré : code stable, titre, explication, action de récupération et
-détails techniques séparés.
-
-L’encodeur ne recrée jamais silencieusement un dossier de destination disparu. Une zone
-de dépôt invalide passe en état rouge et le rendu ne démarre pas. Les logs conservent la
-cause complète tandis que la boîte de dialogue ne présente que le vocabulaire métier.
+`desktop/problems.py` traduit les exceptions techniques en `UserProblem` : code stable,
+titre, explication, récupération et détails séparés. Les chemins sont validés avant le
+lancement puis à nouveau dans les workers. L’encodeur ne recrée jamais silencieusement
+un dossier disparu ; l’interface explique le problème tandis que les logs conservent la
+cause complète.

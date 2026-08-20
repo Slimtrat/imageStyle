@@ -43,6 +43,11 @@ class RenderConfig:
     soft_edge: float = 0.012
     grain_density: float = 0.004
     grain_size: float = 1.35
+    halo_width: float = 0.075
+    halo_intensity: float = 0.9
+    screenprint_width: float = 0.12
+    laser_width: float = 0.018
+    laser_intensity: float = 1.35
     seed: int = 7
     crf: int = 16
     quality: str = "studio"
@@ -91,6 +96,16 @@ class RenderConfig:
             raise ValueError("outline_luma doit être compris entre 0 et 100")
         if self.grain_density < 0 or self.grain_size < 0:
             raise ValueError("les paramètres de grain ne peuvent pas être négatifs")
+        if not 0.005 <= self.halo_width <= 0.30:
+            raise ValueError("halo_width doit être compris entre 0.005 et 0.30")
+        if not 0.0 <= self.halo_intensity <= 3.0:
+            raise ValueError("halo_intensity doit être compris entre 0 et 3")
+        if not 0.02 <= self.screenprint_width <= 0.40:
+            raise ValueError("screenprint_width doit être compris entre 0.02 et 0.40")
+        if not 0.002 <= self.laser_width <= 0.10:
+            raise ValueError("laser_width doit être compris entre 0.002 et 0.10")
+        if not 0.0 <= self.laser_intensity <= 4.0:
+            raise ValueError("laser_intensity doit être compris entre 0 et 4")
         if not 0 <= self.crf <= 51:
             raise ValueError("crf doit être compris entre 0 et 51")
         return self

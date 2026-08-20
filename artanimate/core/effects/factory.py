@@ -34,6 +34,13 @@ def register_effect(effect_type: EffectType) -> EffectType:
         raise ValueError(
             f"L’effet {key!r} déclare un compositeur sans implémenter compose_frame"
         )
+    if (
+        effect_type.supports(EffectCapability.FRAME_DECORATOR)
+        and effect_type.decorate_frame is AnimationEffect.decorate_frame
+    ):
+        raise ValueError(
+            f"L’effet {key!r} déclare une décoration sans implémenter decorate_frame"
+        )
     previous = _REGISTRY.get(key)
     if previous is not None and previous is not effect_type:
         raise ValueError(f"Un effet est déjà enregistré sous la clé {key!r}")

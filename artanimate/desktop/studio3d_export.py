@@ -14,6 +14,7 @@ from ..core.renderer import ArtworkRenderer
 from ..core.video import RenderCancelled
 from .preview import frame_to_qimage
 from .problems import translate_exception, validate_source_path
+from .studio3d_particles import build_studio_scene_data
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ class Studio3DFrameWorker(QObject):
     """Stream effect textures with explicit GUI backpressure between frames."""
 
     prepared = Signal(int, int, int)
+    scene_ready = Signal(object)
     frame_ready = Signal(QImage, int, int, float)
     finished = Signal()
     cancelled = Signal()
@@ -105,6 +107,7 @@ class Studio3DFrameWorker(QObject):
             if self._cancelled.is_set():
                 raise RenderCancelled("Rendu 3D annulé")
             renderer = ArtworkRenderer(analysis, self.config)
+            self.scene_ready.emit(build_studio_scene_data(renderer))
             total = renderer.frame_count
             self.prepared.emit(total, renderer.width, renderer.height)
             for index, frame in enumerate(renderer.frames()):

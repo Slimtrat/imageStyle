@@ -34,7 +34,9 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "overheadLamp" in scene
     assert "lampMotion" in scene
     assert "dark-walnut-v2.png" in scene
-    assert "model: 240" in scene
+    assert "model: sandParticleModel" in scene
+    assert "cameraOrbitTurns" in scene
+    assert "effectToolIsOutline" in scene
     assert "artworkSource" in scene
     assert "MouseArea" in scene
     assert "effectKind" in scene
@@ -68,6 +70,10 @@ def test_studio_panel_loads_scene_and_accepts_animated_frames(
         assert root.property("artworkAspect") == pytest.approx(1.5)
         assert root.property("lampMotion") == pytest.approx(0.65)
         assert panel.camera_state()["lamp_motion"] == pytest.approx(0.65)
+        assert panel.camera_state()["orbit_turns"] == pytest.approx(0.0)
+        panel.camera_preset.setCurrentIndex(3)
+        assert root.property("cameraOrbitTurns") == pytest.approx(1.0)
+        assert root.property("cameraPitch") == pytest.approx(-58.0)
         panel.set_effect("wave", direction="right")
         assert root.property("effectKind") == "wave"
         assert root.property("effectDirection") == "right"

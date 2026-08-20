@@ -35,7 +35,7 @@
           "control": "slider",
           "minimum": 0.0,
           "maximum": 0.35,
-          "default": 0.10,
+          "default": 0.1,
           "step": 0.01,
           "decimals": 2,
           "suffix": "",
@@ -53,12 +53,30 @@
           "control": "choice",
           "description": "Origine et trajectoire générale du front de révélation.",
           "choices": [
-            {"value": "left", "label": "Gauche → droite"},
-            {"value": "right", "label": "Droite → gauche"},
-            {"value": "top", "label": "Haut → bas"},
-            {"value": "bottom", "label": "Bas → haut"},
-            {"value": "diagonal", "label": "Diagonale"},
-            {"value": "radial", "label": "Depuis le centre"}
+            {
+              "value": "left",
+              "label": "Gauche → droite"
+            },
+            {
+              "value": "right",
+              "label": "Droite → gauche"
+            },
+            {
+              "value": "top",
+              "label": "Haut → bas"
+            },
+            {
+              "value": "bottom",
+              "label": "Bas → haut"
+            },
+            {
+              "value": "diagonal",
+              "label": "Diagonale"
+            },
+            {
+              "value": "radial",
+              "label": "Depuis le centre"
+            }
           ]
         },
         {
@@ -66,7 +84,7 @@
           "label": "Amplitude",
           "control": "slider",
           "minimum": 0.0,
-          "maximum": 0.20,
+          "maximum": 0.2,
           "default": 0.055,
           "step": 0.005,
           "decimals": 3,
@@ -91,7 +109,7 @@
           "control": "slider",
           "minimum": 0.0,
           "maximum": 0.35,
-          "default": 0.10,
+          "default": 0.1,
           "step": 0.01,
           "decimals": 2,
           "suffix": "",
@@ -102,7 +120,7 @@
           "label": "Bord progressif",
           "control": "slider",
           "minimum": 0.001,
-          "maximum": 0.10,
+          "maximum": 0.1,
           "default": 0.012,
           "step": 0.001,
           "decimals": 3,
@@ -121,9 +139,207 @@
           "control": "choice",
           "description": "Choisit entre une montée naturelle de toute la lumière et une construction numérique R → G → B avec chevauchement.",
           "choices": [
-            {"value": "channels", "label": "Canaux successifs — R → G → B"},
-            {"value": "together", "label": "Lumière simultanée — RGB ensemble"}
+            {
+              "value": "channels",
+              "label": "Canaux successifs — R → G → B"
+            },
+            {
+              "value": "together",
+              "label": "Lumière simultanée — RGB ensemble"
+            }
           ]
+        }
+      ]
+    },
+    "vertical_halo": {
+      "selector_label": "Halo vertical — activation couleur",
+      "description": "Un rideau lumineux vertical traverse l’œuvre et active chaque famille de couleurs dans l’ordre choisi.",
+      "parameters": [
+        {
+          "key": "halo_width",
+          "label": "Largeur du halo",
+          "control": "slider",
+          "minimum": 0.005,
+          "maximum": 0.3,
+          "default": 0.075,
+          "step": 0.005,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Épaisseur du rideau de lumière. Étroit, il est précis ; large, il enveloppe davantage les formes."
+        },
+        {
+          "key": "halo_intensity",
+          "label": "Intensité lumineuse",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 3.0,
+          "default": 0.9,
+          "step": 0.05,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Puissance du halo transitoire, sans modifier la fidélité de l’image finale."
+        },
+        {
+          "key": "soft_edge",
+          "label": "Bord progressif",
+          "control": "slider",
+          "minimum": 0.001,
+          "maximum": 0.1,
+          "default": 0.012,
+          "step": 0.001,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Largeur de la transition entre la zone encore vide et la matière déposée."
+        }
+      ]
+    },
+    "screenprint": {
+      "selector_label": "Sérigraphie — passages couleur",
+      "description": "Chaque couche colorée est déposée séparément de gauche à droite, comme un passage de racle sérigraphique.",
+      "parameters": [
+        {
+          "key": "screenprint_width",
+          "label": "Largeur du passage",
+          "control": "slider",
+          "minimum": 0.02,
+          "maximum": 0.4,
+          "default": 0.12,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Largeur de la zone de pression lumineuse qui accompagne la dépose d’une couleur."
+        },
+        {
+          "key": "halo_intensity",
+          "label": "Éclat de la couche",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 3.0,
+          "default": 0.9,
+          "step": 0.05,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Intensité du reflet de matière au moment où la couleur est déposée."
+        },
+        {
+          "key": "soft_edge",
+          "label": "Bord progressif",
+          "control": "slider",
+          "minimum": 0.001,
+          "maximum": 0.1,
+          "default": 0.012,
+          "step": 0.001,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Largeur de la transition entre la zone encore vide et la matière déposée."
+        }
+      ]
+    },
+    "contour_laser": {
+      "selector_label": "Laser contours — scan précis",
+      "description": "Un laser balaie l’œuvre de gauche à droite et illumine les frontières réellement détectées des formes.",
+      "parameters": [
+        {
+          "key": "laser_width",
+          "label": "Finesse du laser",
+          "control": "slider",
+          "minimum": 0.002,
+          "maximum": 0.1,
+          "default": 0.018,
+          "step": 0.002,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Largeur temporelle du faisceau : faible pour une ligne nette, forte pour une traîne lumineuse."
+        },
+        {
+          "key": "laser_intensity",
+          "label": "Puissance du laser",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 4.0,
+          "default": 1.35,
+          "step": 0.05,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Intensité du cœur cyan et de son aura sur les contours analysés."
+        },
+        {
+          "key": "soft_edge",
+          "label": "Bord progressif",
+          "control": "slider",
+          "minimum": 0.001,
+          "maximum": 0.1,
+          "default": 0.012,
+          "step": 0.001,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Largeur de la transition entre la zone encore vide et la matière déposée."
+        }
+      ]
+    },
+    "screenprint_laser": {
+      "selector_label": "WOW — sérigraphie + contours laser",
+      "description": "Les couleurs sont sérigraphiées une par une, puis le laser reconstruit les contours noirs dans un second acte distinct.",
+      "parameters": [
+        {
+          "key": "screenprint_width",
+          "label": "Largeur sérigraphie",
+          "control": "slider",
+          "minimum": 0.02,
+          "maximum": 0.4,
+          "default": 0.12,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Largeur de la passe appliquant chacune des couches colorées."
+        },
+        {
+          "key": "halo_intensity",
+          "label": "Éclat des couleurs",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 3.0,
+          "default": 0.9,
+          "step": 0.05,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Reflet transitoire de la matière colorée pendant sa dépose."
+        },
+        {
+          "key": "laser_width",
+          "label": "Finesse du contour",
+          "control": "slider",
+          "minimum": 0.002,
+          "maximum": 0.1,
+          "default": 0.018,
+          "step": 0.002,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Finesse du passage final réservé aux pixels de contour sombre détectés."
+        },
+        {
+          "key": "laser_intensity",
+          "label": "Puissance finale",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 4.0,
+          "default": 1.35,
+          "step": 0.05,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Puissance du laser cyan qui révèle le dessin noir après les couleurs."
+        },
+        {
+          "key": "soft_edge",
+          "label": "Bord progressif",
+          "control": "slider",
+          "minimum": 0.001,
+          "maximum": 0.1,
+          "default": 0.012,
+          "step": 0.001,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Largeur de la transition entre la zone encore vide et la matière déposée."
         }
       ]
     }

@@ -1,5 +1,6 @@
 import json
 
+from artanimate.core.config import EFFECTS
 from artanimate.core.effects.documentation import (
     DOCUMENTATION_PATH,
     documentation_for,
@@ -12,6 +13,6 @@ def test_effect_documentation_json_is_packaged_and_valid() -> None:
     documentation = load_effect_documentation()
 
     assert payload["schema_version"] == 1
-    assert set(documentation) == {"sand", "wave", "rgb_fade"}
+    assert set(documentation) == set(EFFECTS)
     assert documentation_for("sand").parameters[0].description
     assert documentation_for("wave").parameters[0].choices

@@ -12,6 +12,7 @@ from ..core.analysis import analyze_artwork
 from ..core.config import RenderConfig
 from ..core.renderer import ArtworkRenderer
 from .problems import translate_exception, validate_source_path
+from .studio3d_particles import build_studio_scene_data
 
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,8 @@ def frame_to_qimage(frame: np.ndarray) -> QImage:
 class PreviewWorker(QObject):
     """Build a small in-memory animation without invoking the video encoder."""
 
-    ready = Signal(int, object, str)
+    ready = Signal(int, object, object, str)
+    scene_ready = Signal(int, object)
     failed = Signal(int, object)
     finished = Signal(int)
 
@@ -81,7 +83,9 @@ class PreviewWorker(QObject):
                 logger.info("Prérendu obsolète annulé après analyse")
                 return
             renderer = ArtworkRenderer(analysis, self.config)
+            self.scene_ready.emit(self.revision, build_studio_scene_data(renderer))
             frames: list[QImage] = []
+            progresses: list[float] = []
             for seconds in np.linspace(
                 0.0,
                 self.config.duration,
@@ -90,13 +94,17 @@ class PreviewWorker(QObject):
                 if self._cancelled.is_set():
                     logger.info("Prérendu obsolète annulé pendant la composition")
                     return
-                frames.append(frame_to_qimage(renderer.frame_at(float(seconds))))
+                sample_time = float(seconds)
+                frames.append(frame_to_qimage(renderer.frame_at(sample_time)))
+                progresses.append(renderer.global_progress_at(sample_time))
             quality = (
                 f"Prérendu {renderer.width}×{renderer.height} · "
                 f"{PREVIEW_FRAME_COUNT} images"
             )
             logger.info("Prérendu prêt : %s", quality)
-            self.ready.emit(self.revision, tuple(frames), quality)
+            self.ready.emit(
+                self.revision, tuple(frames), tuple(progresses), quality
+            )
         except Exception as exc:
             logger.exception("Échec du prérendu")
             self.failed.emit(

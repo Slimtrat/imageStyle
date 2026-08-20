@@ -13,6 +13,8 @@ from .effects import (
     EffectCapability,
     EffectContext,
     FrameCompositionContext,
+    FrameDecorationContext,
+    LayerFrameState,
     create_effect,
     reveal_opacity,
 )
@@ -92,6 +94,8 @@ class ArtworkRenderer:
 
     def _stage_layers(self) -> list[ColorLayer]:
         outline = self.analysis.outline
+        if outline is not None and self.effect.supports(EffectCapability.OUTLINE_FINALE):
+            return [*self.color_layers, outline]
         if outline is None or self.config.outline == "together":
             return list(self.color_layers)
         if self.config.outline == "first":
@@ -125,7 +129,8 @@ class ArtworkRenderer:
             colors=self.analysis.source[targets[:, 0], targets[:, 1]],
         )
 
-    def _global_progress(self, seconds: float) -> float:
+    def global_progress_at(self, seconds: float) -> float:
+        """Return animation progress with configured opening and closing holds removed."""
         start = self.config.hold_start
         end = self.config.duration - self.config.hold_end
         if seconds <= start:
@@ -134,9 +139,15 @@ class ArtworkRenderer:
             return 1.0
         return (seconds - start) / (end - start)
 
+    def stage_stride(self) -> float:
+        """Return the public spacing between layer starts for this effect."""
+        if self.effect.supports(EffectCapability.STRICT_SEQUENCE):
+            return 1.0
+        return 1.0 - self.config.overlap
+
     def _stage_progress(self, global_progress: float, index: int) -> float:
         count = max(1, len(self.stages))
-        stride = 1.0 - self.config.overlap
+        stride = self.stage_stride()
         timeline = 1.0 + (count - 1) * stride
         linear = float(np.clip(global_progress * timeline - index * stride, 0.0, 1.0))
         return ease_in_out(linear)
@@ -146,7 +157,11 @@ class ArtworkRenderer:
             (layer, self._stage_progress(global_progress, index))
             for index, layer in enumerate(self.stages)
         ]
-        if self.analysis.outline and self.config.outline == "together":
+        if (
+            self.analysis.outline
+            and self.config.outline == "together"
+            and not self.effect.supports(EffectCapability.OUTLINE_FINALE)
+        ):
             result.append((self.analysis.outline, global_progress))
         return result
 
@@ -219,14 +234,15 @@ class ArtworkRenderer:
 
     def frame_at(self, seconds: float) -> np.ndarray:
         seconds = float(np.clip(seconds, 0.0, self.config.duration))
-        global_progress = self._global_progress(seconds)
+        global_progress = self.global_progress_at(seconds)
         if global_progress >= 1.0:
             return self.analysis.source.copy()
         composed = self.effect.create_frame(self.frame_context, global_progress)
         if composed is not None:
             return composed
         frame = self.blank.copy()
-        for layer, progress in self._layer_progresses(global_progress):
+        layer_progresses = self._layer_progresses(global_progress)
+        for layer, progress in layer_progresses:
             if progress <= 0.0:
                 continue
             if progress >= 1.0:
@@ -249,6 +265,26 @@ class ArtworkRenderer:
             particles = self.particles.get(layer.key)
             if particles is not None:
                 self._draw_particles(frame, particles, progress)
+        if self.effect.supports(EffectCapability.FRAME_DECORATOR):
+            states = tuple(
+                LayerFrameState(
+                    mask=layer.mask,
+                    field=self.fields[layer.key],
+                    progress=progress,
+                    color=layer.color,
+                    is_outline=layer.is_outline,
+                )
+                for layer, progress in layer_progresses
+            )
+            return self.effect.create_decoration(
+                frame,
+                FrameDecorationContext(
+                    source=self.analysis.source,
+                    config=self.config,
+                    progress=global_progress,
+                    layers=states,
+                ),
+            )
         return frame
 
     @property

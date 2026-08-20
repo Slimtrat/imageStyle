@@ -20,6 +20,9 @@ class EffectCapability(StrEnum):
     CHROMATIC_SEQUENCE = "chromatic_sequence"
     FALLING_PARTICLES = "falling_particles"
     FRAME_COMPOSITOR = "frame_compositor"
+    FRAME_DECORATOR = "frame_decorator"
+    STRICT_SEQUENCE = "strict_sequence"
+    OUTLINE_FINALE = "outline_finale"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +71,27 @@ class FrameCompositionContext:
             raise ValueError("La toile et la source du compositeur doivent avoir la même taille")
         if self.linear_source is not None and self.linear_source.shape != self.source.shape:
             raise ValueError("La source linéaire doit avoir la même taille que la source RGB")
+
+
+@dataclass(frozen=True, slots=True)
+class LayerFrameState:
+    """State of one analyzed layer at the current animation instant."""
+
+    mask: np.ndarray
+    field: np.ndarray
+    progress: float
+    color: tuple[int, int, int]
+    is_outline: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FrameDecorationContext:
+    """Read-only data exposed to effects that draw a physical light or tool."""
+
+    source: np.ndarray
+    config: RenderConfig
+    progress: float
+    layers: tuple[LayerFrameState, ...]
 
 
 class AnimationEffect(ABC):
@@ -150,6 +174,30 @@ class AnimationEffect(ABC):
     ) -> np.ndarray | None:
         """Optionally replace the generic layer renderer for the complete frame."""
         return None
+
+    def create_decoration(
+        self,
+        frame: np.ndarray,
+        context: FrameDecorationContext,
+    ) -> np.ndarray:
+        """Decorate a generic layer frame and validate the public contract."""
+        result = np.asarray(self.decorate_frame(frame, context))
+        if result.shape != context.source.shape:
+            raise ValueError(
+                f"L’effet {self.key!r} a décoré {result.shape}, "
+                f"attendu {context.source.shape}"
+            )
+        if result.dtype != np.uint8:
+            raise ValueError(f"L’effet {self.key!r} doit décorer des pixels RGB uint8")
+        return result
+
+    def decorate_frame(
+        self,
+        frame: np.ndarray,
+        context: FrameDecorationContext,
+    ) -> np.ndarray:
+        """Optionally add a transient halo or physical tool to a layer frame."""
+        return frame
 
     @abstractmethod
     def build_field(self, context: EffectContext) -> np.ndarray:
