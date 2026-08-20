@@ -50,6 +50,19 @@ Vous pouvez aussi le lancer sans commande installée :
 python -m artanimate.desktop
 ```
 
+## Exécutable Windows autonome
+
+L’EXE Windows embarque Python, Qt et FFmpeg. La machine de destination n’a donc
+besoin ni de Python ni d’une installation séparée de FFmpeg.
+
+```powershell
+python -m pip install -e ".[desktop,build]"
+.\packaging\windows\build.ps1 -Python "python"
+```
+
+Le résultat est créé dans `dist\ArtAnimate.exe`. Il s’agit d’un exécutable unique,
+sans fenêtre de console, avec l’icône et les métadonnées de version ArtAnimate.
+
 ## Premier film en ligne de commande
 
 ```powershell

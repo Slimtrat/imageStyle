@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 desktop = ["PySide6>=6.8,<7"]
+build = ["PyInstaller>=6.10,<7"]
 dev = ["pytest>=8,<9"]
 
 [project.scripts]

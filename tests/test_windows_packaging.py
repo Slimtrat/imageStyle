@@ -1,0 +1,21 @@
+from pathlib import Path
+
+from PIL import Image
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WINDOWS_DIR = PROJECT_ROOT / "packaging" / "windows"
+
+
+def test_windows_icon_contains_required_resolutions() -> None:
+    with Image.open(WINDOWS_DIR / "artanimate.ico") as icon:
+        sizes = icon.ico.sizes()
+
+    assert {(16, 16), (32, 32), (48, 48), (256, 256)} <= sizes
+
+
+def test_windows_launcher_and_build_recipe_are_present() -> None:
+    assert (WINDOWS_DIR / "launcher.py").is_file()
+    assert (WINDOWS_DIR / "artanimate.spec").is_file()
+    assert (WINDOWS_DIR / "build.ps1").is_file()
+    assert (WINDOWS_DIR / "version_info.txt").is_file()
