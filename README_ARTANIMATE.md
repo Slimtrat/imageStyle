@@ -46,7 +46,9 @@ python -m pip install -e ".[desktop]"
 artanimate-ui
 ```
 
-Le client accepte le glisser-déposer de l’image et du dossier de destination. Il affiche l’œuvre originale, le rendu en cours avec son pourcentage, puis lit la vidéo finale. Les réglages visibles s’adaptent automatiquement au mode Sable ou Vague. Chaque valeur numérique dispose d’un slider, de sa valeur exacte et de bornes visibles. La roue chromatique se fait tourner à la souris pour choisir la couleur de départ et le sens de progression. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle. Les événements sont aussi conservés dans un fichier rotatif accessible depuis cette fenêtre.
+Le client accepte le glisser-déposer de l’image et du dossier de destination. Chaque modification d’un effet ou de ses paramètres déclenche, après un court délai, un prérendu animé basse définition calculé sans encodage vidéo. Les réglages visibles s’adaptent automatiquement au mode Sable ou Vague et chaque valeur numérique dispose d’un slider, de sa valeur exacte et de bornes visibles. La roue chromatique se fait tourner à la souris pour choisir la couleur de départ et le sens de progression.
+
+Les vidéos terminées alimentent une banque persistante sous l’atelier : vignette, effet, date, lecture, sélection dans l’Explorateur Windows et suppression confirmée. Les menus **Fichier**, **Génération**, **Affichage** et **Historique** regroupent les actions et raccourcis. L’onglet **Studio 3D · Coming soon** réserve clairement la future mise en scène sans simuler un moteur inexistant. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle.
 
 Vous pouvez aussi le lancer sans commande installée :
 

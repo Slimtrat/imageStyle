@@ -20,7 +20,7 @@ QLabel#sectionTitle {
     font-size: 15px;
     font-weight: 650;
 }
-QFrame#card, QFrame#previewCard, QFrame#progressCard {
+QFrame#card, QFrame#previewCard, QFrame#progressCard, QFrame#historyPanel {
     background: #ffffff;
     border: 1px solid #dfe4ec;
     border-radius: 14px;
@@ -137,6 +137,110 @@ QSlider::handle:horizontal {
 }
 QSlider::handle:horizontal:hover {
     background: #eef0ff;
+}
+QTabWidget::pane {
+    border: 1px solid #dfe4ec;
+    border-radius: 12px;
+    background: #f7f8fb;
+}
+QTabBar::tab {
+    background: #e8ebf2;
+    border: 1px solid #d6dce7;
+    padding: 9px 20px;
+    margin-right: 4px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    font-weight: 650;
+}
+QTabBar::tab:selected {
+    color: #4352c5;
+    background: #ffffff;
+}
+QLabel#previewBadge {
+    color: #5262d9;
+    background: #eef0ff;
+    border-radius: 7px;
+    padding: 4px 7px;
+    font-size: 11px;
+}
+QFrame#historyCard {
+    background: #f9faff;
+    border: 1px solid #dfe4ec;
+    border-radius: 10px;
+}
+QLabel#historyThumbnail {
+    color: #8a92a1;
+    background: #171b25;
+    border-radius: 7px;
+}
+QLabel#historyTitle {
+    font-weight: 700;
+}
+QLabel#historyMetadata {
+    color: #737c8e;
+    font-size: 10px;
+}
+QLabel#historyEmpty {
+    color: #8a92a1;
+    background: #f7f8fb;
+    border: 1px dashed #cbd2de;
+    border-radius: 9px;
+    padding: 24px;
+}
+QPushButton#compactButton {
+    padding: 4px 8px;
+    font-size: 11px;
+}
+QToolButton#historyMenuButton {
+    min-width: 28px;
+    min-height: 24px;
+    background: #eef1f6;
+    border: 1px solid #d8dee8;
+    border-radius: 7px;
+    font-size: 18px;
+    font-weight: 700;
+}
+QMenuBar {
+    background: #ffffff;
+    border-bottom: 1px solid #dfe4ec;
+    padding: 3px;
+}
+QMenuBar::item {
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+QMenuBar::item:selected, QMenu::item:selected {
+    background: #eef0ff;
+    color: #4050c2;
+}
+QMenu {
+    background: #ffffff;
+    border: 1px solid #d8dee8;
+    padding: 5px;
+}
+QMenu::item {
+    padding: 7px 24px 7px 10px;
+}
+QWidget#comingSoonPage {
+    background: #f7f8fb;
+}
+QLabel#comingSoonBadge {
+    color: #ffffff;
+    background: #5262d9;
+    border-radius: 11px;
+    padding: 7px 14px;
+    font-size: 11px;
+    font-weight: 800;
+}
+QLabel#comingSoonTitle {
+    color: #172033;
+    font-size: 30px;
+    font-weight: 750;
+}
+QLabel#comingSoonText {
+    color: #4e5870;
+    font-size: 16px;
+    padding: 10px;
 }
 QToolTip {
     color: #ffffff;

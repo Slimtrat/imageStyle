@@ -11,6 +11,7 @@ from ..core.analysis import analyze_artwork
 from ..core.config import RenderConfig
 from ..core.renderer import ArtworkRenderer
 from ..core.video import RenderCancelled, encode_video
+from .preview import frame_to_qimage
 
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 class RenderWorker(QObject):
     progress = Signal(int)
     preview = Signal(QImage)
+    thumbnail = Signal(QImage)
     status = Signal(str)
     finished = Signal(str)
     cancelled = Signal()
@@ -45,6 +47,9 @@ class RenderWorker(QObject):
                 raise RenderCancelled("Rendu annulé")
             self.status.emit("Préparation des masques d’animation…")
             renderer = ArtworkRenderer(analysis, self.config)
+            self.thumbnail.emit(
+                frame_to_qimage(renderer.frame_at(self.config.duration * 0.56))
+            )
             preview_stride = max(1, renderer.frame_count // 72)
 
             def on_progress(done: int, total: int) -> None:
@@ -52,15 +57,7 @@ class RenderWorker(QObject):
 
             def on_frame(frame, done: int, total: int) -> None:  # type: ignore[no-untyped-def]
                 if done == 1 or done == total or done % preview_stride == 0:
-                    height, width = frame.shape[:2]
-                    image = QImage(
-                        frame.data,
-                        width,
-                        height,
-                        width * 3,
-                        QImage.Format.Format_RGB888,
-                    ).copy()
-                    self.preview.emit(image)
+                    self.preview.emit(frame_to_qimage(frame))
 
             self.status.emit("Création de la vidéo…")
             encode_video(

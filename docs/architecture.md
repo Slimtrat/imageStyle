@@ -65,3 +65,20 @@ une lumière ambiante contrôlée et une caméra déplaçable. Ses paramètres s
 Le renderer 3D consommera les frames de `ArtworkRenderer` comme texture, composera la
 scène, puis exposera à son tour `FrameSource`. L’encodeur et les effets resteront donc
 inchangés.
+
+
+## Atelier desktop et coût du prérendu
+
+L’interface ne lance pas FFmpeg lorsqu’un réglage change. Après un debounce, un worker
+annulable analyse une version plafonnée à 384 px et compose 20 images en mémoire. Les
+changements plus récents invalident les résultats obsolètes ; le thread graphique ne
+fait que lire la boucle d’images reçue.
+
+Une génération n’entre dans l’historique qu’après la réussite de l’encodage final. La
+banque conserve un manifeste JSON atomique, les paramètres et une vignette limitée à
+480 × 270 px. Elle référence la vidéo dans son dossier de destination au lieu de la
+dupliquer. La suppression du fichier reste une action explicite, confirmée et journalisée.
+
+Le client expose déjà un onglet `Studio 3D · Coming soon`, mais aucun contrôle 3D ne sera
+activé avant l’existence de la factory de présentations et du renderer `room_3d` décrits
+ci-dessus.
