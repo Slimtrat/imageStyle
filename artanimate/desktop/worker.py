@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from threading import Event
 
@@ -10,6 +11,9 @@ from ..core.analysis import analyze_artwork
 from ..core.config import RenderConfig
 from ..core.renderer import ArtworkRenderer
 from ..core.video import RenderCancelled, encode_video
+
+
+logger = logging.getLogger(__name__)
 
 
 class RenderWorker(QObject):
@@ -28,11 +32,13 @@ class RenderWorker(QObject):
         self._cancelled = Event()
 
     def cancel(self) -> None:
+        logger.info("Demande d’annulation reçue")
         self._cancelled.set()
 
     @Slot()
     def run(self) -> None:
         try:
+            logger.info("Tâche desktop démarrée : %s -> %s", self.source, self.destination)
             self.status.emit("Analyse des couleurs et des contours…")
             analysis = analyze_artwork(self.source, self.config)
             if self._cancelled.is_set():
@@ -65,8 +71,11 @@ class RenderWorker(QObject):
                 should_cancel=self._cancelled.is_set,
             )
             self.progress.emit(100)
+            logger.info("Tâche desktop terminée : %s", self.destination.resolve())
             self.finished.emit(str(self.destination.resolve()))
         except RenderCancelled:
+            logger.warning("Tâche desktop annulée")
             self.cancelled.emit()
         except Exception as exc:
+            logger.exception("Échec de la tâche desktop")
             self.failed.emit(str(exc))

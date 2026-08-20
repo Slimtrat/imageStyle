@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import fields
 import json
+import logging
 from pathlib import Path
 import sys
 import time
@@ -12,6 +13,10 @@ from ..core.analysis import analyze_artwork
 from ..core.config import DIRECTIONS, EFFECTS, ORDERS, OUTLINE_MODES, RenderConfig
 from ..core.renderer import ArtworkRenderer
 from ..core.video import encode_video
+from ..observability import configure_console_logging, configure_file_logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
@@ -52,6 +57,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Transforme une œuvre statique en animation chromatique sable ou vague.",
     )
     parser.add_argument("--version", action="version", version="ArtAnimate 1.0.0")
+    parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
+    parser.add_argument("--log-file", type=Path, help="copie persistante des logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     render = subparsers.add_parser("render", help="analyser puis encoder une vidéo")
@@ -94,6 +101,7 @@ def _palette_summary(analysis: Any, config: RenderConfig) -> str:
 
 def _render(namespace: argparse.Namespace) -> int:
     config = _config_from_namespace(namespace)
+    logger.info("Commande render : source=%s, sortie=%s, effet=%s", namespace.input, namespace.output, config.effect)
     analysis = analyze_artwork(namespace.input, config)
     print(f"Analyse : {analysis.size[0]}x{analysis.size[1]} px, fond {analysis.manifest(config)['background']}")
     print(f"Séquence : {_palette_summary(analysis, config)}")
@@ -106,20 +114,28 @@ def _render(namespace: argparse.Namespace) -> int:
         percent = int(done * 100 / total)
         if percent != last_percent:
             elapsed = time.monotonic() - started
-            print(f"\rEncodage : {percent:3d}%  ({done}/{total})  {elapsed:5.1f}s", end="", flush=True)
+            ending = "\n" if done == total else ""
+            print(
+                f"\rEncodage : {percent:3d}%  ({done}/{total})  {elapsed:5.1f}s",
+                end=ending,
+                flush=True,
+            )
             last_percent = percent
 
     destination = encode_video(renderer, namespace.output, progress)
-    print()
+    if last_percent < 100:
+        print()
     if namespace.manifest:
         analysis.save_manifest(namespace.manifest, config)
         print(f"Manifeste : {namespace.manifest.resolve()}")
     print(f"Vidéo prête : {destination.resolve()}")
+    logger.info("Commande render terminée")
     return 0
 
 
 def _analyze(namespace: argparse.Namespace) -> int:
     config = _config_from_namespace(namespace)
+    logger.info("Commande analyze : source=%s", namespace.input)
     analysis = analyze_artwork(namespace.input, config)
     manifest = analysis.manifest(config)
     if namespace.json:
@@ -137,14 +153,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     namespace = parser.parse_args(argv)
     try:
+        configure_console_logging(namespace.log_level)
+        if namespace.log_file:
+            configure_file_logging(namespace.log_file, namespace.log_level)
+        logger.info("Commande CLI démarrée : %s", namespace.command)
         if namespace.command == "render":
             return _render(namespace)
         return _analyze(namespace)
     except KeyboardInterrupt:
-        print("\nRendu interrompu.", file=sys.stderr)
+        print(file=sys.stderr)
+        logger.warning("Rendu interrompu par l’utilisateur")
         return 130
     except (FileNotFoundError, ValueError, OSError, RuntimeError) as exc:
-        print(f"Erreur : {exc}", file=sys.stderr)
+        logger.error("Échec de la commande : %s", exc)
         return 2
 
 

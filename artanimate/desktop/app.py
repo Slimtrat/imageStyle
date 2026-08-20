@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QSettings, QThread, Qt, QUrl
+from PySide6.QtCore import QSettings, QStandardPaths, QThread, Qt, QUrl
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QImage, QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -29,13 +30,22 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.config import RenderConfig
+from ..observability import attach_handler, configure_file_logging, detach_handler
+from .log_window import LogWindow, QtLogHandler
 from .style import APP_STYLESHEET
 from .widgets import PathDropZone, PreviewCard, ScaledImageLabel
 from .worker import RenderWorker
 
 
+logger = logging.getLogger(__name__)
+
+
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(
+        self,
+        log_file: Path | None = None,
+        startup_warning: str | None = None,
+    ):
         super().__init__()
         self.setWindowTitle("ArtAnimate — Atelier d’animation")
         self.setMinimumSize(1100, 760)
@@ -46,6 +56,7 @@ class MainWindow(QMainWindow):
         self._close_when_done = False
         self._auto_filename = True
         self._last_video: Path | None = None
+        self._unread_logs = 0
 
         saved_geometry = self.settings.value("windowGeometry")
         if saved_geometry:
@@ -68,9 +79,17 @@ class MainWindow(QMainWindow):
         page.addLayout(body, 1)
         page.addWidget(self._build_progress())
 
+        self.log_window = LogWindow(log_file, self)
+        self.log_handler = QtLogHandler()
+        self.log_handler.emitter.record_received.connect(self._receive_log_record)
+        attach_handler(self.log_handler, logging.INFO)
+
         self._connect_signals()
         self._restore_destination()
         self._effect_changed()
+        logger.info("Interface desktop prête")
+        if startup_warning:
+            logger.warning(startup_warning)
 
     def _build_header(self) -> QHBoxLayout:
         layout = QHBoxLayout()
@@ -84,6 +103,9 @@ class MainWindow(QMainWindow):
         text.addWidget(tagline)
         layout.addLayout(text)
         layout.addStretch(1)
+        self.log_button = QPushButton("Logs")
+        self.log_button.setToolTip("Afficher les informations, avertissements et erreurs")
+        layout.addWidget(self.log_button, 0, Qt.AlignmentFlag.AlignBottom)
         local = QLabel("Traitement 100 % local")
         local.setObjectName("muted")
         layout.addWidget(local, 0, Qt.AlignmentFlag.AlignBottom)
@@ -345,9 +367,23 @@ class MainWindow(QMainWindow):
         self.cancel_button.clicked.connect(self._cancel_render)
         self.play_button.clicked.connect(self._toggle_playback)
         self.open_folder_button.clicked.connect(self._open_output_folder)
+        self.log_button.clicked.connect(self._show_logs)
         self.player.mediaStatusChanged.connect(self._media_status_changed)
         self.player.playbackStateChanged.connect(self._playback_state_changed)
         self.player.errorOccurred.connect(self._media_error)
+
+    def _show_logs(self) -> None:
+        self._unread_logs = 0
+        self.log_button.setText("Logs")
+        self.log_window.show()
+        self.log_window.raise_()
+        self.log_window.activateWindow()
+
+    def _receive_log_record(self, record: logging.LogRecord) -> None:
+        self.log_window.append_record(record)
+        if record.levelno >= logging.WARNING and not self.log_window.isVisible():
+            self._unread_logs += 1
+            self.log_button.setText(f"Logs ({self._unread_logs})")
 
     def _restore_destination(self) -> None:
         saved = self.settings.value("destination", "", str)
@@ -358,9 +394,11 @@ class MainWindow(QMainWindow):
         path = Path(value)
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
+            logger.error("Aperçu impossible pour l’image : %s", path)
             QMessageBox.warning(self, "Image illisible", "Cette image ne peut pas être affichée.")
             return
         self.source_preview.image.set_image(pixmap)
+        logger.info("Image sélectionnée : %s", path.resolve())
         if self.destination_zone.path is None:
             self.destination_zone.set_path(path.parent)
         self._auto_filename = True
@@ -371,6 +409,7 @@ class MainWindow(QMainWindow):
 
     def _effect_changed(self) -> None:
         self.mode_stack.setCurrentIndex(self.effect_combo.currentIndex())
+        logger.info("Mode sélectionné : %s", self.effect_combo.currentData())
         if self._auto_filename:
             self._suggest_filename()
 
@@ -418,9 +457,11 @@ class MainWindow(QMainWindow):
         source = self.source_zone.path
         destination_dir = self.destination_zone.path
         if source is None:
+            logger.warning("Création refusée : aucune image source")
             QMessageBox.information(self, "Œuvre manquante", "Choisissez ou déposez une image source.")
             return
         if destination_dir is None:
+            logger.warning("Création refusée : aucun dossier de destination")
             QMessageBox.information(
                 self,
                 "Destination manquante",
@@ -429,6 +470,7 @@ class MainWindow(QMainWindow):
             return
         name = Path(self.output_name.text().strip()).name
         if not name:
+            logger.warning("Création refusée : nom de fichier vide")
             QMessageBox.information(self, "Nom manquant", "Donnez un nom au fichier vidéo.")
             return
         suffix = str(self.format_combo.currentData())
@@ -444,11 +486,13 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.No,
             )
             if answer != QMessageBox.StandardButton.Yes:
+                logger.info("Remplacement de fichier refusé : %s", destination)
                 return
 
         try:
             config = self.build_config()
         except ValueError as exc:
+            logger.warning("Paramètres invalides : %s", exc)
             QMessageBox.warning(self, "Paramètres invalides", str(exc))
             return
 
@@ -460,6 +504,7 @@ class MainWindow(QMainWindow):
         self.percent_label.setText("0 %")
         self._set_running(True)
 
+        logger.info("Création lancée : %s -> %s", source, destination)
         self._thread = QThread(self)
         self._worker = RenderWorker(source, destination, config)
         self._worker.moveToThread(self._thread)
@@ -485,6 +530,7 @@ class MainWindow(QMainWindow):
 
     def _cancel_render(self) -> None:
         if self._worker:
+            logger.info("Annulation demandée depuis l’interface")
             self.status_label.setText("Annulation en cours…")
             self.cancel_button.setEnabled(False)
             self._worker.cancel()
@@ -498,6 +544,7 @@ class MainWindow(QMainWindow):
 
     def _render_finished(self, output: str) -> None:
         self._last_video = Path(output)
+        logger.info("Vidéo prête : %s", self._last_video)
         self._set_running(False)
         self.cancel_button.setEnabled(True)
         self.status_label.setText(f"Vidéo prête : {self._last_video.name}")
@@ -509,6 +556,7 @@ class MainWindow(QMainWindow):
         self.player.play()
 
     def _render_cancelled(self) -> None:
+        logger.warning("Rendu annulé depuis l’interface")
         self._set_running(False)
         self.cancel_button.setEnabled(True)
         self.status_label.setText("Rendu annulé. Aucun fichier partiel conservé.")
@@ -516,6 +564,7 @@ class MainWindow(QMainWindow):
         self.percent_label.setText("0 %")
 
     def _render_failed(self, message: str) -> None:
+        logger.error("Rendu échoué : %s", message)
         self._set_running(False)
         self.cancel_button.setEnabled(True)
         self.status_label.setText("Le rendu a échoué.")
@@ -552,6 +601,7 @@ class MainWindow(QMainWindow):
             self.player.play()
 
     def _media_error(self, _error: QMediaPlayer.Error, message: str) -> None:
+        logger.warning("Lecture vidéo intégrée indisponible : %s", message)
         self.output_stack.setCurrentWidget(self.live_preview)
         self.play_button.setEnabled(False)
         self.status_label.setText(
@@ -560,6 +610,7 @@ class MainWindow(QMainWindow):
 
     def _open_output_folder(self) -> None:
         if self._last_video:
+            logger.info("Ouverture du dossier : %s", self._last_video.parent)
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_video.parent)))
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -581,6 +632,10 @@ class MainWindow(QMainWindow):
         self.settings.setValue("windowGeometry", self.saveGeometry())
         if self.destination_zone.path:
             self.settings.setValue("destination", str(self.destination_zone.path))
+        logger.info("Fermeture de l’interface desktop")
+        self.log_window.allow_close()
+        self.log_window.close()
+        detach_handler(self.log_handler)
         super().closeEvent(event)
 
 
@@ -589,9 +644,19 @@ def main() -> int:
     app.setApplicationName("ArtAnimate")
     app.setOrganizationName("ArtAnimate")
     app.setStyleSheet(APP_STYLESHEET)
-    window = MainWindow()
+    log_path = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)) / "artanimate.log"
+    startup_warning = None
+    try:
+        configure_file_logging(log_path, logging.INFO)
+    except OSError as exc:
+        startup_warning = f"Journal persistant indisponible : {exc}"
+        log_path = None
+    logger.info("Démarrage du client desktop")
+    window = MainWindow(log_path, startup_warning)
     window.show()
-    return app.exec()
+    result = app.exec()
+    logger.info("Arrêt du client desktop")
+    return result
 
 
 if __name__ == "__main__":

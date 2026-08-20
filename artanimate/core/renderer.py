@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -9,6 +10,9 @@ import numpy as np
 from .analysis import ArtworkAnalysis, ColorLayer, analyze_artwork
 from .config import RenderConfig
 from .effects import reveal_opacity, sand_field, wave_field
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -64,6 +68,13 @@ class ArtworkRenderer:
         self.blank = np.empty_like(analysis.source)
         self.blank[:] = analysis.background_color
         self.blank[analysis.background_mask] = analysis.source[analysis.background_mask]
+        logger.info(
+            "Moteur prêt : effet=%s, ordre=%s, couches=%d, images=%d",
+            config.effect,
+            config.order,
+            len(self.stages),
+            self.frame_count,
+        )
 
     def _stage_layers(self) -> list[ColorLayer]:
         outline = self.analysis.outline
@@ -210,6 +221,7 @@ def render_video(
     progress: Callable[[int, int], None] | None = None,
 ) -> ArtworkAnalysis:
     selected_config = (config or RenderConfig()).validate()
+    logger.info("Rendu demandé : %s -> %s", Path(input_path).resolve(), Path(output_path).resolve())
     analysis = analyze_artwork(input_path, selected_config)
     renderer = ArtworkRenderer(analysis, selected_config)
     from .video import encode_video
@@ -217,4 +229,5 @@ def render_video(
     encode_video(renderer, output_path, progress)
     if manifest_path:
         analysis.save_manifest(manifest_path, selected_config)
+    logger.info("Rendu terminé : %s", Path(output_path).resolve())
     return analysis

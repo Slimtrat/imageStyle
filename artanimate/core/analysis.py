@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,9 @@ from .colors import (
     rgb_to_lab,
 )
 from .config import RenderConfig
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -117,6 +121,7 @@ class ArtworkAnalysis:
             json.dumps(self.manifest(config), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        logger.info("Manifeste enregistré : %s", destination.resolve())
 
     def save_preview(self, path: str | Path, config: RenderConfig) -> None:
         ordered = self.ordered_layers(config.order, config.start_hue)
@@ -139,16 +144,19 @@ class ArtworkAnalysis:
         destination = Path(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         preview.save(destination)
+        logger.info("Planche d’analyse enregistrée : %s", destination.resolve())
 
 
 def _load_rgb(path: str | Path, target_width: int) -> np.ndarray:
     source_path = Path(path)
     if not source_path.is_file():
+        logger.error("Image source introuvable : %s", source_path)
         raise FileNotFoundError(f"Image introuvable : {source_path}")
     try:
         with Image.open(source_path) as opened:
             image = ImageOps.exif_transpose(opened).convert("RGBA")
     except Exception as exc:
+        logger.exception("Lecture impossible de l’image : %s", source_path)
         raise ValueError(f"Impossible de lire l'image {source_path}: {exc}") from exc
 
     target_height = max(2, int(round(image.height * target_width / image.width)))
@@ -180,8 +188,15 @@ def _border_color(source: np.ndarray) -> tuple[int, int, int]:
 
 def analyze_artwork(path: str | Path, config: RenderConfig) -> ArtworkAnalysis:
     config.validate()
+    logger.info(
+        "Analyse démarrée : source=%s, largeur=%d, centres=%d",
+        Path(path).resolve(),
+        config.width,
+        config.colors,
+    )
     source = _load_rgb(path, config.width)
     height, width = source.shape[:2]
+    logger.info("Image chargée : %dx%d pixels", width, height)
     flat_rgb = source.reshape(-1, 3)
     flat_lab = rgb_to_lab(flat_rgb)
 
@@ -189,6 +204,16 @@ def analyze_artwork(path: str | Path, config: RenderConfig) -> ArtworkAnalysis:
     background_lab = rgb_to_lab(np.asarray(background_color, dtype=np.uint8))[0:3]
     background_distance = np.linalg.norm(flat_lab - background_lab, axis=1)
     background_mask_flat = background_distance <= config.background_tolerance
+    background_coverage = float(np.mean(background_mask_flat))
+    logger.info(
+        "Fond détecté : rgb=%s, couverture=%.1f %%",
+        background_color,
+        background_coverage * 100.0,
+    )
+    if background_coverage < 0.02:
+        logger.warning("Le fond détecté couvre moins de 2 %% de l’image")
+    elif background_coverage > 0.95:
+        logger.warning("Le fond détecté couvre plus de 95 %% de l’image")
 
     chroma = np.linalg.norm(flat_lab[:, 1:3], axis=1)
     outline_mask_flat = (
@@ -198,6 +223,7 @@ def analyze_artwork(path: str | Path, config: RenderConfig) -> ArtworkAnalysis:
     )
     color_indices = np.flatnonzero(~background_mask_flat & ~outline_mask_flat)
     if len(color_indices) == 0:
+        logger.error("Aucune zone colorée détectée avec les seuils courants")
         raise ValueError(
             "Aucune zone colorée détectée. Réduisez background_tolerance ou outline_luma."
         )
@@ -249,6 +275,8 @@ def analyze_artwork(path: str | Path, config: RenderConfig) -> ArtworkAnalysis:
 
     outline: ColorLayer | None = None
     outline_count = int(outline_mask_flat.sum())
+    if not outline_count:
+        logger.warning("Aucun contour sombre distinct n’a été détecté")
     if outline_count:
         outline_rgb = np.mean(flat_rgb[outline_mask_flat].astype(np.float32), axis=0)
         outline_color = tuple(int(round(channel)) for channel in outline_rgb)
@@ -263,6 +291,11 @@ def analyze_artwork(path: str | Path, config: RenderConfig) -> ArtworkAnalysis:
             is_outline=True,
         )
 
+    logger.info(
+        "Analyse terminée : familles=%s, contours=%d pixels",
+        ", ".join(sorted(layer.label for layer in layers)),
+        outline_count,
+    )
     return ArtworkAnalysis(
         source=source,
         background_color=background_color,

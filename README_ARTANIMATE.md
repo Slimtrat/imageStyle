@@ -42,7 +42,7 @@ python -m pip install -e ".[desktop]"
 artanimate-ui
 ```
 
-Le client accepte le glisser-déposer de l’image et du dossier de destination. Il affiche l’œuvre originale, le rendu en cours avec son pourcentage, puis lit la vidéo finale. Les réglages visibles s’adaptent automatiquement au mode Sable ou Vague.
+Le client accepte le glisser-déposer de l’image et du dossier de destination. Il affiche l’œuvre originale, le rendu en cours avec son pourcentage, puis lit la vidéo finale. Les réglages visibles s’adaptent automatiquement au mode Sable ou Vague. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle. Les événements sont aussi conservés dans un fichier rotatif accessible depuis cette fenêtre.
 
 Vous pouvez aussi le lancer sans commande installée :
 
@@ -101,6 +101,8 @@ La planche montre l’image redimensionnée et les familles retenues. Le JSON co
 --seed 7                    rendu strictement reproductible
 --config config.json        charge un preset JSON
 --manifest rendu.json       sauvegarde les décisions d’analyse
+--log-level INFO            DEBUG, INFO, WARNING ou ERROR
+--log-file session.log      copie persistante du journal CLI
 ```
 
 Les options données en ligne de commande prennent le dessus sur le fichier JSON.

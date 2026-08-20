@@ -4,7 +4,7 @@ QWidget {
     font-family: "Segoe UI", "Inter", sans-serif;
     font-size: 13px;
 }
-QMainWindow, QWidget#appRoot {
+QMainWindow, QDialog, QWidget#appRoot {
     background: #f4f6fa;
 }
 QLabel#brand {

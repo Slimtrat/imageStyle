@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -32,6 +33,35 @@ def test_mode_switch_changes_visible_parameters_and_config(app) -> None:
     config = window.build_config()
     assert config.effect == "wave"
     assert config.direction == "left"
+    window.close()
+
+
+def test_log_window_filters_by_level_source_and_text(app) -> None:
+    window = MainWindow()
+    source = logging.getLogger("artanimate.desktop.filter_test")
+    source.info("palette ready")
+    source.warning("background uncertain")
+    source.error("encoding failed")
+    app.processEvents()
+    logs = window.log_window
+    assert len(logs._records) >= 5  # includes mode selection and window-ready messages
+    logs.level_filter.setCurrentIndex(3)
+    assert "encoding failed" in logs.output.toPlainText()
+    assert "palette ready" not in logs.output.toPlainText()
+    logs.level_filter.setCurrentIndex(0)
+    logs.search.setText("background")
+    assert "background uncertain" in logs.output.toPlainText()
+    assert "encoding failed" not in logs.output.toPlainText()
+    logs.search.clear()
+    source_index = logs.source_filter.findData("desktop.filter_test")
+    assert source_index >= 0
+    logs.source_filter.setCurrentIndex(source_index)
+    assert "palette ready" in logs.output.toPlainText()
+    assert "Interface desktop prête" not in logs.output.toPlainText()
+    assert window.log_button.text() == "Logs (2)"
+    window._show_logs()
+    assert window.log_button.text() == "Logs"
+    logs.hide()
     window.close()
 
 

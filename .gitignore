@@ -9,3 +9,4 @@ build/
 *.mov
 *.webm
 *.part.*
+*.log

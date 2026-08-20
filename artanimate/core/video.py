@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable
 
@@ -10,6 +11,9 @@ from .renderer import ArtworkRenderer
 
 
 SUPPORTED_OUTPUTS = {".mp4", ".mov", ".webm"}
+
+
+logger = logging.getLogger(__name__)
 
 
 class RenderCancelled(RuntimeError):
@@ -26,6 +30,7 @@ def encode_video(
     destination = Path(output_path)
     suffix = destination.suffix.lower()
     if suffix not in SUPPORTED_OUTPUTS:
+        logger.error("Format vidéo non pris en charge : %s", suffix or "sans extension")
         supported = ", ".join(sorted(SUPPORTED_OUTPUTS))
         raise ValueError(f"Format de sortie non pris en charge ({suffix or 'sans extension'}). Utilisez {supported}.")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -40,6 +45,15 @@ def encode_video(
     else:
         output_params += ["-b:v", "0"]
 
+    logger.info(
+        "Encodage démarré : fichier=%s, codec=%s, taille=%dx%d, images=%d, fps=%d",
+        destination.resolve(),
+        codec,
+        renderer.width,
+        renderer.height,
+        renderer.frame_count,
+        renderer.config.fps,
+    )
     writer = imageio_ffmpeg.write_frames(
         str(temporary),
         (renderer.width, renderer.height),
@@ -64,11 +78,21 @@ def encode_video(
                 progress(index, total)
         writer.close()
         temporary.replace(destination)
-    except Exception:
+    except RenderCancelled:
+        logger.warning("Encodage annulé : %s", destination.resolve())
         try:
             writer.close()
         finally:
             if temporary.exists():
                 temporary.unlink()
         raise
+    except Exception:
+        logger.exception("Échec de l’encodage : %s", destination.resolve())
+        try:
+            writer.close()
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        raise
+    logger.info("Encodage terminé : %s (%d octets)", destination.resolve(), destination.stat().st_size)
     return destination
