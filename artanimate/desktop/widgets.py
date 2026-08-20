@@ -16,11 +16,16 @@ from PySide6.QtWidgets import (
 )
 
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+from .problems import (
+    UserProblem,
+    destination_reference_problem,
+    source_reference_problem,
+)
 
 
 class PathDropZone(QFrame):
     path_selected = Signal(str)
+    path_rejected = Signal(object)
 
     def __init__(self, title: str, instruction: str, mode: str, parent: QWidget | None = None):
         super().__init__(parent)
@@ -58,21 +63,38 @@ class PathDropZone(QFrame):
     def path(self) -> Path | None:
         return self._path
 
-    def set_path(self, value: str | Path) -> None:
+    def set_path(self, value: str | Path) -> bool:
         path = Path(value)
-        if not self._accepts(path):
-            return
+        problem = self._path_problem(path)
+        if problem is not None:
+            self._path = None
+            self.mark_invalid(problem)
+            self.path_rejected.emit(problem)
+            return False
         self._path = path.resolve()
         self.path_label.setText(str(self._path))
         self.path_label.setToolTip(str(self._path))
         self.setProperty("ready", True)
+        self.setProperty("invalid", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        return True
+
+    def mark_invalid(self, problem: UserProblem) -> None:
+        self.setProperty("ready", False)
+        self.setProperty("invalid", True)
+        self.path_label.setText(problem.message)
+        self.path_label.setToolTip(problem.display_text)
         self.style().unpolish(self)
         self.style().polish(self)
 
-    def _accepts(self, path: Path) -> bool:
+    def _path_problem(self, path: Path) -> UserProblem | None:
         if self.mode == "directory":
-            return path.is_dir()
-        return path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+            return destination_reference_problem(path)
+        return source_reference_problem(path)
+
+    def _accepts(self, path: Path) -> bool:
+        return self._path_problem(path) is None
 
     def browse(self) -> None:
         if self.mode == "directory":
@@ -84,8 +106,7 @@ class PathDropZone(QFrame):
                 "",
                 "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)",
             )
-        if selected:
-            self.set_path(selected)
+        if selected and self.set_path(selected):
             self.path_selected.emit(str(self._path))
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -95,20 +116,17 @@ class PathDropZone(QFrame):
             super().mousePressEvent(event)
 
     def dragEnterEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        urls = event.mimeData().urls()
-        if any(url.isLocalFile() and self._accepts(Path(url.toLocalFile())) for url in urls):
+        if any(url.isLocalFile() for url in event.mimeData().urls()):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         for url in event.mimeData().urls():
             if not url.isLocalFile():
                 continue
-            path = Path(url.toLocalFile())
-            if self._accepts(path):
-                self.set_path(path)
+            if self.set_path(Path(url.toLocalFile())):
                 self.path_selected.emit(str(self._path))
-                event.acceptProposedAction()
-                return
+            event.acceptProposedAction()
+            return
 
 
 class ScaledImageLabel(QLabel):

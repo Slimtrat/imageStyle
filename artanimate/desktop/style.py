@@ -38,6 +38,10 @@ QFrame#dropZone[ready="true"] {
     background: #f2fbf6;
     border-color: #65b383;
 }
+QFrame#dropZone[invalid="true"] {
+    background: #fff4f4;
+    border-color: #d85d69;
+}
 QPushButton {
     background: #eef1f6;
     border: 1px solid #d8dee8;

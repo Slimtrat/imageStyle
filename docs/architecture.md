@@ -82,3 +82,16 @@ dupliquer. La suppression du fichier reste une action explicite, confirmée et j
 Le client expose déjà un onglet `Studio 3D · Coming soon`, mais aucun contrôle 3D ne sera
 activé avant l’existence de la factory de présentations et du renderer `room_3d` décrits
 ci-dessus.
+
+
+## Frontière d’erreurs utilisateur
+
+Le module `desktop/problems.py` est l’unique traducteur entre les exceptions techniques
+et l’expérience utilisateur. Il valide les chemins avant le lancement, les workers les
+revalident au moment de l’usage, puis les erreurs résiduelles sont converties en un
+`UserProblem` structuré : code stable, titre, explication, action de récupération et
+détails techniques séparés.
+
+L’encodeur ne recrée jamais silencieusement un dossier de destination disparu. Une zone
+de dépôt invalide passe en état rouge et le rendu ne démarre pas. Les logs conservent la
+cause complète tandis que la boîte de dialogue ne présente que le vocabulaire métier.

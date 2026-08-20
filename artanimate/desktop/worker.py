@@ -12,6 +12,11 @@ from ..core.config import RenderConfig
 from ..core.renderer import ArtworkRenderer
 from ..core.video import RenderCancelled, encode_video
 from .preview import frame_to_qimage
+from .problems import (
+    translate_exception,
+    validate_destination_path,
+    validate_source_path,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +29,7 @@ class RenderWorker(QObject):
     status = Signal(str)
     finished = Signal(str)
     cancelled = Signal()
-    failed = Signal(str)
+    failed = Signal(object)
 
     def __init__(self, source: Path, destination: Path, config: RenderConfig):
         super().__init__()
@@ -41,8 +46,10 @@ class RenderWorker(QObject):
     def run(self) -> None:
         try:
             logger.info("Tâche desktop démarrée : %s -> %s", self.source, self.destination)
+            source = validate_source_path(self.source, verify_image=False)
+            validate_destination_path(self.destination.parent)
             self.status.emit("Analyse des couleurs et des contours…")
-            analysis = analyze_artwork(self.source, self.config)
+            analysis = analyze_artwork(source, self.config)
             if self._cancelled.is_set():
                 raise RenderCancelled("Rendu annulé")
             self.status.emit("Préparation des masques d’animation…")
@@ -59,6 +66,7 @@ class RenderWorker(QObject):
                 if done == 1 or done == total or done % preview_stride == 0:
                     self.preview.emit(frame_to_qimage(frame))
 
+            validate_destination_path(self.destination.parent)
             self.status.emit("Création de la vidéo…")
             encode_video(
                 renderer,
@@ -75,4 +83,11 @@ class RenderWorker(QObject):
             self.cancelled.emit()
         except Exception as exc:
             logger.exception("Échec de la tâche desktop")
-            self.failed.emit(str(exc))
+            self.failed.emit(
+                translate_exception(
+                    exc,
+                    "render",
+                    source=self.source,
+                    destination=self.destination.parent,
+                )
+            )

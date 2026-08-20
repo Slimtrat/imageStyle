@@ -37,6 +37,14 @@ from .history import GenerationHistory
 from .history_widgets import HistoryPanel
 from .log_window import LogWindow, QtLogHandler
 from .preview import PREVIEW_INTERVAL_MS, PreviewWorker
+from .problems import (
+    UserInputError,
+    UserProblem,
+    translate_exception,
+    validate_destination_path,
+    validate_render_paths,
+    validate_source_path,
+)
 from .style import APP_STYLESHEET
 from .widgets import PathDropZone, PreviewCard, ScaledImageLabel
 from .worker import RenderWorker
@@ -612,6 +620,14 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.source_zone.path_selected.connect(self._source_selected)
         self.destination_zone.path_selected.connect(self._destination_selected)
+        self.source_zone.path_rejected.connect(
+            lambda problem: self._handle_path_problem(self.source_zone, problem)
+        )
+        self.destination_zone.path_rejected.connect(
+            lambda problem: self._handle_path_problem(
+                self.destination_zone, problem
+            )
+        )
         self.effect_combo.currentIndexChanged.connect(self._effect_changed)
         self.order_combo.currentIndexChanged.connect(self._order_changed)
         self.neutral_combo.currentIndexChanged.connect(self._neutral_changed)
@@ -664,6 +680,41 @@ class MainWindow(QMainWindow):
                     control.valueChanged.connect(lambda *_: self._schedule_preview())
         self.chromatic_wheel.hueChanged.connect(lambda *_: self._schedule_preview())
 
+    def _show_problem(self, problem: UserProblem, *, critical: bool = False) -> None:
+        if critical:
+            logger.error(
+                "Problème utilisateur [%s] : %s | action=%s | détails=%s",
+                problem.code,
+                problem.message,
+                problem.action,
+                problem.technical_details or "aucun",
+            )
+        else:
+            logger.warning(
+                "Problème utilisateur [%s] : %s | action=%s",
+                problem.code,
+                problem.message,
+                problem.action,
+            )
+        box = QMessageBox(self)
+        box.setIcon(
+            QMessageBox.Icon.Critical if critical else QMessageBox.Icon.Warning
+        )
+        box.setWindowTitle(problem.title)
+        box.setText(problem.message)
+        box.setInformativeText(f"Que faire : {problem.action}")
+        if problem.technical_details:
+            box.setDetailedText(problem.technical_details)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
+
+    def _handle_path_problem(self, zone: PathDropZone, problem: object) -> None:
+        if not isinstance(problem, UserProblem):
+            problem = translate_exception(ValueError(str(problem)))
+        zone.mark_invalid(problem)
+        self.status_label.setText(f"{problem.title} — {problem.action}")
+        self._show_problem(problem)
+
     def _show_logs(self) -> None:
         self._unread_logs = 0
         self.log_button.setText("Logs")
@@ -684,14 +735,24 @@ class MainWindow(QMainWindow):
         self.history_panel.set_directory(self.destination_zone.path)
 
     def _source_selected(self, value: str) -> None:
-        path = Path(value)
+        try:
+            path = validate_source_path(Path(value))
+        except UserInputError as exc:
+            self._handle_path_problem(self.source_zone, exc.problem)
+            return
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
-            logger.error("Aperçu impossible pour l’image : %s", path)
-            QMessageBox.warning(self, "Image illisible", "Cette image ne peut pas être affichée.")
+            problem = UserProblem(
+                "source_qt_unreadable",
+                "Aperçu de l’image impossible",
+                f"Le fichier « {path.name} » est lisible, mais son aperçu ne peut pas être affiché.",
+                "Enregistrez une copie PNG ou JPEG de l’œuvre, puis sélectionnez-la.",
+                str(path),
+            )
+            self._handle_path_problem(self.source_zone, problem)
             return
         self.source_preview.image.set_image(pixmap)
-        logger.info("Image sélectionnée : %s", path.resolve())
+        logger.info("Image sélectionnée : %s", path)
         if self.destination_zone.path is None:
             self.destination_zone.set_path(path.parent)
         self.history_panel.set_directory(self.destination_zone.path)
@@ -700,10 +761,14 @@ class MainWindow(QMainWindow):
         self._schedule_preview(120)
 
     def _destination_selected(self, value: str) -> None:
-        destination = Path(value)
+        try:
+            destination = validate_destination_path(Path(value))
+        except UserInputError as exc:
+            self._handle_path_problem(self.destination_zone, exc.problem)
+            return
         self.history_panel.set_directory(destination)
-        self.settings.setValue("destination", str(destination.resolve()))
-        logger.info("Dossier de destination sélectionné : %s", destination.resolve())
+        self.settings.setValue("destination", str(destination))
+        logger.info("Dossier de destination sélectionné : %s", destination)
 
     def _filename_edited(self) -> None:
         self._auto_filename = False
@@ -887,11 +952,20 @@ class MainWindow(QMainWindow):
         self._advance_preview()
         self._preview_playback.start()
 
-    def _preview_failed(self, revision: int, message: str) -> None:
+    def _preview_failed(self, revision: int, problem: object) -> None:
         if revision != self._preview_revision:
             return
-        self.preview_quality.setText("Prérendu indisponible")
-        self.live_preview.clear_image(f"Prérendu impossible : {message}")
+        if not isinstance(problem, UserProblem):
+            problem = translate_exception(
+                ValueError(str(problem)),
+                "preview",
+                source=self.source_zone.path,
+            )
+        if problem.code.startswith("source_"):
+            self.source_zone.mark_invalid(problem)
+        self.preview_quality.setText(problem.title)
+        self.live_preview.clear_image(problem.display_text)
+        self.status_label.setText(f"{problem.title} — {problem.action}")
 
     def _advance_preview(self) -> None:
         if not self._preview_frames:
@@ -1037,29 +1111,24 @@ class MainWindow(QMainWindow):
             logger.info("Onglet Studio 3D consulté : fonctionnalité à venir")
 
     def _start_render(self) -> None:
-        source = self.source_zone.path
-        destination_dir = self.destination_zone.path
-        if source is None:
-            logger.warning("Création refusée : aucune image source")
-            QMessageBox.information(self, "Œuvre manquante", "Choisissez ou déposez une image source.")
-            return
-        if destination_dir is None:
-            logger.warning("Création refusée : aucun dossier de destination")
-            QMessageBox.information(
-                self,
-                "Destination manquante",
-                "Choisissez ou déposez un dossier de destination.",
-            )
-            return
-        name = Path(self.output_name.text().strip()).name
-        if not name:
-            logger.warning("Création refusée : nom de fichier vide")
-            QMessageBox.information(self, "Nom manquant", "Donnez un nom au fichier vidéo.")
-            return
         suffix = str(self.format_combo.currentData())
-        name = str(Path(name).with_suffix(suffix))
-        self.output_name.setText(name)
-        destination = destination_dir / name
+        try:
+            source, destination = validate_render_paths(
+                self.source_zone.path,
+                self.destination_zone.path,
+                self.output_name.text(),
+                suffix,
+            )
+        except UserInputError as exc:
+            problem = exc.problem
+            if problem.code.startswith("source_"):
+                self.source_zone.mark_invalid(problem)
+            elif problem.code.startswith("destination_"):
+                self.destination_zone.mark_invalid(problem)
+            self.status_label.setText(f"{problem.title} — {problem.action}")
+            self._show_problem(problem)
+            return
+        self.output_name.setText(destination.name)
         if destination.exists():
             answer = QMessageBox.question(
                 self,
@@ -1075,8 +1144,9 @@ class MainWindow(QMainWindow):
         try:
             config = self.build_config()
         except ValueError as exc:
-            logger.warning("Paramètres invalides : %s", exc)
-            QMessageBox.warning(self, "Paramètres invalides", str(exc))
+            problem = translate_exception(exc, "render")
+            self.status_label.setText(f"{problem.title} — {problem.action}")
+            self._show_problem(problem)
             return
 
         self._suspend_preview()
@@ -1160,12 +1230,27 @@ class MainWindow(QMainWindow):
         self.percent_label.setText("0 %")
         self._schedule_preview(120)
 
-    def _render_failed(self, message: str) -> None:
-        logger.error("Rendu échoué : %s", message)
+    def _render_failed(self, problem: object) -> None:
+        if not isinstance(problem, UserProblem):
+            problem = translate_exception(
+                RuntimeError(str(problem)),
+                "render",
+                source=self._render_source,
+                destination=(
+                    self.destination_zone.path
+                    if self.destination_zone.path is not None
+                    else None
+                ),
+            )
+        logger.error("Rendu échoué [%s] : %s", problem.code, problem.technical_details)
         self._set_running(False)
         self.cancel_button.setEnabled(True)
-        self.status_label.setText("Le rendu a échoué.")
-        QMessageBox.critical(self, "Erreur de rendu", message)
+        self.status_label.setText(f"{problem.title} — {problem.action}")
+        if problem.code.startswith("source_"):
+            self.source_zone.mark_invalid(problem)
+        elif problem.code.startswith("destination_") or problem.code == "disk_full":
+            self.destination_zone.mark_invalid(problem)
+        self._show_problem(problem, critical=True)
         self._schedule_preview(120)
 
     def _thread_finished(self) -> None:

@@ -33,7 +33,14 @@ def encode_video(
         logger.error("Format vidéo non pris en charge : %s", suffix or "sans extension")
         supported = ", ".join(sorted(SUPPORTED_OUTPUTS))
         raise ValueError(f"Format de sortie non pris en charge ({suffix or 'sans extension'}). Utilisez {supported}.")
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.parent.exists():
+        raise FileNotFoundError(
+            f"Dossier de destination introuvable : {destination.parent}"
+        )
+    if not destination.parent.is_dir():
+        raise NotADirectoryError(
+            f"La destination n’est pas un dossier : {destination.parent}"
+        )
     temporary = destination.with_name(f"{destination.stem}.part{suffix}")
     if temporary.exists():
         temporary.unlink()

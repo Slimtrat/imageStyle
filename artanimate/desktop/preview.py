@@ -11,6 +11,7 @@ from PySide6.QtGui import QImage
 from ..core.analysis import analyze_artwork
 from ..core.config import RenderConfig
 from ..core.renderer import ArtworkRenderer
+from .problems import translate_exception, validate_source_path
 
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class PreviewWorker(QObject):
     """Build a small in-memory animation without invoking the video encoder."""
 
     ready = Signal(int, object, str)
-    failed = Signal(int, str)
+    failed = Signal(int, object)
     finished = Signal(int)
 
     def __init__(self, source: Path, config: RenderConfig, revision: int):
@@ -74,7 +75,8 @@ class PreviewWorker(QObject):
                 self.config.width,
                 PREVIEW_FRAME_COUNT,
             )
-            analysis = analyze_artwork(self.source, self.config)
+            source = validate_source_path(self.source, verify_image=False)
+            analysis = analyze_artwork(source, self.config)
             if self._cancelled.is_set():
                 logger.info("Prérendu obsolète annulé après analyse")
                 return
@@ -97,6 +99,9 @@ class PreviewWorker(QObject):
             self.ready.emit(self.revision, tuple(frames), quality)
         except Exception as exc:
             logger.exception("Échec du prérendu")
-            self.failed.emit(self.revision, str(exc))
+            self.failed.emit(
+                self.revision,
+                translate_exception(exc, "preview", source=self.source),
+            )
         finally:
             self.finished.emit(self.revision)
