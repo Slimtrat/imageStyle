@@ -405,7 +405,7 @@ class MainWindow(QMainWindow):
         )
 
         self.width_spin = self._slider(320, 3840, 1280, 160, 0, " px", "Largeur de la vidéo exportée")
-        self.duration_spin = self._slider(3.0, 120.0, 12.0, 0.5, 1, " s", "Durée totale, pauses incluses")
+        self.duration_spin = self._slider(3.0, 120.0, 18.0, 0.5, 1, " s", "Durée totale, pauses incluses · 18 s offre un mouvement posé")
         self.fps_spin = self._slider(12, 60, 30, 1, 0, " i/s", "Fluidité de la vidéo")
         self.colors_spin = self._slider(4, 64, 24, 1, 0, "", "Nombre de nuances analysées")
         self.shape_completion = self._slider(

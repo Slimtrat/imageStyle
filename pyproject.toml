@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "artanimate"
-version = "2.1.0"
+version = "2.2.0"
 description = "Animate artworks with extensible 2D effects and framed 3D studio videos."
 readme = "README_ARTANIMATE.md"
 requires-python = ">=3.11"
@@ -29,7 +29,7 @@ artanimate-ui = "artanimate.desktop:main"
 include = ["artanimate*"]
 
 [tool.setuptools.package-data]
-artanimate = ["assets/branding/*.png", "assets/docs/*.json", "assets/qml/*.qml"]
+artanimate = ["assets/branding/*.png", "assets/docs/*.json", "assets/qml/*.qml", "assets/materials/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

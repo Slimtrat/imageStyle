@@ -13,6 +13,7 @@ from PySide6.QtGui import QImage
 from artanimate.core.config import RenderConfig
 from artanimate.desktop.preview import (
     PREVIEW_COLORS,
+    PREVIEW_DURATION,
     PREVIEW_FRAME_COUNT,
     PREVIEW_WIDTH,
     PreviewWorker,
@@ -44,7 +45,7 @@ def test_preview_configuration_is_bounded_but_preserves_effect() -> None:
     assert preview.seed == 42
     assert preview.width == PREVIEW_WIDTH
     assert preview.colors == PREVIEW_COLORS
-    assert preview.duration == 4.0
+    assert preview.duration == PREVIEW_DURATION
     assert preview.fps == 10
 
 

@@ -28,10 +28,13 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "PerspectiveCamera" in scene
     assert "PointLight" in scene
     assert "SpotLight" in scene
-    assert "pokerTableFelt" in scene
+    assert "sideboardBody" in scene
+    assert "horizontalArtwork" in scene
+    assert "artworkContactShadow" in scene
     assert "overheadLamp" in scene
-    assert "model: 196" in scene
-    assert "#164b3d" in scene
+    assert "lampMotion" in scene
+    assert "dark-walnut-v2.png" in scene
+    assert "model: 240" in scene
     assert "artworkSource" in scene
     assert "MouseArea" in scene
     assert "effectKind" in scene
@@ -63,6 +66,8 @@ def test_studio_panel_loads_scene_and_accepts_animated_frames(
             "image://artanimate/"
         )
         assert root.property("artworkAspect") == pytest.approx(1.5)
+        assert root.property("lampMotion") == pytest.approx(0.65)
+        assert panel.camera_state()["lamp_motion"] == pytest.approx(0.65)
         panel.set_effect("wave", direction="right")
         assert root.property("effectKind") == "wave"
         assert root.property("effectDirection") == "right"

@@ -31,6 +31,12 @@ qml_datas = [
         "artanimate/assets/qml",
     )
 ]
+material_datas = [
+    (
+        str(PROJECT_ROOT / "artanimate" / "assets" / "materials" / "dark-walnut-v2.png"),
+        "artanimate/assets/materials",
+    )
+]
 qt_quick_hiddenimports = [
     "PySide6.QtQml",
     "PySide6.QtQuick",
@@ -42,7 +48,7 @@ analysis = Analysis(
     [str(WINDOWS_DIR / "launcher.py")],
     pathex=[str(PROJECT_ROOT)],
     binaries=imageio_binaries,
-    datas=branding_datas + documentation_datas + qml_datas + imageio_datas,
+    datas=branding_datas + documentation_datas + qml_datas + material_datas + imageio_datas,
     hiddenimports=imageio_hiddenimports + qt_quick_hiddenimports,
     hookspath=[],
     hooksconfig={},

@@ -24,7 +24,7 @@ class RenderConfig:
     outline: str = "together"
     direction: str = "left"
     rgb_mode: str = "channels"
-    duration: float = 12.0
+    duration: float = 18.0
     fps: int = 30
     width: int = 1280
     colors: int = 24

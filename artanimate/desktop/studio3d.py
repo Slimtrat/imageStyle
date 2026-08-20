@@ -33,9 +33,9 @@ QML_SCENE_PATH = (
     Path(__file__).resolve().parents[1] / "assets" / "qml" / "Studio3D.qml"
 )
 CAMERA_PRESETS = {
-    "artwork": (0.0, 7.0, 640.0),
-    "table": (-10.0, 9.0, 900.0),
-    "room": (-22.0, 12.0, 1060.0),
+    "artwork": (0.0, 31.0, 650.0),
+    "furniture": (-18.0, 22.0, 950.0),
+    "room": (-27.0, 17.0, 1060.0),
 }
 
 
@@ -173,7 +173,7 @@ class Studio3DPanel(QWidget):
         title = QLabel("Studio 3D · cadrage & export")
         title.setObjectName("studioTitle")
         subtitle = QLabel(
-            "Une pièce vide, une table de poker, votre œuvre et une lumière suspendue."
+            "Votre œuvre couchée sur un meuble en noyer, sous une suspension en mouvement lent."
         )
         subtitle.setObjectName("muted")
         text.addWidget(title)
@@ -222,9 +222,9 @@ class Studio3DPanel(QWidget):
         camera_title.setObjectName("sectionTitle")
         layout.addWidget(camera_title)
         self.camera_preset = QComboBox()
-        self.camera_preset.addItem("Œuvre · face", "artwork")
-        self.camera_preset.addItem("Table de poker · héro", "table")
-        self.camera_preset.addItem("Pièce vide · plan large", "room")
+        self.camera_preset.addItem("Œuvre · plongée", "artwork")
+        self.camera_preset.addItem("Meuble · trois quarts", "furniture")
+        self.camera_preset.addItem("Pièce · plan large", "room")
         self.camera_preset.setCurrentIndex(1)
         self.camera_preset.currentIndexChanged.connect(self._apply_selected_preset)
         layout.addWidget(self.camera_preset)
@@ -232,21 +232,25 @@ class Studio3DPanel(QWidget):
         form = QFormLayout()
         form.setSpacing(8)
         self.yaw_slider = ParameterSlider(
-            -70, 70, -10, 1, 0, "°", "Rotation horizontale de la caméra."
+            -70, 70, -18, 1, 0, "°", "Rotation horizontale de la caméra."
         )
         self.pitch_slider = ParameterSlider(
-            -2, 32, 9, 1, 0, "°", "Hauteur du point de vue."
+            -2, 38, 22, 1, 0, "°", "Hauteur du point de vue."
         )
         self.distance_slider = ParameterSlider(
-            560, 1150, 900, 10, 0, "", "Distance entre la caméra et l’œuvre."
+            560, 1180, 950, 10, 0, "", "Distance entre la caméra et l’œuvre."
         )
         self.lamp_slider = ParameterSlider(
-            0.2, 5.0, 2.2, 0.1, 1, "×", "Intensité de la suspension au-dessus de la table."
+            0.2, 5.0, 2.4, 0.1, 1, "×", "Intensité de la suspension au-dessus du meuble."
+        )
+        self.lamp_motion_slider = ParameterSlider(
+            0.0, 1.0, 0.65, 0.05, 2, "", "Amplitude de l’oscillation lente de la suspension."
         )
         form.addRow("Angle", self.yaw_slider)
         form.addRow("Hauteur", self.pitch_slider)
         form.addRow("Distance", self.distance_slider)
         form.addRow("Suspension", self.lamp_slider)
+        form.addRow("Mouvement", self.lamp_motion_slider)
         layout.addLayout(form)
 
         self.yaw_slider.valueChanged.connect(
@@ -260,6 +264,9 @@ class Studio3DPanel(QWidget):
         )
         self.lamp_slider.valueChanged.connect(
             lambda value: self._set_scene_property("lampBrightness", value)
+        )
+        self.lamp_motion_slider.valueChanged.connect(
+            lambda value: self._set_scene_property("lampMotion", value)
         )
 
         hint = QLabel(
@@ -346,6 +353,7 @@ class Studio3DPanel(QWidget):
             self.pitch_slider,
             self.distance_slider,
             self.lamp_slider,
+            self.lamp_motion_slider,
             self.ratio_combo,
             self.resolution_combo,
             self.format_combo,
@@ -430,12 +438,14 @@ class Studio3DPanel(QWidget):
                 "pitch": -float(self.pitch_slider.value()),
                 "distance": float(self.distance_slider.value()),
                 "lamp": float(self.lamp_slider.value()),
+                "lamp_motion": float(self.lamp_motion_slider.value()),
             }
         return {
             "yaw": float(root.property("cameraYaw")),
             "pitch": float(root.property("cameraPitch")),
             "distance": float(root.property("cameraDistance")),
             "lamp": float(root.property("lampBrightness")),
+            "lamp_motion": float(root.property("lampMotion")),
         }
 
     def set_source(self, path: Path) -> bool:
@@ -501,6 +511,7 @@ class Studio3DPanel(QWidget):
     def _publish_scene_state(self) -> None:
         self._publish_texture()
         self._set_scene_property("lampBrightness", self.lamp_slider.value())
+        self._set_scene_property("lampMotion", self.lamp_motion_slider.value())
         self._set_scene_property("effectKind", self._current_effect)
         self._set_scene_property("rgbMode", self._rgb_mode)
         self._set_scene_property("effectDirection", self._effect_direction)

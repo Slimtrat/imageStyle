@@ -59,7 +59,9 @@ def qimage_to_rgb(image: QImage) -> np.ndarray:
     buffer = np.frombuffer(converted.constBits(), dtype=np.uint8).reshape(
         height, row_bytes
     )
-    return np.ascontiguousarray(buffer[:, : width * 3].reshape(height, width, 3))
+    # Always detach from QImage: its temporary backing store can be released
+    # immediately after this function returns, even when the NumPy view is contiguous.
+    return buffer[:, : width * 3].reshape(height, width, 3).copy(order="C")
 
 
 class Studio3DFrameWorker(QObject):

@@ -19,3 +19,12 @@ def test_windows_launcher_and_build_recipe_are_present() -> None:
     assert (WINDOWS_DIR / "artanimate.spec").is_file()
     assert (WINDOWS_DIR / "build.ps1").is_file()
     assert (WINDOWS_DIR / "version_info.txt").is_file()
+
+
+def test_windows_package_includes_studio_materials() -> None:
+    material = PROJECT_ROOT / "artanimate" / "assets" / "materials" / "dark-walnut-v2.png"
+    spec = (WINDOWS_DIR / "artanimate.spec").read_text(encoding="utf-8")
+
+    assert material.is_file()
+    assert "dark-walnut-v2.png" in spec
+    assert "material_datas" in spec

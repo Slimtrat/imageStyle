@@ -5,10 +5,11 @@ Item {
     id: root
     property url artworkSource: ""
     property real artworkAspect: 1.6
-    property real cameraYaw: -10
-    property real cameraPitch: -9
-    property real cameraDistance: 900
-    property real lampBrightness: 2.2
+    property real cameraYaw: -18
+    property real cameraPitch: -22
+    property real cameraDistance: 950
+    property real lampBrightness: 2.4
+    property real lampMotion: 0.65
     property string effectKind: "sand"
     property string rgbMode: "channels"
     property string effectDirection: "left"
@@ -16,11 +17,15 @@ Item {
     property real outputAspect: 16 / 9
     property bool showHud: true
 
-    readonly property real artworkWidth: artworkAspect >= 1.0 ? 280 : 280 * artworkAspect
-    readonly property real artworkHeight: artworkAspect >= 1.0 ? 280 / artworkAspect : 280
-    readonly property real tableTopY: -35
-    readonly property real artworkBottomY: tableTopY + 4
-    readonly property real artworkCenterY: artworkBottomY + artworkHeight / 2
+    readonly property real artworkWidth: artworkAspect >= 1.0
+        ? Math.min(360, 210 * artworkAspect) : 210 * artworkAspect
+    readonly property real artworkDepth: artworkAspect >= 1.0
+        ? artworkWidth / artworkAspect : 210
+    readonly property real furnitureTopY: -20
+    readonly property real artworkSurfaceY: -9
+    readonly property real artworkCenterZ: -8
+    readonly property real lampWave: Math.sin(effectProgress * Math.PI * 2)
+    readonly property real lampCrossWave: Math.sin(effectProgress * Math.PI * 2 - 1.15)
 
     function rgbWeight(channel) {
         if (rgbMode === "together")
@@ -31,7 +36,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#07090c"
+        color: "#090a0c"
     }
 
     View3D {
@@ -40,51 +45,78 @@ Item {
         camera: camera
         environment: SceneEnvironment {
             backgroundMode: SceneEnvironment.Color
-            clearColor: "#07090c"
+            clearColor: "#090a0c"
             antialiasingMode: SceneEnvironment.MSAA
             antialiasingQuality: SceneEnvironment.VeryHigh
             temporalAAEnabled: true
             aoEnabled: true
-            aoStrength: 68
-            aoDistance: 12
-            aoSoftness: 52
+            aoStrength: 76
+            aoDistance: 14
+            aoSoftness: 58
         }
 
         Node {
             id: scene
 
+            Texture {
+                id: walnutTexture
+                source: "../materials/dark-walnut-v2.png"
+                generateMipmaps: true
+            }
+
             Node {
                 id: cameraRig
-                y: 45
+                y: 48
                 eulerRotation.x: root.cameraPitch
                 eulerRotation.y: root.cameraYaw
                 PerspectiveCamera {
                     id: camera
-                    z: root.cameraDistance
+                    z: root.cameraDistance - Math.sin(root.effectProgress * Math.PI) * 12
                     clipNear: 20
                     clipFar: 2800
-                    fieldOfView: 40
+                    fieldOfView: 39
                 }
             }
 
-            // The room stays deliberately empty: architecture, table, artwork, light.
             DirectionalLight {
-                eulerRotation.x: -48
-                eulerRotation.y: -32
-                color: "#a7b6ca"
-                ambientColor: "#11151b"
+                eulerRotation.x: -52
+                eulerRotation.y: -34
+                color: "#a9b4c2"
+                ambientColor: "#1a2028"
+                brightness: 0.3
+            }
+            PointLight {
+                x: -330
+                y: 115
+                z: 390
+                color: "#9fb2c8"
+                ambientColor: "#11161c"
+                brightness: 0.42
+                constantFade: 1.0
+                linearFade: 0.003
+                quadraticFade: 0.000006
+            }
+            PointLight {
+                x: 360
+                y: 70
+                z: 280
+                color: "#c69b79"
                 brightness: 0.22
+                constantFade: 1.0
+                linearFade: 0.004
+                quadraticFade: 0.000008
             }
 
+            // Empty architectural shell; no decorative props compete with the artwork.
             Model {
                 id: floor
-                y: -170
+                y: -176
                 source: "#Cube"
                 scale: Qt.vector3d(13, 0.1, 10)
                 materials: PrincipledMaterial {
-                    baseColor: "#14161b"
-                    roughness: 0.9
-                    metalness: 0.04
+                    baseColor: "#15161a"
+                    roughness: 0.91
+                    metalness: 0.03
                 }
             }
             Model {
@@ -94,169 +126,209 @@ Item {
                 source: "#Cube"
                 scale: Qt.vector3d(13, 8.4, 0.1)
                 materials: PrincipledMaterial {
-                    baseColor: "#191a1e"
+                    baseColor: "#1a1a1c"
                     roughness: 0.98
                 }
             }
             Model {
-                id: leftWall
                 x: -650
                 y: 245
                 source: "#Cube"
                 scale: Qt.vector3d(0.1, 8.4, 10)
                 materials: PrincipledMaterial {
-                    baseColor: "#0e1013"
+                    baseColor: "#101114"
                     roughness: 0.98
                 }
             }
             Model {
-                id: rightWall
                 x: 650
                 y: 245
                 source: "#Cube"
                 scale: Qt.vector3d(0.1, 8.4, 10)
                 materials: PrincipledMaterial {
-                    baseColor: "#0e1013"
+                    baseColor: "#101114"
                     roughness: 0.98
                 }
             }
 
-            // A single oval poker table anchors the room.
-            Model {
-                id: pokerTablePedestal
-                y: -109
-                source: "#Cylinder"
-                scale: Qt.vector3d(0.72, 1.22, 0.72)
-                materials: PrincipledMaterial {
-                    baseColor: "#17120f"
-                    metalness: 0.22
-                    roughness: 0.5
-                }
-            }
-            Model {
-                y: -158
-                source: "#Cylinder"
-                scale: Qt.vector3d(1.9, 0.15, 1.32)
-                materials: PrincipledMaterial {
-                    baseColor: "#0d0c0c"
-                    metalness: 0.26
-                    roughness: 0.48
-                }
-            }
-            Model {
-                id: pokerTableBody
-                y: -58
-                source: "#Cylinder"
-                scale: Qt.vector3d(4.9, 0.28, 2.72)
-                materials: PrincipledMaterial {
-                    baseColor: "#17100d"
-                    roughness: 0.52
-                }
-            }
-            Model {
-                id: pokerTableRail
-                y: -43
-                source: "#Cylinder"
-                scale: Qt.vector3d(4.9, 0.14, 2.72)
-                materials: PrincipledMaterial {
-                    baseColor: "#362117"
-                    metalness: 0.08
-                    roughness: 0.46
-                }
-            }
-            Model {
-                id: pokerTableFelt
-                y: -34
-                source: "#Cylinder"
-                scale: Qt.vector3d(4.46, 0.045, 2.34)
-                materials: PrincipledMaterial {
-                    baseColor: "#164b3d"
-                    roughness: 0.96
-                    metalness: 0.0
-                }
-            }
-
-            // The framed artwork is placed directly on the felt.
-            Model {
-                y: root.artworkCenterY
-                z: -28
-                source: "#Cube"
-                scale: Qt.vector3d(
-                    (root.artworkWidth + 24) / 100,
-                    (root.artworkHeight + 24) / 100,
-                    0.10
-                )
-                materials: PrincipledMaterial {
-                    baseColor: "#090a0c"
-                    metalness: 0.38
-                    roughness: 0.26
-                }
-            }
-            Model {
-                y: root.artworkCenterY
-                z: -20
-                source: "#Rectangle"
-                scale: Qt.vector3d(
-                    root.artworkWidth / 100,
-                    root.artworkHeight / 100,
-                    1
-                )
-                materials: PrincipledMaterial {
-                    baseColor: "#ffffff"
-                    roughness: 0.5
-                    baseColorMap: Texture {
-                        sourceItem: Image {
-                            source: root.artworkSource
-                            cache: false
-                            asynchronous: false
-                        }
-                        generateMipmaps: true
-                    }
-                }
-            }
+            // Contemporary walnut sideboard with drawers, brass details and tapered legs.
             Repeater3D {
-                model: 2
+                model: 4
                 delegate: Model {
                     required property int index
-                    x: index === 0 ? -root.artworkWidth * 0.28 : root.artworkWidth * 0.28
-                    y: root.tableTopY + 6
-                    z: -8
+                    x: index % 2 === 0 ? -225 : 225
+                    y: -139
+                    z: index < 2 ? -84 : 84
+                    eulerRotation.z: index % 2 === 0 ? -2.2 : 2.2
+                    eulerRotation.x: index < 2 ? 1.6 : -1.6
                     source: "#Cube"
-                    scale: Qt.vector3d(0.18, 0.12, 0.34)
+                    scale: Qt.vector3d(0.17, 0.61, 0.17)
                     materials: PrincipledMaterial {
-                        baseColor: "#0b0b0d"
-                        metalness: 0.3
-                        roughness: 0.32
+                        baseColor: "#171719"
+                        metalness: 0.64
+                        roughness: 0.3
+                    }
+                }
+            }
+            Model {
+                id: sideboardBody
+                y: -70
+                source: "#Cube"
+                scale: Qt.vector3d(5.4, 0.78, 2.35)
+                materials: PrincipledMaterial {
+                    baseColor: "#ffffff"
+                    baseColorMap: walnutTexture
+                    roughness: 0.48
+                    metalness: 0.02
+                }
+            }
+            Model {
+                id: sideboardPlinth
+                y: -108
+                source: "#Cube"
+                scale: Qt.vector3d(5.48, 0.055, 2.39)
+                materials: PrincipledMaterial {
+                    baseColor: "#151416"
+                    metalness: 0.34
+                    roughness: 0.38
+                }
+            }
+            Model {
+                id: sideboardTop
+                y: -26
+                source: "#Cube"
+                scale: Qt.vector3d(5.65, 0.13, 2.52)
+                materials: PrincipledMaterial {
+                    baseColor: "#29282a"
+                    metalness: 0.12
+                    roughness: 0.39
+                }
+            }
+            Repeater3D {
+                model: 3
+                delegate: Model {
+                    required property int index
+                    x: (index - 1) * 174
+                    y: -66
+                    z: 120
+                    source: "#Cube"
+                    scale: Qt.vector3d(1.66, 0.28, 0.035)
+                    materials: PrincipledMaterial {
+                        baseColor: index === 1 ? "#e2d6cb" : "#ffffff"
+                        baseColorMap: walnutTexture
+                        roughness: 0.43
+                    }
+                }
+            }
+            Repeater3D {
+                model: 3
+                delegate: Model {
+                    required property int index
+                    x: (index - 1) * 174
+                    y: -63
+                    z: 126
+                    eulerRotation.z: 90
+                    source: "#Cylinder"
+                    scale: Qt.vector3d(0.045, 0.28, 0.045)
+                    materials: PrincipledMaterial {
+                        baseColor: "#b88a52"
+                        metalness: 0.8
+                        roughness: 0.22
                     }
                 }
             }
 
-            // Fine pigment streams converge on their actual positions in the artwork.
+            // The artwork lies flat like a precious object, with a restrained contact shadow.
+            Node {
+                id: artworkDeck
+                z: root.artworkCenterZ
+                eulerRotation.y: -3
+
+                Model {
+                    id: artworkContactShadow
+                    x: -root.lampWave * root.lampMotion * 7
+                    y: root.furnitureTopY + 0.9
+                    z: -root.lampCrossWave * root.lampMotion * 4
+                    eulerRotation.x: -90
+                    source: "#Rectangle"
+                    scale: Qt.vector3d(
+                        (root.artworkWidth + 28) / 100,
+                        (root.artworkDepth + 24) / 100,
+                        1
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: "#050506"
+                        opacity: 0.2
+                        roughness: 1.0
+                    }
+                }
+                Model {
+                    id: horizontalArtworkFrame
+                    y: -14
+                    source: "#Cube"
+                    scale: Qt.vector3d(
+                        (root.artworkWidth + 18) / 100,
+                        0.075,
+                        (root.artworkDepth + 18) / 100
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: "#111114"
+                        metalness: 0.38
+                        roughness: 0.25
+                    }
+                }
+                Model {
+                    id: horizontalArtwork
+                    y: root.artworkSurfaceY
+                    eulerRotation.x: -90
+                    source: "#Rectangle"
+                    scale: Qt.vector3d(
+                        root.artworkWidth / 100,
+                        root.artworkDepth / 100,
+                        1
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: "#ffffff"
+                        roughness: 0.47
+                        baseColorMap: Texture {
+                            sourceItem: Image {
+                                source: root.artworkSource
+                                cache: false
+                                asynchronous: false
+                            }
+                            generateMipmaps: true
+                        }
+                    }
+                }
+            }
+
+            // Pigment falls vertically and settles into coordinates on the horizontal canvas.
             Repeater3D {
-                model: 196
+                model: 240
                 delegate: Model {
                     required property int index
                     readonly property real targetX: -root.artworkWidth / 2
-                        + (((index * 73) % 197) / 196) * root.artworkWidth
-                    readonly property real targetY: root.artworkBottomY
-                        + (((index * 47) % 193) / 192) * root.artworkHeight
-                    readonly property real birth: (((index * 37) % 197) / 196) * 0.78
+                        + (((index * 73) % 241) / 240) * root.artworkWidth
+                    readonly property real targetZ: root.artworkCenterZ - root.artworkDepth / 2
+                        + (((index * 47) % 239) / 238) * root.artworkDepth
+                    readonly property real birth: (((index * 37) % 241) / 240) * 0.79
                     readonly property real travel: Math.max(0, Math.min(1,
-                        (root.effectProgress - birth) / 0.20))
+                        (root.effectProgress - birth) / 0.22))
                     readonly property real fall: travel * travel
                     visible: root.effectKind === "sand"
                         && travel > 0.0 && travel < 1.0
                     x: targetX
                         + Math.sin(index * 1.73 + travel * 6.28)
-                        * (1 - fall) * (5 + index % 5)
-                    y: root.artworkBottomY + root.artworkHeight + 62
-                        + (targetY - root.artworkBottomY - root.artworkHeight - 62) * fall
-                    z: -8 + (index % 9) * 1.35
+                        * (1 - fall) * (4 + index % 5)
+                    y: root.artworkSurfaceY + 245 * (1 - fall)
+                    z: targetZ
+                        + Math.cos(index * 1.27 + travel * 5.1)
+                        * (1 - fall) * (3 + index % 4)
                     source: "#Sphere"
                     scale: Qt.vector3d(
-                        0.006 + (index % 4) * 0.0017,
-                        0.018 + (index % 5) * 0.004,
-                        0.006 + (index % 4) * 0.0017
+                        0.0055 + (index % 4) * 0.0014,
+                        0.017 + (index % 5) * 0.0036,
+                        0.0055 + (index % 4) * 0.0014
                     )
                     materials: PrincipledMaterial {
                         baseColor: index % 6 === 0 ? "#d98a45"
@@ -264,12 +336,13 @@ Item {
                             : index % 6 === 2 ? "#a4523e"
                             : index % 6 === 3 ? "#557180"
                             : index % 6 === 4 ? "#6d5876" : "#292420"
-                        opacity: 0.82
-                        roughness: 0.84
+                        opacity: 0.78
+                        roughness: 0.86
                     }
                 }
             }
 
+            // Wave fronts skim a few millimetres above the horizontal artwork.
             Model {
                 readonly property bool horizontalFront: root.effectDirection === "left"
                     || root.effectDirection === "right"
@@ -278,30 +351,28 @@ Item {
                     && root.effectProgress < 0.99
                 x: horizontalFront
                     ? (root.effectDirection === "right" ? 1 : -1)
-                        * root.artworkWidth * (0.5 - root.effectProgress)
-                    : 0
-                y: horizontalFront
-                    ? root.artworkCenterY
-                    : root.artworkBottomY + root.artworkHeight
-                        * (root.effectDirection === "top"
+                        * root.artworkWidth * (0.5 - root.effectProgress) : 0
+                y: root.artworkSurfaceY + 4
+                z: horizontalFront
+                    ? root.artworkCenterZ
+                    : root.artworkCenterZ - root.artworkDepth / 2
+                        + root.artworkDepth * (root.effectDirection === "top"
                             ? 1 - root.effectProgress : root.effectProgress)
-                z: -5
-                eulerRotation.z: root.effectDirection === "diagonal" ? -24 : 0
+                eulerRotation.y: root.effectDirection === "diagonal" ? -24 : 0
                 source: root.effectDirection === "radial" ? "#Cylinder" : "#Cube"
-                eulerRotation.x: root.effectDirection === "radial" ? 90 : 0
                 scale: root.effectDirection === "radial"
                     ? Qt.vector3d(
-                        0.22 + root.effectProgress * 1.5,
-                        0.015,
-                        0.22 + root.effectProgress * 1.5
+                        0.18 + root.effectProgress * 1.35,
+                        0.012,
+                        0.18 + root.effectProgress * 1.35
                     )
                     : horizontalFront
-                        ? Qt.vector3d(0.026, root.artworkHeight / 100, 0.045)
-                        : Qt.vector3d(root.artworkWidth / 100, 0.026, 0.045)
+                        ? Qt.vector3d(0.024, 0.024, root.artworkDepth / 100)
+                        : Qt.vector3d(root.artworkWidth / 100, 0.024, 0.024)
                 materials: PrincipledMaterial {
-                    baseColor: "#68b9e8"
-                    emissiveFactor: Qt.vector3d(0.12, 0.34, 0.56)
-                    opacity: root.effectDirection === "radial" ? 0.22 : 0.68
+                    baseColor: "#79c4ec"
+                    emissiveFactor: Qt.vector3d(0.11, 0.31, 0.5)
+                    opacity: root.effectDirection === "radial" ? 0.2 : 0.58
                     roughness: 0.2
                 }
             }
@@ -314,127 +385,123 @@ Item {
                     && root.effectProgress < 0.99
                 x: horizontalFront
                     ? (root.effectDirection === "right" ? 1 : -1)
-                        * root.artworkWidth * (0.5 - root.effectProgress)
-                    : Math.sin(root.effectProgress * 18) * 7
-                y: horizontalFront
-                    ? root.artworkCenterY + Math.sin(root.effectProgress * 18) * 6
-                    : root.artworkBottomY + root.artworkHeight
-                        * (root.effectDirection === "top"
-                            ? 1 - root.effectProgress : root.effectProgress) - 7
-                z: -7
-                eulerRotation.z: root.effectDirection === "diagonal" ? -24 : 0
+                        * root.artworkWidth * (0.5 - root.effectProgress) : 0
+                y: root.artworkSurfaceY + 7
+                z: horizontalFront
+                    ? root.artworkCenterZ + Math.sin(root.effectProgress * 14) * 5
+                    : root.artworkCenterZ - root.artworkDepth / 2
+                        + root.artworkDepth * (root.effectDirection === "top"
+                            ? 1 - root.effectProgress : root.effectProgress)
+                eulerRotation.y: root.effectDirection === "diagonal" ? -24 : 0
                 source: "#Cube"
                 scale: horizontalFront
-                    ? Qt.vector3d(0.012, root.artworkHeight / 105, 0.065)
-                    : Qt.vector3d(root.artworkWidth / 105, 0.012, 0.065)
+                    ? Qt.vector3d(0.011, 0.018, root.artworkDepth / 105)
+                    : Qt.vector3d(root.artworkWidth / 105, 0.018, 0.011)
                 materials: PrincipledMaterial {
-                    baseColor: "#b5e1f6"
-                    emissiveFactor: Qt.vector3d(0.22, 0.42, 0.62)
-                    opacity: 0.42
+                    baseColor: "#c5e9f8"
+                    emissiveFactor: Qt.vector3d(0.18, 0.34, 0.5)
+                    opacity: 0.34
                     roughness: 0.18
                 }
             }
 
             PointLight {
                 visible: root.effectKind === "rgb_fade"
-                x: -190
-                y: root.artworkCenterY + 35
-                z: 110
+                x: -170
+                y: 75
+                z: root.artworkCenterZ
                 color: "#ff3348"
-                brightness: root.rgbWeight(0) * 1.15
-                quadraticFade: 0.000012
+                brightness: root.rgbWeight(0) * 0.9
+                quadraticFade: 0.000014
             }
             PointLight {
                 visible: root.effectKind === "rgb_fade"
                 x: 0
-                y: root.artworkCenterY + 80
-                z: 95
+                y: 100
+                z: root.artworkCenterZ - 45
                 color: "#36df77"
-                brightness: root.rgbWeight(1) * 1.05
-                quadraticFade: 0.000012
+                brightness: root.rgbWeight(1) * 0.82
+                quadraticFade: 0.000014
             }
             PointLight {
                 visible: root.effectKind === "rgb_fade"
-                x: 190
-                y: root.artworkCenterY + 25
-                z: 110
+                x: 170
+                y: 70
+                z: root.artworkCenterZ + 20
                 color: "#4385ff"
-                brightness: root.rgbWeight(2) * 1.2
-                quadraticFade: 0.000012
+                brightness: root.rgbWeight(2) * 0.92
+                quadraticFade: 0.000014
             }
 
-            // Floating poker suspension: cable, sculpted shade and warm pool of light.
-            Model {
-                id: overheadLampCable
-                x: 0
-                y: 410
-                z: 45
-                source: "#Cylinder"
-                scale: Qt.vector3d(0.025, 1.3, 0.025)
-                materials: PrincipledMaterial {
-                    baseColor: "#08090a"
-                    metalness: 0.62
-                    roughness: 0.24
+            // The pendant and its light share one slow, deterministic physical swing.
+            Node {
+                id: hangingLampRig
+                x: root.lampWave * root.lampMotion * 52
+                y: 445
+                z: -16 + root.lampCrossWave * root.lampMotion * 20
+                eulerRotation.z: root.lampWave * root.lampMotion * 5.0
+                eulerRotation.x: root.lampCrossWave * root.lampMotion * 2.4
+
+                Model {
+                    id: overheadLampCable
+                    y: -86
+                    source: "#Cylinder"
+                    scale: Qt.vector3d(0.024, 1.72, 0.024)
+                    materials: PrincipledMaterial {
+                        baseColor: "#08090a"
+                        metalness: 0.68
+                        roughness: 0.23
+                    }
                 }
-            }
-            Model {
-                id: overheadLamp
-                x: 0
-                y: 316
-                z: 45
-                source: "#Cone"
-                scale: Qt.vector3d(1.34, 0.66, 1.34)
-                materials: PrincipledMaterial {
-                    baseColor: "#18110d"
-                    metalness: 0.58
-                    roughness: 0.31
+                Model {
+                    id: overheadLamp
+                    y: -182
+                    source: "#Cone"
+                    scale: Qt.vector3d(1.46, 0.66, 1.46)
+                    materials: PrincipledMaterial {
+                        baseColor: "#17110d"
+                        metalness: 0.62
+                        roughness: 0.29
+                    }
                 }
-            }
-            Model {
-                x: 0
-                y: 284
-                z: 45
-                source: "#Cylinder"
-                scale: Qt.vector3d(1.34, 0.035, 1.34)
-                materials: PrincipledMaterial {
-                    baseColor: "#bf8251"
-                    emissiveFactor: Qt.vector3d(0.16, 0.09, 0.045)
-                    roughness: 0.5
+                Model {
+                    y: -214
+                    source: "#Cylinder"
+                    scale: Qt.vector3d(1.46, 0.035, 1.46)
+                    materials: PrincipledMaterial {
+                        baseColor: "#c38b56"
+                        emissiveFactor: Qt.vector3d(0.17, 0.1, 0.05)
+                        roughness: 0.46
+                    }
                 }
-            }
-            Model {
-                x: 0
-                y: 275
-                z: 45
-                source: "#Sphere"
-                scale: Qt.vector3d(0.16, 0.16, 0.16)
-                materials: PrincipledMaterial {
-                    baseColor: "#ffd6a1"
-                    emissiveFactor: Qt.vector3d(0.72, 0.48, 0.24)
-                    roughness: 0.25
+                Model {
+                    y: -223
+                    source: "#Sphere"
+                    scale: Qt.vector3d(0.16, 0.16, 0.16)
+                    materials: PrincipledMaterial {
+                        baseColor: "#ffd8a4"
+                        emissiveFactor: Qt.vector3d(0.75, 0.5, 0.25)
+                        roughness: 0.24
+                    }
                 }
-            }
-            SpotLight {
-                x: 0
-                y: 270
-                z: 45
-                eulerRotation.x: -90
-                color: "#ffd1a0"
-                brightness: root.lampBrightness * 3.2
-                coneAngle: 70
-                innerConeAngle: 44
-                castsShadow: true
-            }
-            PointLight {
-                x: 0
-                y: 262
-                z: 45
-                color: "#ffc58c"
-                ambientColor: "#20150d"
-                brightness: root.lampBrightness * 0.62
-                constantFade: 1.0
-                linearFade: 0.004
-                quadraticFade: 0.000013
+                SpotLight {
+                    y: -230
+                    eulerRotation.x: -90
+                    color: "#ffd1a0"
+                    brightness: root.lampBrightness * 3.45
+                    coneAngle: 64
+                    innerConeAngle: 38
+                    castsShadow: true
+                }
+                PointLight {
+                    y: -225
+                    color: "#ffc58c"
+                    ambientColor: "#20150d"
+                    brightness: root.lampBrightness * 0.52
+                    constantFade: 1.0
+                    linearFade: 0.004
+                    quadraticFade: 0.000014
+                }
             }
         }
     }
@@ -455,13 +522,13 @@ Item {
                 return
             root.cameraYaw = Math.max(-75, Math.min(75,
                 root.cameraYaw + (mouse.x - lastX) * 0.28))
-            root.cameraPitch = Math.max(-30, Math.min(2,
+            root.cameraPitch = Math.max(-38, Math.min(2,
                 root.cameraPitch + (mouse.y - lastY) * 0.2))
             lastX = mouse.x
             lastY = mouse.y
         }
         onWheel: function(wheel) {
-            root.cameraDistance = Math.max(560, Math.min(1150,
+            root.cameraDistance = Math.max(560, Math.min(1180,
                 root.cameraDistance - wheel.angleDelta.y * 0.45))
             wheel.accepted = true
         }

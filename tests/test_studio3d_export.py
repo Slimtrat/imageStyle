@@ -49,6 +49,7 @@ def test_qimage_conversion_removes_scanline_padding() -> None:
     assert frame.shape == (5, 7, 3)
     assert frame.dtype == np.uint8
     assert frame.flags.c_contiguous
+    assert frame.flags.owndata
     assert tuple(frame[0, 0]) == (120, 70, 220)
 
 def test_export_dimensions_keep_the_selected_long_edge() -> None:

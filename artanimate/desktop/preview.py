@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 PREVIEW_WIDTH = 384
 PREVIEW_COLORS = 12
-PREVIEW_DURATION = 4.0
-PREVIEW_FRAME_COUNT = 20
-PREVIEW_INTERVAL_MS = 110
+PREVIEW_DURATION = 6.0
+PREVIEW_FRAME_COUNT = 24
+PREVIEW_INTERVAL_MS = 180
 
 
 def build_preview_config(config: RenderConfig) -> RenderConfig:
