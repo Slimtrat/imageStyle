@@ -5,8 +5,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .effects import EffectCapability, create_effect, effect_keys
 
-EFFECTS = ("sand", "wave")
+
+EFFECTS = effect_keys()
 ORDERS = ("chromatic", "reverse", "area", "luminance")
 NEUTRAL_POSITIONS = ("first", "last")
 OUTLINE_MODES = ("first", "last", "together")
@@ -46,6 +48,11 @@ class RenderConfig:
             raise ValueError(f"effect doit être l'un de : {', '.join(EFFECTS)}")
         if self.order not in ORDERS:
             raise ValueError(f"order doit être l'un de : {', '.join(ORDERS)}")
+        effect = create_effect(self.effect)
+        if self.order in {"chromatic", "reverse"} and not effect.supports(
+            EffectCapability.CHROMATIC_SEQUENCE
+        ):
+            raise ValueError(f"L’effet {self.effect!r} ne prend pas en charge la roue chromatique")
         if self.neutral_position not in NEUTRAL_POSITIONS:
             raise ValueError(
                 f"neutral_position doit être l’une de : {', '.join(NEUTRAL_POSITIONS)}"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "artanimate"
-version = "1.1.0"
+version = "1.1.1"
 description = "Animate artworks by revealing chromatic color families as sand or waves."
 readme = "README_ARTANIMATE.md"
 requires-python = ">=3.11"
@@ -29,7 +29,7 @@ artanimate-ui = "artanimate.desktop:main"
 include = ["artanimate*"]
 
 [tool.setuptools.package-data]
-artanimate = ["assets/branding/*.png"]
+artanimate = ["assets/branding/*.png", "assets/docs/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

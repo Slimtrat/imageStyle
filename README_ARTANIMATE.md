@@ -9,6 +9,8 @@ Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette
 - regroupement automatique des couleurs en espace CIELAB ;
 - complétion morphologique réglable des aplats pour supprimer les micro-trous ;
 - roue chromatique rotative avec séquence numérotée et neutres séparés ;
+- effets extensibles par contrat/factory, un module par effet ;
+- documentation JSON des effets et paramètres affichée en infobulle ;
 - familles chromatiques ordonnées (rouge → orange → jaune → vert → bleu → violet → rose) ;
 - détection séparée du fond et des contours sombres ;
 - effet `sand` avec accumulation irrégulière et grains en chute ;
@@ -148,3 +150,7 @@ image source
 ```
 
 ArtAnimate traite les images localement. Aucun fichier n’est envoyé vers un service externe.
+
+## Architecture extensible
+
+La séparation entre séquence, effet de matière et présentation 2D/3D est détaillée dans [docs/architecture.md](docs/architecture.md).

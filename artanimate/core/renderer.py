@@ -9,7 +9,7 @@ import numpy as np
 
 from .analysis import ArtworkAnalysis, ColorLayer, analyze_artwork
 from .config import RenderConfig
-from .effects import reveal_opacity, sand_field, wave_field
+from .effects import EffectCapability, EffectContext, create_effect, reveal_opacity
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ class ArtworkRenderer:
     def __init__(self, analysis: ArtworkAnalysis, config: RenderConfig):
         self.analysis = analysis
         self.config = config.validate()
+        self.effect = create_effect(config.effect)
         self.width, self.height = analysis.size
         self.color_layers = analysis.ordered_layers(
             config.order,
@@ -46,25 +47,18 @@ class ArtworkRenderer:
         self.particles: dict[str, FallingParticles] = {}
         for index, layer in enumerate(all_layers):
             layer_seed = config.seed + (index + 1) * 7919
-            if config.effect == "sand":
-                field = sand_field(
-                    self.width,
-                    self.height,
-                    config.turbulence,
-                    layer_seed,
-                )
-            else:
-                field = wave_field(
-                    self.width,
-                    self.height,
-                    config.direction,
-                    config.wave_amplitude,
-                    config.wave_frequency,
-                    config.turbulence,
-                    layer_seed,
-                )
+            context = EffectContext(
+                width=self.width,
+                height=self.height,
+                seed=layer_seed,
+                config=config,
+            )
+            field = self.effect.create_field(context)
             self.fields[layer.key] = field
-            if config.effect == "sand" and config.grain_density > 0:
+            if (
+                self.effect.supports(EffectCapability.FALLING_PARTICLES)
+                and config.grain_density > 0
+            ):
                 particles = self._prepare_particles(layer, field, layer_seed)
                 if particles is not None:
                     self.particles[layer.key] = particles

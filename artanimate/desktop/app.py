@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from ..branding import LOGO_PATH
 from ..core.config import RenderConfig
+from ..core.effects import EffectCapability, EffectDescriptor, effect_descriptors
 from ..observability import attach_handler, configure_file_logging, detach_handler
 from .controls import ChromaticSequenceWheel, ParameterSlider
 from .log_window import LogWindow, QtLogHandler
@@ -214,9 +215,17 @@ class MainWindow(QMainWindow):
         form.setVerticalSpacing(9)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
+        descriptors = effect_descriptors()
+        self._effect_descriptors = {descriptor.key: descriptor for descriptor in descriptors}
         self.effect_combo = self._combo(
-            (("Sable — grains en chute", "sand"), ("Vague — front fluide", "wave"))
+            tuple((descriptor.selector_label, descriptor.key) for descriptor in descriptors)
         )
+        for index, descriptor in enumerate(descriptors):
+            self.effect_combo.setItemData(
+                index,
+                descriptor.description,
+                Qt.ItemDataRole.ToolTipRole,
+            )
         self.order_combo = self._combo(
             (
                 ("Roue chromatique — sens horaire", "chromatic"),
@@ -335,8 +344,12 @@ class MainWindow(QMainWindow):
         mode_title.setObjectName("sectionTitle")
         content.addWidget(mode_title)
         self.mode_stack = QStackedWidget()
-        self.mode_stack.addWidget(self._build_sand_page())
-        self.mode_stack.addWidget(self._build_wave_page())
+        self._effect_controls: dict[str, dict[str, QWidget]] = {}
+        self._effect_page_indexes: dict[str, int] = {}
+        for descriptor in descriptors:
+            page, controls = self._build_effect_page(descriptor)
+            self._effect_controls[descriptor.key] = controls
+            self._effect_page_indexes[descriptor.key] = self.mode_stack.addWidget(page)
         content.addWidget(self.mode_stack)
 
         output_title = QLabel("Nom du fichier")
@@ -355,44 +368,45 @@ class MainWindow(QMainWindow):
         scroll.setMaximumWidth(470)
         return scroll
 
-    def _build_sand_page(self) -> QWidget:
+    def _build_effect_page(
+        self,
+        descriptor: EffectDescriptor,
+    ) -> tuple[QWidget, dict[str, QWidget]]:
+        """Build one effect page entirely from its validated JSON documentation."""
         page = QWidget()
         form = QFormLayout(page)
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(9)
-        self.grain_density = self._slider(0.0, 0.02, 0.0025, 0.0005, 4)
-        self.grain_size = self._slider(0.5, 4.0, 1.35, 0.05, 2, " px")
-        self.sand_turbulence = self._slider(0.0, 0.35, 0.10, 0.01, 2)
-        form.addRow("Densité des grains", self.grain_density)
-        form.addRow("Taille des grains", self.grain_size)
-        form.addRow("Irrégularité", self.sand_turbulence)
-        return page
-
-    def _build_wave_page(self) -> QWidget:
-        page = QWidget()
-        form = QFormLayout(page)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setVerticalSpacing(9)
-        self.direction_combo = self._combo(
-            (
-                ("Gauche → droite", "left"),
-                ("Droite → gauche", "right"),
-                ("Haut → bas", "top"),
-                ("Bas → haut", "bottom"),
-                ("Diagonale", "diagonal"),
-                ("Depuis le centre", "radial"),
-            )
-        )
-        self.wave_amplitude = self._slider(0.0, 0.20, 0.055, 0.005, 3)
-        self.wave_frequency = self._slider(0.5, 10.0, 2.7, 0.1, 2)
-        self.wave_turbulence = self._slider(0.0, 0.35, 0.10, 0.01, 2)
-        self.soft_edge = self._slider(0.001, 0.10, 0.012, 0.002, 3)
-        form.addRow("Direction", self.direction_combo)
-        form.addRow("Amplitude", self.wave_amplitude)
-        form.addRow("Fréquence", self.wave_frequency)
-        form.addRow("Turbulence", self.wave_turbulence)
-        form.addRow("Bord progressif", self.soft_edge)
-        return page
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        controls: dict[str, QWidget] = {}
+        for parameter in descriptor.parameters:
+            if parameter.control == "choice":
+                control: QWidget = self._combo(
+                    tuple((choice.label, choice.value) for choice in parameter.choices)
+                )
+            else:
+                if None in {
+                    parameter.minimum,
+                    parameter.maximum,
+                    parameter.default,
+                    parameter.step,
+                }:
+                    raise ValueError(f"Slider incomplet : {descriptor.key}/{parameter.key}")
+                control = self._slider(
+                    parameter.minimum,
+                    parameter.maximum,
+                    parameter.default,
+                    parameter.step,
+                    parameter.decimals,
+                    parameter.suffix,
+                    parameter.description,
+                )
+            control.setToolTip(parameter.description)
+            label = QLabel(parameter.label)
+            label.setToolTip(parameter.description)
+            form.addRow(label, control)
+            controls[parameter.key] = control
+        return page, controls
 
     def _build_progress(self) -> QFrame:
         card = QFrame()
@@ -507,25 +521,23 @@ class MainWindow(QMainWindow):
 
     def _effect_changed(self) -> None:
         effect = str(self.effect_combo.currentData())
-        self.mode_stack.setCurrentIndex(self.effect_combo.currentIndex())
-        descriptions = {
-            "sand": (
-                "Sable : les pigments tombent verticalement, se déposent puis complètent "
-                "progressivement chaque forme."
-            ),
-            "wave": (
-                "Vague : un front directionnel traverse l’œuvre et révèle les aplats "
-                "comme une matière fluide."
-            ),
-        }
-        self.mode_description.setText(descriptions[effect])
+        descriptor = self._effect_descriptors[effect]
+        self.mode_stack.setCurrentIndex(self._effect_page_indexes[effect])
+        self.mode_description.setText(descriptor.description)
+        self.effect_combo.setToolTip(descriptor.description)
         logger.info("Mode sélectionné : %s", effect)
+        if hasattr(self, "sequence_panel"):
+            self._order_changed()
         if self._auto_filename:
             self._suggest_filename()
 
     def _order_changed(self) -> None:
         order = str(self.order_combo.currentData())
-        uses_wheel = order in {"chromatic", "reverse"}
+        effect = str(self.effect_combo.currentData())
+        descriptor = self._effect_descriptors[effect]
+        uses_wheel = order in {"chromatic", "reverse"} and descriptor.supports(
+            EffectCapability.CHROMATIC_SEQUENCE
+        )
         self.sequence_panel.setVisible(uses_wheel)
         self.neutral_combo.setEnabled(uses_wheel)
         self.chromatic_wheel.setReverse(order == "reverse")
@@ -581,20 +593,13 @@ class MainWindow(QMainWindow):
             "overlap": self.overlap_slider.value(),
             "seed": self.seed_spin.value(),
         }
-        if effect == "sand":
-            values.update(
-                grain_density=self.grain_density.value(),
-                grain_size=self.grain_size.value(),
-                turbulence=self.sand_turbulence.value(),
-            )
-        else:
-            values.update(
-                direction=str(self.direction_combo.currentData()),
-                wave_amplitude=self.wave_amplitude.value(),
-                wave_frequency=self.wave_frequency.value(),
-                turbulence=self.wave_turbulence.value(),
-                soft_edge=self.soft_edge.value(),
-            )
+        for field_name, control in self._effect_controls[effect].items():
+            if isinstance(control, QComboBox):
+                values[field_name] = str(control.currentData())
+            elif isinstance(control, ParameterSlider):
+                values[field_name] = control.value()
+            else:
+                raise TypeError(f"Contrôle de paramètre non pris en charge : {field_name}")
         return RenderConfig.from_dict({**RenderConfig().to_dict(), **values})
 
     def _start_render(self) -> None:

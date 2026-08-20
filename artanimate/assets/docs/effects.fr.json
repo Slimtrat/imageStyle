@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "effects": {
+    "sand": {
+      "selector_label": "Sable — grains en chute",
+      "description": "Les pigments tombent verticalement, se déposent puis complètent progressivement chaque forme.",
+      "parameters": [
+        {
+          "key": "grain_density",
+          "label": "Densité des grains",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 0.02,
+          "default": 0.0025,
+          "step": 0.0005,
+          "decimals": 4,
+          "suffix": "",
+          "description": "Quantité de particules visibles pendant la chute. Une valeur élevée densifie le mouvement sans modifier l’image finale."
+        },
+        {
+          "key": "grain_size",
+          "label": "Taille des grains",
+          "control": "slider",
+          "minimum": 0.5,
+          "maximum": 4.0,
+          "default": 1.35,
+          "step": 0.05,
+          "decimals": 2,
+          "suffix": " px",
+          "description": "Diamètre visuel des particules en déplacement. Les grandes valeurs donnent un sable plus graphique."
+        },
+        {
+          "key": "turbulence",
+          "label": "Irrégularité",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 0.35,
+          "default": 0.10,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Déforme la ligne de dépôt. À zéro la progression est régulière ; plus haut elle devient organique."
+        }
+      ]
+    },
+    "wave": {
+      "selector_label": "Vague — front fluide",
+      "description": "Un front directionnel traverse l’œuvre et révèle les aplats comme une matière fluide.",
+      "parameters": [
+        {
+          "key": "direction",
+          "label": "Direction",
+          "control": "choice",
+          "description": "Origine et trajectoire générale du front de révélation.",
+          "choices": [
+            {"value": "left", "label": "Gauche → droite"},
+            {"value": "right", "label": "Droite → gauche"},
+            {"value": "top", "label": "Haut → bas"},
+            {"value": "bottom", "label": "Bas → haut"},
+            {"value": "diagonal", "label": "Diagonale"},
+            {"value": "radial", "label": "Depuis le centre"}
+          ]
+        },
+        {
+          "key": "wave_amplitude",
+          "label": "Amplitude",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 0.20,
+          "default": 0.055,
+          "step": 0.005,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Écart latéral du front. Une grande amplitude produit une vague plus marquée."
+        },
+        {
+          "key": "wave_frequency",
+          "label": "Fréquence",
+          "control": "slider",
+          "minimum": 0.5,
+          "maximum": 10.0,
+          "default": 2.7,
+          "step": 0.1,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Nombre d’ondulations le long du front de révélation."
+        },
+        {
+          "key": "turbulence",
+          "label": "Turbulence",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 0.35,
+          "default": 0.10,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Ajoute une variation organique au front pour éviter un mouvement trop géométrique."
+        },
+        {
+          "key": "soft_edge",
+          "label": "Bord progressif",
+          "control": "slider",
+          "minimum": 0.001,
+          "maximum": 0.10,
+          "default": 0.012,
+          "step": 0.001,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Largeur de la transition entre zone masquée et zone révélée."
+        }
+      ]
+    }
+  }
+}

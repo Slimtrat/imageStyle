@@ -19,12 +19,18 @@ branding_datas = [
         "artanimate/assets/branding",
     )
 ]
+documentation_datas = [
+    (
+        str(PROJECT_ROOT / "artanimate" / "assets" / "docs" / "effects.fr.json"),
+        "artanimate/assets/docs",
+    )
+]
 
 analysis = Analysis(
     [str(WINDOWS_DIR / "launcher.py")],
     pathex=[str(PROJECT_ROOT)],
     binaries=imageio_binaries,
-    datas=branding_datas + imageio_datas,
+    datas=branding_datas + documentation_datas + imageio_datas,
     hiddenimports=imageio_hiddenimports,
     hookspath=[],
     hooksconfig={},

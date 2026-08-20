@@ -7,7 +7,7 @@ from typing import Callable
 import imageio_ffmpeg
 import numpy as np
 
-from .renderer import ArtworkRenderer
+from .frame_source import FrameSource
 
 
 SUPPORTED_OUTPUTS = {".mp4", ".mov", ".webm"}
@@ -21,7 +21,7 @@ class RenderCancelled(RuntimeError):
 
 
 def encode_video(
-    renderer: ArtworkRenderer,
+    renderer: FrameSource,
     output_path: str | Path,
     progress: Callable[[int, int], None] | None = None,
     frame_callback: Callable[[np.ndarray, int, int], None] | None = None,
