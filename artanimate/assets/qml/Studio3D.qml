@@ -37,10 +37,17 @@ Item {
         : effectProgress
     readonly property int effectToolStage: strictToolEffect
         ? Math.floor(toolTimeline) : 0
-    readonly property real effectToolProgress: strictToolEffect
+    readonly property real effectToolLinearProgress: strictToolEffect
         ? toolTimeline - effectToolStage : effectProgress
+    readonly property real effectToolProgress: strictToolEffect
+        ? smootherstep(effectToolLinearProgress) : effectToolLinearProgress
     readonly property bool effectToolIsOutline: effectToolStage === effectOutlineStage
     readonly property bool satelliteView: cameraPitch < -48
+
+    function smootherstep(value) {
+        const t = Math.max(0, Math.min(1, value))
+        return t * t * t * (t * (t * 6 - 15) + 10)
+    }
 
     function wrapAngle(value) {
         return ((value + 180) % 360 + 360) % 360 - 180
@@ -361,8 +368,9 @@ Item {
                 }
             }
 
-            // Physical light tools mirror the analyzed 2D halo/laser passes.
-            Model {
+            // The tool shares the exact transform and quintic timing of the artwork deck.
+            Node {
+                id: effectToolDeck
                 readonly property bool isHalo: root.effectKind === "vertical_halo"
                 readonly property bool isScreen: root.effectKind === "screenprint"
                     || (root.effectKind === "screenprint_laser"
@@ -370,27 +378,100 @@ Item {
                 readonly property bool isLaser: root.effectKind === "contour_laser"
                     || (root.effectKind === "screenprint_laser"
                         && root.effectToolIsOutline)
+                readonly property real halfWidth: isLaser ? 1.4 : (isScreen ? 8 : 5)
                 visible: (isHalo || isScreen || isLaser)
-                    && root.effectToolProgress > 0.01
-                    && root.effectToolProgress < 0.99
-                x: -root.artworkWidth / 2
-                    + root.artworkWidth * root.effectToolProgress
-                y: root.artworkSurfaceY + (isLaser ? 5.2 : 3.0)
+                    && root.effectToolProgress > 0.005
+                    && root.effectToolProgress < 0.995
                 z: root.artworkCenterZ
-                source: "#Cube"
-                scale: Qt.vector3d(
-                    isLaser ? 0.018 : (isScreen ? 0.16 : 0.09),
-                    isLaser ? 0.022 : 0.012,
-                    root.artworkDepth / 100
+                eulerRotation.y: -3
+                x: Math.max(
+                    -root.artworkWidth / 2 + halfWidth,
+                    Math.min(
+                        root.artworkWidth / 2 - halfWidth,
+                        -root.artworkWidth / 2
+                            + root.artworkWidth * root.effectToolProgress
+                    )
                 )
-                materials: PrincipledMaterial {
-                    baseColor: isLaser ? "#81eeff"
-                        : (isScreen ? "#ffd49a" : "#fff0cf")
-                    emissiveFactor: isLaser
-                        ? Qt.vector3d(0.55, 1.0, 1.0)
-                        : Qt.vector3d(0.45, 0.34, 0.20)
-                    opacity: isLaser ? 0.92 : 0.48
-                    roughness: 0.14
+
+                Model {
+                    id: effectToolCore
+                    y: root.artworkSurfaceY + (effectToolDeck.isLaser ? 5.2 : 7.0)
+                    source: "#Cube"
+                    scale: Qt.vector3d(
+                        effectToolDeck.isLaser ? 0.028
+                            : (effectToolDeck.isScreen ? 0.14 : 0.10),
+                        effectToolDeck.isLaser ? 0.024 : 0.028,
+                        root.artworkDepth / 100
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: effectToolDeck.isLaser ? "#d6fbff"
+                            : (effectToolDeck.isScreen ? "#fff0d7" : "#fff7e9")
+                        emissiveFactor: effectToolDeck.isLaser
+                            ? Qt.vector3d(0.85, 1.0, 1.0)
+                            : Qt.vector3d(0.82, 0.58, 0.30)
+                        opacity: effectToolDeck.isLaser ? 0.96 : 0.88
+                        roughness: 0.10
+                    }
+                }
+                Model {
+                    id: effectToolAura
+                    y: root.artworkSurfaceY + 1.4
+                    source: "#Cube"
+                    scale: Qt.vector3d(
+                        effectToolDeck.isLaser ? 0.11
+                            : (effectToolDeck.isScreen ? 0.34 : 0.24),
+                        0.006,
+                        (root.artworkDepth + 12) / 100
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: effectToolDeck.isLaser ? "#66eaff" : "#ffd9a8"
+                        emissiveFactor: effectToolDeck.isLaser
+                            ? Qt.vector3d(0.34, 0.82, 1.0)
+                            : Qt.vector3d(0.34, 0.22, 0.11)
+                        opacity: effectToolDeck.isLaser ? 0.24 : 0.16
+                        roughness: 0.22
+                    }
+                }
+                Repeater3D {
+                    model: 2
+                    delegate: Model {
+                        required property int index
+                        visible: effectToolDeck.isScreen
+                        y: root.artworkSurfaceY + 14
+                        z: (index === 0 ? -1 : 1) * (root.artworkDepth / 2 + 7)
+                        source: "#Cube"
+                        scale: Qt.vector3d(0.22, 0.09, 0.15)
+                        materials: PrincipledMaterial {
+                            baseColor: "#f2b66f"
+                            metalness: 0.58
+                            roughness: 0.20
+                            emissiveFactor: Qt.vector3d(0.48, 0.26, 0.08)
+                        }
+                    }
+                }
+                Model {
+                    id: effectLaserEmitter
+                    visible: effectToolDeck.isLaser
+                    y: root.artworkSurfaceY + 11
+                    z: root.artworkDepth / 2 + 5
+                    source: "#Sphere"
+                    scale: Qt.vector3d(0.075, 0.075, 0.075)
+                    materials: PrincipledMaterial {
+                        baseColor: "#d9fcff"
+                        emissiveFactor: Qt.vector3d(0.75, 1.0, 1.0)
+                        metalness: 0.18
+                        roughness: 0.12
+                    }
+                }
+                SpotLight {
+                    y: root.artworkSurfaceY + 54
+                    eulerRotation.x: -90
+                    color: effectToolDeck.isLaser ? "#78ecff" : "#ffd0a0"
+                    brightness: effectToolDeck.isLaser ? 1.5 : 0.82
+                    coneAngle: effectToolDeck.isLaser ? 30 : 42
+                    innerConeAngle: effectToolDeck.isLaser ? 14 : 25
+                    castsShadow: false
+                    quadraticFade: 0.00009
                 }
             }
 
@@ -559,6 +640,46 @@ Item {
                     quadraticFade: 0.000014
                 }
             }
+        }
+    }
+
+    Rectangle {
+        id: effectActBadge
+        visible: root.showHud
+            && (root.effectKind === "vertical_halo"
+                || root.effectKind === "screenprint"
+                || root.effectKind === "contour_laser"
+                || root.effectKind === "screenprint_laser")
+            && root.effectProgress > 0.005
+            && root.effectProgress < 0.995
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 18
+        radius: 8
+        color: "#d0161b25"
+        border.color: root.effectToolIsOutline ? "#5adff4" : "#c99a67"
+        border.width: 1
+        width: effectActText.implicitWidth + 26
+        height: 34
+
+        Text {
+            id: effectActText
+            anchors.centerIn: parent
+            color: root.effectToolIsOutline ? "#9af2ff" : "#ffe0b9"
+            text: root.effectKind === "screenprint_laser"
+                ? (root.effectToolIsOutline
+                    ? "ACTE 2 · LASER DES CONTOURS NOIRS"
+                    : "ACTE 1 · SÉRIGRAPHIE COULEUR "
+                        + (root.effectToolStage + 1) + "/"
+                        + Math.max(1, root.effectStageCount - 1))
+                : root.effectKind === "screenprint"
+                    ? "SÉRIGRAPHIE · COUCHE " + (root.effectToolStage + 1)
+                    : root.effectKind === "contour_laser"
+                        ? "LASER · TRACÉ DES CONTOURS"
+                        : "HALO VERTICAL · ACTIVATION DES COULEURS"
+            font.pixelSize: 11
+            font.bold: true
+            font.letterSpacing: 0.55
         }
     }
 

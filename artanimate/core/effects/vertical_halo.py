@@ -28,6 +28,6 @@ class VerticalHaloEffect(AnimationEffect):
             if state.progress <= 0.0 or state.progress >= 1.0:
                 continue
             band = gaussian_band(state.field, state.progress, context.config.halo_width)
-            strength = band * state.mask * context.config.halo_intensity
-            result = blend_glow(result, context.source, strength, state.color)
+            strength = band * 0.62 * context.config.halo_intensity
+            result = blend_glow(result, strength, state.color)
         return result

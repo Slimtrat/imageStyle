@@ -4,7 +4,12 @@ import numpy as np
 
 from .base import AnimationEffect, EffectCapability, EffectContext, FrameDecorationContext
 from .factory import register_effect
-from .light_tools import blend_glow, gaussian_band, horizontal_field
+from .light_tools import (
+    blend_glow,
+    blend_ink_edges,
+    gaussian_band,
+    horizontal_field,
+)
 
 
 @register_effect
@@ -28,12 +33,28 @@ class ScreenPrintEffect(AnimationEffect):
         self, frame: np.ndarray, context: FrameDecorationContext
     ) -> np.ndarray:
         result = frame
+        radius = max(4, min(10, round(context.source.shape[1] / 80)))
+        outline = next((state for state in context.layers if state.is_outline), None)
         for state in context.layers:
-            if state.is_outline or state.progress <= 0.0 or state.progress >= 1.0:
+            if state.is_outline or state.progress <= 0.0:
+                continue
+            result = blend_ink_edges(
+                result,
+                state.mask,
+                state.field,
+                state.progress,
+                context.config.soft_edge,
+                state.color,
+                radius,
+                outline.mask if outline is not None else None,
+                outline.field if outline is not None else None,
+                outline.progress if outline is not None else 0.0,
+            )
+            if state.progress >= 1.0:
                 continue
             band = gaussian_band(
                 state.field, state.progress, context.config.screenprint_width
             )
-            strength = band * state.mask * context.config.halo_intensity * 0.72
-            result = blend_glow(result, context.source, strength, state.color)
+            strength = band * 0.42 * context.config.halo_intensity
+            result = blend_glow(result, strength, state.color)
         return result

@@ -79,6 +79,9 @@ def test_screenprint_laser_keeps_black_outline_for_the_final_act(tmp_path: Path)
     assert renderer.stages[-1].is_outline
     assert renderer.stage_stride() == 1.0
     assert not np.array_equal(renderer.frame_at(2.0), analysis.source)
+    laser_frame = renderer.frame_at(2.5)
+    assert laser_frame.dtype == np.uint8
+    assert not np.array_equal(laser_frame, analysis.source)
     assert np.array_equal(renderer.frame_at(4.0), analysis.source)
 
 

@@ -62,7 +62,14 @@ prérendu et l’export final reçoivent ces mêmes données via leurs workers r
 
 Les effets de lumière restent synchronisés avec la chronologie des passes. Pour un effet
 strict, la scène reçoit le nombre de stages et l’index du contour final afin que l’outil
-3D distingue la sérigraphie de la passe laser.
+3D distingue la sérigraphie de la passe laser. L’outil physique hérite de la même
+transformation que le plateau de l’œuvre et applique la même courbe quintique que le
+renderer : sa position projetée reste donc alignée du premier au dernier pixel.
+
+En 2D, le faisceau est un champ spatial indépendant des masques de segmentation. Les
+couleurs déposées créent une sous-encre douce jusque sous le futur contour noir, puis la
+passe laser la remplace progressivement. Ce raccord transitoire masque les coutures de
+segmentation sans modifier la frame finale, qui reste toujours la source exacte.
 
 ## 4. Atelier desktop et coût du prérendu
 

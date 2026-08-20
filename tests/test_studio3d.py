@@ -37,6 +37,12 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "model: sandParticleModel" in scene
     assert "cameraOrbitTurns" in scene
     assert "effectToolIsOutline" in scene
+    assert "id: effectToolDeck" in scene
+    assert "eulerRotation.y: -3" in scene
+    assert "smootherstep(effectToolLinearProgress)" in scene
+    assert "LASER DES CONTOURS NOIRS" in scene
+    assert "root.artworkDepth / 2 + 7" in scene
+    assert "id: effectLaserEmitter" in scene
     assert "artworkSource" in scene
     assert "MouseArea" in scene
     assert "effectKind" in scene
