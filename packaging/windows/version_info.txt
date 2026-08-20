@@ -16,12 +16,12 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', 'ArtAnimate'),
           StringStruct('FileDescription', "ArtAnimate — Atelier d'animation"),
-          StringStruct('FileVersion', '2.0.0'),
+          StringStruct('FileVersion', '2.1.0'),
           StringStruct('InternalName', 'ArtAnimate'),
           StringStruct('LegalCopyright', 'Copyright © 2026 ArtAnimate'),
           StringStruct('OriginalFilename', 'ArtAnimate.exe'),
           StringStruct('ProductName', 'ArtAnimate'),
-          StringStruct('ProductVersion', '2.0.0'),
+          StringStruct('ProductVersion', '2.1.0'),
         ],
       )
     ]),

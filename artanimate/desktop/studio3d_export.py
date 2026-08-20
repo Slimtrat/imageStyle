@@ -33,6 +33,21 @@ def effect_progress(config: RenderConfig, frame_index: int, frame_count: int) ->
     return (seconds - config.hold_start) / (active_end - config.hold_start)
 
 
+def capture_requires_retry(frame: np.ndarray) -> bool:
+    """Detect transient blank GPU captures before they reach the encoder.
+
+    QQuickWidget may exceptionally expose its white or black backing buffer while
+    a new texture is being uploaded. The real studio always contains lit geometry,
+    so an almost uniform extreme frame is invalid and safe to capture again.
+    """
+    if frame.ndim != 3 or frame.shape[2] != 3 or frame.size == 0:
+        return True
+    luminance = frame.astype(np.float32).mean(axis=2)
+    almost_white = float(np.percentile(luminance, 5)) >= 248.0
+    almost_black = float(np.percentile(luminance, 95)) <= 2.0
+    return almost_white or almost_black
+
+
 def qimage_to_rgb(image: QImage) -> np.ndarray:
     """Copy a QImage into a tightly packed uint8 RGB NumPy frame."""
     converted = image.convertToFormat(QImage.Format.Format_RGB888)

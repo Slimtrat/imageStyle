@@ -40,7 +40,7 @@ from .log_window import LogWindow, QtLogHandler
 from .preview import PREVIEW_INTERVAL_MS, PreviewWorker
 from .settings_windows import SettingsCard, SettingsDialog
 from .studio3d import Studio3DPanel
-from .studio3d_export import Studio3DFrameWorker, qimage_to_rgb
+from .studio3d_export import Studio3DFrameWorker, capture_requires_retry, qimage_to_rgb
 from .problems import (
     UserInputError,
     UserProblem,
@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         self._studio_worker: Studio3DFrameWorker | None = None
         self._studio_encoder: VideoFrameEncoder | None = None
         self._studio_pending_frame: tuple[int, int] | None = None
+        self._studio_capture_retries = 0
         self._studio_failure: UserProblem | None = None
         self._studio_source: Path | None = None
         self._studio_output: Path | None = None
@@ -1394,6 +1395,7 @@ class MainWindow(QMainWindow):
         self._studio_thumbnail = None
         self._studio_failure = None
         self._studio_pending_frame = None
+        self._studio_capture_retries = 0
         self._studio_output_size = (settings.width, settings.height)
         self.studio_3d.set_effect(config.effect, config.rgb_mode, config.direction)
         self.studio_3d.begin_export(total)
@@ -1453,7 +1455,8 @@ class MainWindow(QMainWindow):
             return
         self.studio_3d.set_frame(image, index, total, progress)
         self._studio_pending_frame = (index, total)
-        QTimer.singleShot(18, self._capture_studio_frame)
+        self._studio_capture_retries = 0
+        QTimer.singleShot(24, self._capture_studio_frame)
 
     def _capture_studio_frame(self) -> None:
         pending = self._studio_pending_frame
@@ -1465,7 +1468,23 @@ class MainWindow(QMainWindow):
         try:
             width, height = self._studio_output_size
             captured = self.studio_3d.capture_frame(width, height)
-            encoder.write(qimage_to_rgb(captured))
+            rgb_frame = qimage_to_rgb(captured)
+            if capture_requires_retry(rgb_frame):
+                self._studio_capture_retries += 1
+                if self._studio_capture_retries <= 5:
+                    logger.warning(
+                        "Capture GPU 3D vide à l’image %d/%d · nouvelle tentative %d/5",
+                        index + 1,
+                        total,
+                        self._studio_capture_retries,
+                    )
+                    QTimer.singleShot(36, self._capture_studio_frame)
+                    return
+                raise RuntimeError(
+                    f"Le moteur 3D a produit 5 captures vides à l’image {index + 1}/{total}"
+                )
+            encoder.write(rgb_frame)
+            self._studio_capture_retries = 0
             if self._studio_thumbnail is None and index >= total // 2:
                 self._studio_thumbnail = captured.scaled(
                     480,

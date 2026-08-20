@@ -108,7 +108,7 @@ class ArtworkRenderer:
         if len(coordinates) == 0:
             return None
         desired = int(round(len(coordinates) * self.config.grain_density))
-        desired = min(len(coordinates), max(80, min(5200, desired)))
+        desired = min(len(coordinates), max(180, min(6800, desired)))
         rng = np.random.default_rng(seed)
         chosen = rng.choice(len(coordinates), size=desired, replace=False)
         targets = coordinates[chosen]
@@ -119,8 +119,8 @@ class ArtworkRenderer:
             target_x=target_x,
             target_y=target_y,
             settle=settle,
-            flight=rng.uniform(0.10, 0.25, desired).astype(np.float32),
-            sway=rng.uniform(-24.0, 24.0, desired).astype(np.float32),
+            flight=rng.uniform(0.20, 0.40, desired).astype(np.float32),
+            sway=np.clip(rng.normal(0.0, 9.0, desired), -20.0, 20.0).astype(np.float32),
             phase=rng.uniform(0.0, np.pi * 2.0, desired).astype(np.float32),
             colors=self.analysis.source[targets[:, 0], targets[:, 1]],
         )
@@ -168,14 +168,16 @@ class ArtworkRenderer:
             return
         denominator = np.maximum(particles.settle - spawn, 1e-5)
         phase_progress = np.clip((progress - spawn) / denominator, 0.0, 1.0)
-        eased = phase_progress * phase_progress
-        margin = self.height * 0.14
-        current_y = -margin + (particles.target_y + margin) * eased
+        fall = phase_progress * phase_progress
+        margin = self.height * 0.20
+        current_y = -margin + (particles.target_y + margin) * fall
+        stream_envelope = np.sin(np.pi * phase_progress)
         current_x = (
             particles.target_x
-            + np.sin(particles.phase + phase_progress * np.pi * 3.0)
-            * particles.sway
-            * (1.0 - phase_progress)
+            + particles.sway * (1.0 - fall)
+            + np.sin(particles.phase + phase_progress * np.pi * 2.0)
+            * (2.0 + np.abs(particles.sway) * 0.08)
+            * stream_envelope
         )
         indices = np.flatnonzero(alive)
         x = np.rint(current_x[indices]).astype(np.int32)
@@ -186,14 +188,14 @@ class ArtworkRenderer:
             return
 
         grain_size = max(0.5, float(self.config.grain_size))
-        sigma_x = max(0.65, grain_size * 0.55)
-        sigma_y = max(0.90, grain_size * 0.80)
-        radius_x = max(1, min(5, int(np.ceil(grain_size * 0.75))))
-        radius_y = max(1, min(6, int(np.ceil(grain_size * 1.15))))
+        sigma_x = max(0.58, grain_size * 0.48)
+        sigma_y = max(1.05, grain_size * 1.05)
+        radius_x = max(1, min(4, int(np.ceil(grain_size * 0.68))))
+        radius_y = max(2, min(8, int(np.ceil(grain_size * 1.65))))
         colors = particles.colors[indices].astype(np.float32)
         life = phase_progress[indices]
-        fade_in = np.clip(life / 0.22, 0.0, 1.0)
-        fade_out = np.clip((1.0 - life) / 0.14, 0.0, 1.0)
+        fade_in = np.clip(life / 0.16, 0.0, 1.0)
+        fade_out = np.clip((1.0 - life) / 0.12, 0.0, 1.0)
         fade_in = fade_in * fade_in * (3.0 - 2.0 * fade_in)
         fade_out = fade_out * fade_out * (3.0 - 2.0 * fade_out)
         visibility = (fade_in * fade_out).astype(np.float32)
@@ -201,7 +203,7 @@ class ArtworkRenderer:
         for dy in range(-radius_y, radius_y + 1):
             for dx in range(-radius_x, radius_x + 1):
                 distance = (dx / sigma_x) ** 2 + (dy / sigma_y) ** 2
-                kernel_alpha = 0.84 * float(np.exp(-0.5 * distance))
+                kernel_alpha = 0.74 * float(np.exp(-0.5 * distance))
                 if kernel_alpha < 0.035:
                     continue
                 nx, ny = x + dx, y + dy

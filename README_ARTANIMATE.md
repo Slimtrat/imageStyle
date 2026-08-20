@@ -17,7 +17,7 @@ Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette
 - effet `wave` avec front sinusoïdal, turbulence et six directions ;
 - effet `rgb_fade` avec montée lumineuse ou construction R → G → B ;
 - contours au début, à la fin ou pendant toute l’animation ;
-- studio 3D avec pièce éclairée, effets volumétriques, cadrage caméra et export vidéo ;
+- studio 3D théâtral avec pièce vide, table de poker, suspension, effets volumétriques, cadrage caméra et export vidéo ;
 - export MP4 H.264, MOV ou WebM, sans installation manuelle de FFmpeg ;
 - analyse de palette en JSON et planche de contrôle PNG ;
 - presets JSON reproductibles et graine aléatoire configurable.

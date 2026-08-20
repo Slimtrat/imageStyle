@@ -15,6 +15,7 @@ from artanimate.core.config import RenderConfig
 from artanimate.desktop.studio3d import StudioExportSettings
 from artanimate.desktop.studio3d_export import (
     Studio3DFrameWorker,
+    capture_requires_retry,
     effect_progress,
     qimage_to_rgb,
 )
@@ -28,6 +29,15 @@ def test_effect_progress_excludes_holds() -> None:
     assert effect_progress(config, 50, 101) == pytest.approx(0.5)
     assert effect_progress(config, 80, 101) == 1.0
     assert effect_progress(config, 100, 101) == 1.0
+
+
+def test_blank_gpu_capture_is_retried_but_a_dark_scene_is_kept() -> None:
+    assert capture_requires_retry(np.full((32, 48, 3), 255, dtype=np.uint8))
+    assert capture_requires_retry(np.zeros((32, 48, 3), dtype=np.uint8))
+
+    scene = np.full((32, 48, 3), 12, dtype=np.uint8)
+    scene[8:24, 14:34] = (48, 72, 56)
+    assert not capture_requires_retry(scene)
 
 
 def test_qimage_conversion_removes_scanline_padding() -> None:

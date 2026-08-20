@@ -4,14 +4,15 @@ import numpy as np
 
 from .base import AnimationEffect, EffectCapability, EffectContext
 from .factory import register_effect
-from .noise import fractal_noise, normalize_reveal_field, normalized_coordinates
+from .noise import fractal_noise, normalize_reveal_field, normalized_coordinates, value_noise
 
 
 def sand_field(width: int, height: int, turbulence: float, seed: int) -> np.ndarray:
     """Build a top-to-bottom settling field disturbed by organic noise."""
     _, y = normalized_coordinates(width, height)
-    noise = (fractal_noise(width, height, seed) - 0.5) * turbulence
-    field = (1.0 - y) + noise
+    organic = (fractal_noise(width, height, seed) - 0.5) * turbulence
+    micro_grain = (value_noise(width, height, seed + 4099, scale=4.0) - 0.5) * 0.045
+    field = (1.0 - y) + organic + micro_grain
     return normalize_reveal_field(field)
 
 

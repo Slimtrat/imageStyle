@@ -11,11 +11,11 @@
           "control": "slider",
           "minimum": 0.0,
           "maximum": 0.02,
-          "default": 0.0015,
+          "default": 0.004,
           "step": 0.0005,
           "decimals": 4,
           "suffix": "",
-          "description": "Quantité de pigments doux visibles pendant la chute. Une valeur élevée densifie le mouvement sans modifier l’image finale."
+          "description": "Quantité de pigments fins visibles pendant la chute. La valeur par défaut forme un flux continu sans masquer l’œuvre."
         },
         {
           "key": "grain_size",
@@ -23,11 +23,11 @@
           "control": "slider",
           "minimum": 0.5,
           "maximum": 4.0,
-          "default": 2.0,
+          "default": 1.35,
           "step": 0.05,
           "decimals": 2,
           "suffix": " px",
-          "description": "Taille de la brosse douce des pigments en déplacement. Les grandes valeurs donnent une matière plus diffuse, sans pixels isolés."
+          "description": "Épaisseur des pigments en déplacement. Les petites valeurs évoquent du sable fin ; les grandes créent une poudre diffuse."
         },
         {
           "key": "turbulence",

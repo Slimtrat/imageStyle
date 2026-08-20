@@ -41,8 +41,8 @@ class RenderConfig:
     wave_frequency: float = 2.7
     turbulence: float = 0.10
     soft_edge: float = 0.012
-    grain_density: float = 0.0015
-    grain_size: float = 2.0
+    grain_density: float = 0.004
+    grain_size: float = 1.35
     seed: int = 7
     crf: int = 16
     quality: str = "studio"

@@ -33,9 +33,9 @@ QML_SCENE_PATH = (
     Path(__file__).resolve().parents[1] / "assets" / "qml" / "Studio3D.qml"
 )
 CAMERA_PRESETS = {
-    "artwork": (0.0, 7.0, 650.0),
-    "table": (-18.0, 11.0, 780.0),
-    "room": (-31.0, 16.0, 1010.0),
+    "artwork": (0.0, 7.0, 640.0),
+    "table": (-10.0, 9.0, 900.0),
+    "room": (-22.0, 12.0, 1060.0),
 }
 
 
@@ -173,7 +173,7 @@ class Studio3DPanel(QWidget):
         title = QLabel("Studio 3D · cadrage & export")
         title.setObjectName("studioTitle")
         subtitle = QLabel(
-            "Cadrez la scène, voyez l’effet en volume puis exportez exactement ce plan."
+            "Une pièce vide, une table de poker, votre œuvre et une lumière suspendue."
         )
         subtitle.setObjectName("muted")
         text.addWidget(title)
@@ -222,9 +222,9 @@ class Studio3DPanel(QWidget):
         camera_title.setObjectName("sectionTitle")
         layout.addWidget(camera_title)
         self.camera_preset = QComboBox()
-        self.camera_preset.addItem("Œuvre · frontal", "artwork")
-        self.camera_preset.addItem("Table · trois quarts", "table")
-        self.camera_preset.addItem("Pièce · plan large", "room")
+        self.camera_preset.addItem("Œuvre · face", "artwork")
+        self.camera_preset.addItem("Table de poker · héro", "table")
+        self.camera_preset.addItem("Pièce vide · plan large", "room")
         self.camera_preset.setCurrentIndex(1)
         self.camera_preset.currentIndexChanged.connect(self._apply_selected_preset)
         layout.addWidget(self.camera_preset)
@@ -232,21 +232,21 @@ class Studio3DPanel(QWidget):
         form = QFormLayout()
         form.setSpacing(8)
         self.yaw_slider = ParameterSlider(
-            -70, 70, -18, 1, 0, "°", "Rotation horizontale de la caméra."
+            -70, 70, -10, 1, 0, "°", "Rotation horizontale de la caméra."
         )
         self.pitch_slider = ParameterSlider(
-            -2, 32, 11, 1, 0, "°", "Hauteur du point de vue."
+            -2, 32, 9, 1, 0, "°", "Hauteur du point de vue."
         )
         self.distance_slider = ParameterSlider(
-            560, 1100, 780, 10, 0, "", "Distance entre la caméra et l’œuvre."
+            560, 1150, 900, 10, 0, "", "Distance entre la caméra et l’œuvre."
         )
         self.lamp_slider = ParameterSlider(
-            0.2, 4.0, 1.8, 0.1, 1, "×", "Intensité de la lampe de table."
+            0.2, 5.0, 2.2, 0.1, 1, "×", "Intensité de la suspension au-dessus de la table."
         )
         form.addRow("Angle", self.yaw_slider)
         form.addRow("Hauteur", self.pitch_slider)
         form.addRow("Distance", self.distance_slider)
-        form.addRow("Lampe", self.lamp_slider)
+        form.addRow("Suspension", self.lamp_slider)
         layout.addLayout(form)
 
         self.yaw_slider.valueChanged.connect(

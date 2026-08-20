@@ -27,6 +27,11 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "View3D" in scene
     assert "PerspectiveCamera" in scene
     assert "PointLight" in scene
+    assert "SpotLight" in scene
+    assert "pokerTableFelt" in scene
+    assert "overheadLamp" in scene
+    assert "model: 196" in scene
+    assert "#164b3d" in scene
     assert "artworkSource" in scene
     assert "MouseArea" in scene
     assert "effectKind" in scene
