@@ -1,6 +1,6 @@
 import numpy as np
 
-from artanimate.colors import family_for_color, kmeans_lab, rgb_to_lab
+from artanimate.core.colors import family_for_color, kmeans_lab, rgb_to_lab
 
 
 def test_rgb_to_lab_reference_extremes() -> None:

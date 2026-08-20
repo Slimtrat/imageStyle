@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 import imageio_ffmpeg
+import numpy as np
 
 from .renderer import ArtworkRenderer
 
@@ -11,10 +12,16 @@ from .renderer import ArtworkRenderer
 SUPPORTED_OUTPUTS = {".mp4", ".mov", ".webm"}
 
 
+class RenderCancelled(RuntimeError):
+    """Raised when a caller requests a clean cancellation."""
+
+
 def encode_video(
     renderer: ArtworkRenderer,
     output_path: str | Path,
     progress: Callable[[int, int], None] | None = None,
+    frame_callback: Callable[[np.ndarray, int, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> Path:
     destination = Path(output_path)
     suffix = destination.suffix.lower()
@@ -48,7 +55,11 @@ def encode_video(
     try:
         writer.send(None)
         for index, frame in enumerate(renderer.frames(), start=1):
+            if should_cancel and should_cancel():
+                raise RenderCancelled("Rendu annulé")
             writer.send(frame)
+            if frame_callback:
+                frame_callback(frame, index, total)
             if progress:
                 progress(index, total)
         writer.close()

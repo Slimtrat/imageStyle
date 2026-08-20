@@ -3,10 +3,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from artanimate.analysis import analyze_artwork
-from artanimate.config import RenderConfig
-from artanimate.effects import reveal_opacity, wave_field
-from artanimate.renderer import ArtworkRenderer
+from artanimate.core.analysis import analyze_artwork
+from artanimate.core.config import RenderConfig
+from artanimate.core.effects import reveal_opacity, wave_field
+from artanimate.core.renderer import ArtworkRenderer
 
 
 def make_source(path: Path) -> None:

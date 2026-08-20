@@ -3,8 +3,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from artanimate.analysis import analyze_artwork
-from artanimate.config import RenderConfig
+from artanimate.core.analysis import analyze_artwork
+from artanimate.core.config import RenderConfig
 
 
 def make_artwork(path: Path) -> None:

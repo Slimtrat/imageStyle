@@ -8,10 +8,10 @@ import sys
 import time
 from typing import Any
 
-from .analysis import analyze_artwork
-from .config import DIRECTIONS, EFFECTS, ORDERS, OUTLINE_MODES, RenderConfig
-from .renderer import ArtworkRenderer
-from .video import encode_video
+from ..core.analysis import analyze_artwork
+from ..core.config import DIRECTIONS, EFFECTS, ORDERS, OUTLINE_MODES, RenderConfig
+from ..core.renderer import ArtworkRenderer
+from ..core.video import encode_video
 
 
 def _add_configuration_options(parser: argparse.ArgumentParser) -> None:

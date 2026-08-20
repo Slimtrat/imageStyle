@@ -33,7 +33,24 @@ python -m pip install -e ".[dev]"
 pytest
 ```
 
-## Premier film
+## Client desktop
+
+Installez l’interface puis lancez-la :
+
+```powershell
+python -m pip install -e ".[desktop]"
+artanimate-ui
+```
+
+Le client accepte le glisser-déposer de l’image et du dossier de destination. Il affiche l’œuvre originale, le rendu en cours avec son pourcentage, puis lit la vidéo finale. Les réglages visibles s’adaptent automatiquement au mode Sable ou Vague.
+
+Vous pouvez aussi le lancer sans commande installée :
+
+```powershell
+python -m artanimate.desktop
+```
+
+## Premier film en ligne de commande
 
 ```powershell
 artanimate render oeuvre.jpg -o oeuvre-sable.mp4
