@@ -54,6 +54,19 @@ def test_paint_drop_stages_target_real_analyzed_pixels(tmp_path: Path) -> None:
         assert stage.color == layer.color
 
 
+def test_laser_studio_path_matches_the_detected_contour_stage(tmp_path: Path) -> None:
+    source = tmp_path / "laser.png"
+    _artwork(source)
+    config = RenderConfig(effect="contour_laser", width=100, colors=6)
+    renderer = ArtworkRenderer(analyze_artwork(source, config), config)
+    scene = build_studio_scene_data(renderer)
+
+    assert len(scene.laser_path) > 20
+    assert any(point.laser_on for point in scene.laser_path)
+    assert all(0.0 <= point.target_u <= 1.0 for point in scene.laser_path)
+    assert all(0.0 <= point.target_v <= 1.0 for point in scene.laser_path)
+
+
 def test_non_particle_effect_clears_the_studio_particle_bank(tmp_path: Path) -> None:
     source = tmp_path / "artwork.png"
     _artwork(source)

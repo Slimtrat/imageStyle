@@ -91,7 +91,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="artanimate",
         description="Transforme une œuvre statique en animation chromatique sable ou vague.",
     )
-    parser.add_argument("--version", action="version", version="ArtAnimate 2.6.0")
+    parser.add_argument("--version", action="version", version="ArtAnimate 2.7.0")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     parser.add_argument("--log-file", type=Path, help="copie persistante des logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -125,6 +125,8 @@ def _palette_summary(analysis: Any, config: RenderConfig) -> str:
     effect = create_effect(config.effect)
     if effect.supports(EffectCapability.FRAME_COMPOSITOR):
         return "composition directe de l’image · ordre chromatique non utilisé"
+    if effect.supports(EffectCapability.DETECTED_CONTOURS):
+        return "formes détectées · parcours continu des contours"
     ordered = analysis.ordered_layers(config.order, config.start_hue, config.neutral_position)
     names = " -> ".join(layer.label for layer in ordered)
     if analysis.outline:

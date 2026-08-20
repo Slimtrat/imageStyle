@@ -858,7 +858,9 @@ class MainWindow(QMainWindow):
             f"{effect_label} · {effect_count} paramètres"
         )
         descriptor = self._effect_descriptors[effect]
-        if descriptor.supports(EffectCapability.FRAME_COMPOSITOR):
+        if descriptor.supports(EffectCapability.DETECTED_CONTOURS):
+            color_summary = "Trajet automatique · aucun ordre chromatique"
+        elif descriptor.supports(EffectCapability.FRAME_COMPOSITOR):
             color_summary = "Composition directe · aucun ordre chromatique"
         else:
             order = self.order_combo.currentText().replace(
@@ -1025,7 +1027,10 @@ class MainWindow(QMainWindow):
         order = str(self.order_combo.currentData())
         effect = str(self.effect_combo.currentData())
         descriptor = self._effect_descriptors[effect]
-        direct_compositor = descriptor.supports(EffectCapability.FRAME_COMPOSITOR)
+        direct_compositor = (
+            descriptor.supports(EffectCapability.FRAME_COMPOSITOR)
+            or descriptor.supports(EffectCapability.DETECTED_CONTOURS)
+        )
         uses_wheel = (
             not direct_compositor
             and order in {"chromatic", "reverse"}
@@ -1044,10 +1049,17 @@ class MainWindow(QMainWindow):
             "luminance": "Les zones claires apparaissent avant les zones sombres.",
         }
         if direct_compositor:
-            self.order_description.setText(
-                f"{descriptor.selector_label} compose l’image entière : ordre chromatique, "
-                "neutres et contours ne sont pas utilisés."
-            )
+            if descriptor.supports(EffectCapability.DETECTED_CONTOURS):
+                self.order_description.setText(
+                    "La découpeuse détecte et ordonne directement les formes : la roue "
+                    "chromatique, les neutres et le placement manuel des contours ne "
+                    "modifient pas son trajet."
+                )
+            else:
+                self.order_description.setText(
+                    f"{descriptor.selector_label} compose l’image entière : ordre "
+                    "chromatique, neutres et contours ne sont pas utilisés."
+                )
         else:
             self.order_description.setText(descriptions[order])
         self._update_settings_summaries()

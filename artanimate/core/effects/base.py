@@ -18,6 +18,7 @@ class EffectCapability(StrEnum):
     """Independent renderer/UI capabilities an effect can explicitly support."""
 
     CHROMATIC_SEQUENCE = "chromatic_sequence"
+    DETECTED_CONTOURS = "detected_contours"
     FALLING_PARTICLES = "falling_particles"
     FRAME_COMPOSITOR = "frame_compositor"
     FRAME_DECORATOR = "frame_decorator"

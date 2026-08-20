@@ -24,6 +24,9 @@ Item {
     property real paintBrushWidth: 0.34
     property real paintDropSize: 0.024
     property real paintFallRatio: 0.30
+    property var laserPathU: []
+    property var laserPathV: []
+    property var laserPathOn: []
     property real outputAspect: 16 / 9
     property bool showHud: true
 
@@ -55,6 +58,26 @@ Item {
         ? paintStageTargetV[effectToolStage] : 0.5
     readonly property color paintActiveColor: effectToolStage < paintStageColors.length
         ? paintStageColors[effectToolStage] : "#d94c4c"
+    readonly property real laserPathPosition: effectToolProgress
+        * Math.max(0, laserPathU.length - 1)
+    readonly property int laserPathIndex: Math.min(
+        Math.max(0, laserPathU.length - 2),
+        Math.floor(laserPathPosition)
+    )
+    readonly property real laserPathMix: laserPathPosition - laserPathIndex
+    readonly property real laserTargetU: laserPathU.length > 1
+        ? laserPathU[laserPathIndex]
+            + (laserPathU[laserPathIndex + 1] - laserPathU[laserPathIndex])
+                * laserPathMix
+        : effectToolProgress
+    readonly property real laserTargetV: laserPathV.length > 1
+        ? laserPathV[laserPathIndex]
+            + (laserPathV[laserPathIndex + 1] - laserPathV[laserPathIndex])
+                * laserPathMix
+        : 0.5
+    readonly property bool laserBeamOn: laserPathOn.length > 1
+        ? laserPathOn[Math.min(laserPathIndex + 1, laserPathOn.length - 1)]
+        : true
     readonly property bool satelliteView: cameraPitch < -48
 
     function smootherstep(value) {
@@ -398,51 +421,70 @@ Item {
                 visible: (isHalo || isScreen || isLaser)
                     && root.effectToolProgress > 0.005
                     && root.effectToolProgress < 0.995
-                z: root.artworkCenterZ
+                z: isLaser
+                    ? root.artworkCenterZ
+                        + (root.laserTargetV - 0.5) * root.artworkDepth
+                    : root.artworkCenterZ
                 eulerRotation.y: -3
-                x: Math.max(
-                    -root.artworkWidth / 2 + halfWidth,
-                    Math.min(
-                        root.artworkWidth / 2 - halfWidth,
-                        -root.artworkWidth / 2
-                            + root.artworkWidth * effectToolDeck.travelProgress
+                x: isLaser
+                    ? -root.artworkWidth / 2 + root.artworkWidth * root.laserTargetU
+                    : Math.max(
+                        -root.artworkWidth / 2 + halfWidth,
+                        Math.min(
+                            root.artworkWidth / 2 - halfWidth,
+                            -root.artworkWidth / 2
+                                + root.artworkWidth * effectToolDeck.travelProgress
+                        )
                     )
-                )
 
                 Model {
                     id: effectToolCore
-                    y: root.artworkSurfaceY + (effectToolDeck.isLaser ? 5.2 : 7.0)
-                    source: "#Cube"
+                    y: root.artworkSurfaceY + (effectToolDeck.isLaser ? 24 : 7.0)
+                    source: effectToolDeck.isLaser ? "#Cylinder" : "#Cube"
                     scale: Qt.vector3d(
-                        effectToolDeck.isLaser ? 0.028
+                        effectToolDeck.isLaser ? 0.10
                             : (effectToolDeck.isScreen ? 0.14 : 0.10),
-                        effectToolDeck.isLaser ? 0.024 : 0.028,
-                        root.artworkDepth / 100
+                        effectToolDeck.isLaser ? 0.12 : 0.028,
+                        effectToolDeck.isLaser ? 0.10 : root.artworkDepth / 100
                     )
                     materials: PrincipledMaterial {
-                        baseColor: effectToolDeck.isLaser ? "#d6fbff"
+                        baseColor: effectToolDeck.isLaser ? "#3d434c"
                             : (effectToolDeck.isScreen ? "#fff0d7" : "#fff7e9")
                         emissiveFactor: effectToolDeck.isLaser
-                            ? Qt.vector3d(0.85, 1.0, 1.0)
+                            ? Qt.vector3d(0.08, 0.06, 0.04)
                             : Qt.vector3d(0.82, 0.58, 0.30)
                         opacity: effectToolDeck.isLaser ? 0.96 : 0.88
                         roughness: 0.10
                     }
                 }
                 Model {
+                    id: effectLaserCollar
+                    visible: effectToolDeck.isLaser
+                    y: root.artworkSurfaceY + 15.5
+                    source: "#Cylinder"
+                    scale: Qt.vector3d(0.106, 0.018, 0.106)
+                    materials: PrincipledMaterial {
+                        baseColor: "#c13a22"
+                        emissiveFactor: Qt.vector3d(0.22, 0.025, 0.01)
+                        metalness: 0.66
+                        roughness: 0.17
+                    }
+                }
+                Model {
                     id: effectToolAura
+                    visible: !effectToolDeck.isLaser || root.laserBeamOn
                     y: root.artworkSurfaceY + 1.4
                     source: "#Cube"
                     scale: Qt.vector3d(
-                        effectToolDeck.isLaser ? 0.11
+                        effectToolDeck.isLaser ? 0.055
                             : (effectToolDeck.isScreen ? 0.34 : 0.24),
                         0.006,
-                        (root.artworkDepth + 12) / 100
+                        effectToolDeck.isLaser ? 0.055 : (root.artworkDepth + 12) / 100
                     )
                     materials: PrincipledMaterial {
-                        baseColor: effectToolDeck.isLaser ? "#66eaff" : "#ffd9a8"
+                        baseColor: effectToolDeck.isLaser ? "#ff5b24" : "#ffd9a8"
                         emissiveFactor: effectToolDeck.isLaser
-                            ? Qt.vector3d(0.34, 0.82, 1.0)
+                            ? Qt.vector3d(1.0, 0.18, 0.035)
                             : Qt.vector3d(0.34, 0.22, 0.11)
                         opacity: effectToolDeck.isLaser ? 0.24 : 0.16
                         roughness: 0.22
@@ -467,22 +509,47 @@ Item {
                 }
                 Model {
                     id: effectLaserEmitter
-                    visible: effectToolDeck.isLaser
-                    y: root.artworkSurfaceY + 11
-                    z: root.artworkDepth / 2 + 5
+                    visible: effectToolDeck.isLaser && root.laserBeamOn
+                    y: root.artworkSurfaceY + 12
+                    z: 0
                     source: "#Sphere"
-                    scale: Qt.vector3d(0.075, 0.075, 0.075)
+                    scale: Qt.vector3d(0.052, 0.052, 0.052)
                     materials: PrincipledMaterial {
-                        baseColor: "#d9fcff"
-                        emissiveFactor: Qt.vector3d(0.75, 1.0, 1.0)
+                        baseColor: "#ffcf9b"
+                        emissiveFactor: Qt.vector3d(1.0, 0.24, 0.04)
                         metalness: 0.18
                         roughness: 0.12
                     }
                 }
+                Model {
+                    visible: effectToolDeck.isLaser && root.laserBeamOn
+                    y: root.artworkSurfaceY + 6.5
+                    source: "#Cylinder"
+                    scale: Qt.vector3d(0.012, 0.105, 0.012)
+                    materials: PrincipledMaterial {
+                        baseColor: "#fff0c2"
+                        emissiveFactor: Qt.vector3d(1.0, 0.18, 0.025)
+                        opacity: 0.94
+                        roughness: 0.05
+                    }
+                }
+                Model {
+                    visible: effectToolDeck.isLaser && root.laserBeamOn
+                    y: root.artworkSurfaceY + 1.1
+                    source: "#Sphere"
+                    scale: Qt.vector3d(0.07, 0.012, 0.07)
+                    materials: PrincipledMaterial {
+                        baseColor: "#ff6a24"
+                        emissiveFactor: Qt.vector3d(1.0, 0.16, 0.02)
+                        opacity: 0.62
+                        roughness: 0.18
+                    }
+                }
                 SpotLight {
+                    visible: !effectToolDeck.isLaser || root.laserBeamOn
                     y: root.artworkSurfaceY + 54
                     eulerRotation.x: -90
-                    color: effectToolDeck.isLaser ? "#78ecff" : "#ffd0a0"
+                    color: effectToolDeck.isLaser ? "#ff5a20" : "#ffd0a0"
                     brightness: effectToolDeck.isLaser ? 1.5 : 0.82
                     coneAngle: effectToolDeck.isLaser ? 30 : 42
                     innerConeAngle: effectToolDeck.isLaser ? 14 : 25
@@ -490,6 +557,42 @@ Item {
                     quadraticFade: 0.00009
                 }
             }
+
+            // XY cutter gantry: fixed rails, moving crossbar and path-following head.
+            Node {
+                id: laserGantry
+                visible: effectToolDeck.visible && effectToolDeck.isLaser
+                z: root.artworkCenterZ
+                eulerRotation.y: -3
+
+                Repeater3D {
+                    model: 2
+                    delegate: Model {
+                        required property int index
+                        x: (index === 0 ? -1 : 1) * (root.artworkWidth / 2 + 9)
+                        y: root.artworkSurfaceY + 38
+                        source: "#Cube"
+                        scale: Qt.vector3d(0.035, 0.035, root.artworkDepth / 100)
+                        materials: PrincipledMaterial {
+                            baseColor: "#343a43"
+                            metalness: 0.82
+                            roughness: 0.20
+                        }
+                    }
+                }
+                Model {
+                    y: root.artworkSurfaceY + 42
+                    z: (root.laserTargetV - 0.5) * root.artworkDepth
+                    source: "#Cube"
+                    scale: Qt.vector3d(root.artworkWidth / 100, 0.042, 0.042)
+                    materials: PrincipledMaterial {
+                        baseColor: "#555f6c"
+                        metalness: 0.88
+                        roughness: 0.16
+                    }
+                }
+            }
+
 
             // A real oversized flat brush drops the analyzed layer color onto its true zone.
             Node {
@@ -824,7 +927,7 @@ Item {
         color: "#d0161b25"
         border.color: root.effectKind === "paint_drop"
             ? root.paintActiveColor
-            : (root.effectToolIsOutline ? "#5adff4" : "#c99a67")
+            : (root.effectToolIsOutline ? "#ff6a32" : "#c99a67")
         border.width: 1
         width: effectActText.implicitWidth + 26
         height: 34
@@ -832,7 +935,7 @@ Item {
         Text {
             id: effectActText
             anchors.centerIn: parent
-            color: root.effectToolIsOutline ? "#9af2ff" : "#ffe0b9"
+            color: root.effectToolIsOutline ? "#ffd1b6" : "#ffe0b9"
             text: root.effectKind === "paint_drop"
                 ? "COUCHE " + (root.effectToolStage + 1) + "/"
                     + root.effectStageCount + " · "
@@ -847,7 +950,7 @@ Item {
                 : root.effectKind === "screenprint"
                     ? "SÉRIGRAPHIE · COUCHE " + (root.effectToolStage + 1)
                     : root.effectKind === "contour_laser"
-                        ? "LASER · TRACÉ DES CONTOURS"
+                        ? "DÉCOUPEUSE LASER · ÉCRITURE DES FORMES"
                         : (root.effectDirection === "right"
                             ? "HALO VERTICAL · RÉVÉLATION DROITE → GAUCHE"
                             : "HALO VERTICAL · RÉVÉLATION GAUCHE → DROITE")

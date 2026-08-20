@@ -538,11 +538,21 @@ class Studio3DPanel(QWidget):
         self._set_scene_property("paintBrushWidth", data.paint_brush_width)
         self._set_scene_property("paintDropSize", data.paint_drop_size)
         self._set_scene_property("paintFallRatio", data.paint_fall_ratio)
+        self._set_scene_property(
+            "laserPathU", [point.target_u for point in data.laser_path]
+        )
+        self._set_scene_property(
+            "laserPathV", [point.target_v for point in data.laser_path]
+        )
+        self._set_scene_property(
+            "laserPathOn", [point.laser_on for point in data.laser_path]
+        )
         logger.info(
-            "Scène 3D synchronisée : gouttes=%d, passages=%d, contour=%d",
+            "Scène 3D synchronisée : grains=%d, passages=%d, contour=%d, points laser=%d",
             len(data.particles),
             data.stage_count,
             data.outline_stage,
+            len(data.laser_path),
         )
 
     def set_source(self, path: Path) -> bool:

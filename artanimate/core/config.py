@@ -68,6 +68,7 @@ class RenderConfig:
             self.order in {"chromatic", "reverse"}
             and not effect.supports(EffectCapability.CHROMATIC_SEQUENCE)
             and not effect.supports(EffectCapability.FRAME_COMPOSITOR)
+            and not effect.supports(EffectCapability.DETECTED_CONTOURS)
         ):
             raise ValueError(f"L’effet {self.effect!r} ne prend pas en charge la roue chromatique")
         if self.neutral_position not in NEUTRAL_POSITIONS:

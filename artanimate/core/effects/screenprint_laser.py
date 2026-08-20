@@ -3,12 +3,12 @@ from __future__ import annotations
 import numpy as np
 
 from .base import AnimationEffect, EffectCapability, EffectContext, FrameDecorationContext
+from .contour_laser import decorate_laser_trace
+from .contour_paths import contour_path_field
 from .factory import register_effect
 from .light_tools import (
     blend_glow,
     blend_ink_edges,
-    expand_mask,
-    feather_mask,
     gaussian_band,
     horizontal_field,
 )
@@ -36,6 +36,8 @@ class ScreenPrintLaserEffect(AnimationEffect):
     )
 
     def build_field(self, context: EffectContext) -> np.ndarray:
+        if context.is_outline and context.layer_mask is not None:
+            return contour_path_field(context.layer_mask)
         return horizontal_field(context.width, context.height)
 
     def decorate_frame(
@@ -68,10 +70,12 @@ class ScreenPrintLaserEffect(AnimationEffect):
             result = blend_glow(result, strength, state.color)
 
         if outline is not None and 0.0 < outline.progress < 1.0:
-            band = gaussian_band(
-                outline.field, outline.progress, context.config.laser_width
+            result = decorate_laser_trace(
+                result,
+                outline.mask,
+                outline.field,
+                outline.progress,
+                context.config.laser_width,
+                context.config.laser_intensity,
             )
-            aura = feather_mask(expand_mask(outline.mask, 1), radius + 1)
-            strength = band * aura * context.config.laser_intensity
-            result = blend_glow(result, strength, (105, 235, 255))
         return result

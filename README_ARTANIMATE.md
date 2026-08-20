@@ -19,7 +19,7 @@ Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette
 - effet `rgb_fade` avec montée lumineuse ou construction R → G → B ;
 - effet `vertical_halo` avec un rideau unique qui ne révèle que la partie déjà traversée ;
 - effet `screenprint` avec dépose séquentielle des couches couleur ;
-- effet `contour_laser` qui suit les frontières réellement analysées ;
+- effet `contour_laser` avec détection de formes, chemins continus et tête de découpe XY ;
 - effet signature `screenprint_laser` : sérigraphie couleur sans coutures visibles, puis contours noirs au laser ;
 - contours au début, à la fin ou pendant toute l’animation ;
 - studio 3D cinématique avec pièce vide, meuble en noyer, œuvre couchée, ombre de contact et suspension oscillante ;

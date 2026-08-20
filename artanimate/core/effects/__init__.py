@@ -37,6 +37,15 @@ from .rgb_fade import RgbFadeEffect, rgb_channel_weights
 from .vertical_halo import VerticalHaloEffect
 from .screenprint import ScreenPrintEffect
 from .contour_laser import ContourLaserEffect
+from .contour_paths import (
+    ContourTrace,
+    LaserPathPoint,
+    build_contour_trace,
+    contour_path_field,
+    detected_contour_mask,
+    sample_laser_path,
+    thin_contours,
+)
 from .screenprint_laser import ScreenPrintLaserEffect
 
 
@@ -50,6 +59,7 @@ __all__ = [
     "FrameCompositionContext",
     "FrameDecorationContext",
     "LayerFrameState",
+    "LaserPathPoint",
     "ParameterDocumentation",
     "PaintDropEffect",
     "RgbFadeEffect",
@@ -57,9 +67,13 @@ __all__ = [
     "ScreenPrintEffect",
     "ScreenPrintLaserEffect",
     "ContourLaserEffect",
+    "ContourTrace",
     "VerticalHaloEffect",
     "WaveEffect",
+    "build_contour_trace",
+    "contour_path_field",
     "create_effect",
+    "detected_contour_mask",
     "documentation_for",
     "effect_descriptors",
     "effect_keys",
@@ -69,6 +83,8 @@ __all__ = [
     "register_effect",
     "reveal_opacity",
     "rgb_channel_weights",
+    "sample_laser_path",
+    "thin_contours",
     "sand_field",
     "wave_field",
 ]

@@ -7,6 +7,7 @@ from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
 
 from ..core.effects import EffectCapability
+from ..core.effects.contour_paths import sample_laser_path
 from ..core.effects.paint_drop import paint_drop_target
 from ..core.renderer import ArtworkRenderer
 
@@ -35,6 +36,15 @@ class StudioToolStageRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class StudioLaserPathRecord:
+    """One uniformly timed cutter-head position for the 3D gantry."""
+
+    target_u: float
+    target_v: float
+    laser_on: bool
+
+
+@dataclass(frozen=True, slots=True)
 class StudioSceneData:
     """Analysis metadata shared by the interactive preview and final export."""
 
@@ -45,6 +55,7 @@ class StudioSceneData:
     paint_brush_width: float = 0.34
     paint_drop_size: float = 0.024
     paint_fall_ratio: float = 0.30
+    laser_path: tuple[StudioLaserPathRecord, ...] = ()
 
 
 def _inverse_ease(values: np.ndarray) -> np.ndarray:
@@ -84,15 +95,32 @@ def build_studio_scene_data(
             )
         tool_stages = tuple(records)
 
+    laser_path: tuple[StudioLaserPathRecord, ...] = ()
+    if renderer.config.effect in {"contour_laser", "screenprint_laser"}:
+        laser_stage = next(
+            (layer for layer in renderer.stages if layer.is_outline),
+            None,
+        )
+        if laser_stage is not None:
+            laser_path = tuple(
+                StudioLaserPathRecord(
+                    target_u=(point.x + 0.5) / width,
+                    target_v=(point.y + 0.5) / height,
+                    laser_on=point.laser_on,
+                )
+                for point in sample_laser_path(laser_stage.mask)
+            )
+
     def scene(particles: tuple[StudioParticleRecord, ...]) -> StudioSceneData:
         return StudioSceneData(
-            particles,
-            len(renderer.stages),
-            outline_stage,
-            tool_stages,
-            renderer.config.paint_brush_width,
-            renderer.config.paint_drop_size,
-            renderer.config.paint_fall_ratio,
+            particles=particles,
+            stage_count=len(renderer.stages),
+            outline_stage=outline_stage,
+            tool_stages=tool_stages,
+            paint_brush_width=renderer.config.paint_brush_width,
+            paint_drop_size=renderer.config.paint_drop_size,
+            paint_fall_ratio=renderer.config.paint_fall_ratio,
+            laser_path=laser_path,
         )
 
     if not renderer.effect.supports(EffectCapability.FALLING_PARTICLES):

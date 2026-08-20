@@ -16,6 +16,7 @@ from .effects import (
     FrameDecorationContext,
     LayerFrameState,
     create_effect,
+    detected_contour_mask,
     reveal_opacity,
 )
 from .quality import ease_in_out, exposure_average, srgb_to_linear
@@ -48,10 +49,20 @@ class ArtworkRenderer:
             config.start_hue,
             config.neutral_position,
         )
+        self.detected_contour_layer = self._build_detected_contour_layer()
         self.stages = self._stage_layers()
         self.blank = np.empty_like(analysis.source)
-        self.blank[:] = analysis.background_color
-        self.blank[analysis.background_mask] = analysis.source[analysis.background_mask]
+        if (
+            self.effect.supports(EffectCapability.DETECTED_CONTOURS)
+            and self.detected_contour_layer is not None
+        ):
+            self.blank[:] = analysis.source
+            self.blank[self.detected_contour_layer.mask] = analysis.background_color
+        else:
+            self.blank[:] = analysis.background_color
+            self.blank[analysis.background_mask] = analysis.source[
+                analysis.background_mask
+            ]
         direct_compositor = self.effect.supports(EffectCapability.FRAME_COMPOSITOR)
         self.frame_context = FrameCompositionContext(
             source=analysis.source,
@@ -59,9 +70,12 @@ class ArtworkRenderer:
             config=config,
             linear_source=srgb_to_linear(analysis.source) if direct_compositor else None,
         )
-        all_layers = list(self.color_layers)
-        if analysis.outline:
-            all_layers.append(analysis.outline)
+        if self.effect.supports(EffectCapability.DETECTED_CONTOURS):
+            all_layers = list(self.stages)
+        else:
+            all_layers = list(self.color_layers)
+            if analysis.outline:
+                all_layers.append(analysis.outline)
         self.fields: dict[str, np.ndarray] = {}
         self.particles: dict[str, FallingParticles] = {}
         if direct_compositor:
@@ -95,7 +109,31 @@ class ArtworkRenderer:
             self.frame_count,
         )
 
+    def _build_detected_contour_layer(self) -> ColorLayer | None:
+        if not self.effect.supports(EffectCapability.DETECTED_CONTOURS):
+            return None
+        outline = self.analysis.outline
+        mask = detected_contour_mask(
+            tuple(layer.mask for layer in self.color_layers),
+            outline.mask if outline is not None else None,
+        )
+        if not np.any(mask):
+            return None
+        color = outline.color if outline is not None else (20, 20, 20)
+        return ColorLayer(
+            key="detected_contours",
+            label="contours détectés",
+            color=color,
+            mask=mask,
+            hue=0.0,
+            luma=8.0,
+            pixel_count=int(mask.sum()),
+            is_outline=True,
+        )
+
     def _stage_layers(self) -> list[ColorLayer]:
+        if self.effect.supports(EffectCapability.DETECTED_CONTOURS):
+            return [self.detected_contour_layer] if self.detected_contour_layer else []
         outline = self.analysis.outline
         if outline is not None and self.effect.supports(EffectCapability.OUTLINE_FINALE):
             return [*self.color_layers, outline]
@@ -164,6 +202,7 @@ class ArtworkRenderer:
             self.analysis.outline
             and self.config.outline == "together"
             and not self.effect.supports(EffectCapability.OUTLINE_FINALE)
+            and not self.effect.supports(EffectCapability.DETECTED_CONTOURS)
         ):
             result.append((self.analysis.outline, global_progress))
         return result

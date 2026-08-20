@@ -60,15 +60,16 @@ def test_effect_capabilities_match_their_composition_model() -> None:
         "wave",
         "paint_drop",
         "screenprint",
-        "contour_laser",
         "screenprint_laser",
     ):
         assert descriptors[key].supports(EffectCapability.CHROMATIC_SEQUENCE)
         assert not descriptors[key].supports(EffectCapability.FRAME_COMPOSITOR)
     for key in ("paint_drop", "screenprint", "contour_laser", "screenprint_laser"):
         assert descriptors[key].supports(EffectCapability.FRAME_DECORATOR)
+    assert descriptors["contour_laser"].supports(EffectCapability.DETECTED_CONTOURS)
     assert descriptors["vertical_halo"].supports(EffectCapability.FRAME_COMPOSITOR)
     assert descriptors["rgb_fade"].supports(EffectCapability.FRAME_COMPOSITOR)
+    assert not descriptors["contour_laser"].supports(EffectCapability.CHROMATIC_SEQUENCE)
     assert not descriptors["rgb_fade"].supports(EffectCapability.CHROMATIC_SEQUENCE)
 
 

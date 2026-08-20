@@ -68,6 +68,12 @@ strict, la scène reçoit le nombre de stages et l’index du contour final afin
 transformation que le plateau de l’œuvre et applique la même courbe quintique que le
 renderer : sa position projetée reste donc alignée du premier au dernier pixel.
 
+La découpeuse laser fusionne les frontières des familles de couleur et les traits
+noirs, amincit les formes en lignes centrales, sépare les composantes puis construit un
+parcours continu. Les déplacements entre formes restent dans la chronologie mais coupent
+le faisceau. Le champ de révélation, la tête 2D et le portique XY du Studio consomment ce
+même itinéraire échantillonné ; le trait final reste constitué des pixels source exacts.
+
 En 2D, le faisceau est un champ spatial indépendant des masques de segmentation. Les
 couleurs déposées créent une sous-encre douce jusque sous le futur contour noir, puis la
 passe laser la remplace progressivement. Ce raccord transitoire masque les coutures de
