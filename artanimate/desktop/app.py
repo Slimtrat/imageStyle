@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from PySide6.QtCore import QSettings, QStandardPaths, QThread, Qt, QUrl
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QImage, QPixmap
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon, QImage, QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..branding import LOGO_PATH
 from ..core.config import RenderConfig
 from ..observability import attach_handler, configure_file_logging, detach_handler
 from .log_window import LogWindow, QtLogHandler
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
     ):
         super().__init__()
         self.setWindowTitle("ArtAnimate — Atelier d’animation")
+        self.setWindowIcon(QIcon(str(LOGO_PATH)))
         self.setMinimumSize(1100, 760)
         self.resize(1420, 900)
         self.settings = QSettings("ArtAnimate", "Desktop")
@@ -93,6 +95,21 @@ class MainWindow(QMainWindow):
 
     def _build_header(self) -> QHBoxLayout:
         layout = QHBoxLayout()
+        self.brand_logo = QLabel()
+        self.brand_logo.setAccessibleName("Logo ArtAnimate")
+        self.brand_logo.setFixedSize(68, 68)
+        logo = QPixmap(str(LOGO_PATH))
+        if not logo.isNull():
+            self.brand_logo.setPixmap(
+                logo.scaled(
+                    self.brand_logo.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        else:
+            logger.error("Logo ArtAnimate illisible : %s", LOGO_PATH)
+        layout.addWidget(self.brand_logo)
         text = QVBoxLayout()
         text.setSpacing(1)
         brand = QLabel("ArtAnimate")
@@ -643,6 +660,7 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ArtAnimate")
     app.setOrganizationName("ArtAnimate")
+    app.setWindowIcon(QIcon(str(LOGO_PATH)))
     app.setStyleSheet(APP_STYLESHEET)
     log_path = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)) / "artanimate.log"
     startup_warning = None
