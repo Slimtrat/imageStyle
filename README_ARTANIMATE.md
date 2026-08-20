@@ -1,0 +1,114 @@
+# ArtAnimate
+
+ArtAnimate transforme une œuvre graphique statique en film de construction : les familles de couleurs apparaissent dans l’ordre chromatique, comme du sable qui tombe ou une vague qui dépose la matière. Le rendu est déterministe, fidèle à l’image source et réutilisable sur toute une série d’œuvres.
+
+Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette pour décider **quand** révéler chaque zone, mais les pixels finaux proviennent de l’image originale. La dernière image est donc fidèle à la source.
+
+## Fonctionnalités
+
+- regroupement automatique des couleurs en espace CIELAB ;
+- familles chromatiques ordonnées (rouge → orange → jaune → vert → bleu → violet → rose) ;
+- détection séparée du fond et des contours sombres ;
+- effet `sand` avec accumulation irrégulière et grains en chute ;
+- effet `wave` avec front sinusoïdal, turbulence et six directions ;
+- contours au début, à la fin ou pendant toute l’animation ;
+- export MP4 H.264, MOV ou WebM, sans installation manuelle de FFmpeg ;
+- analyse de palette en JSON et planche de contrôle PNG ;
+- presets JSON reproductibles et graine aléatoire configurable.
+
+## Installation
+
+Python 3.11 ou plus récent est recommandé.
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e .
+```
+
+Pour le développement :
+
+```powershell
+python -m pip install -e ".[dev]"
+pytest
+```
+
+## Premier film
+
+```powershell
+artanimate render oeuvre.jpg -o oeuvre-sable.mp4
+```
+
+Un rendu plus ample en Full HD :
+
+```powershell
+artanimate render oeuvre.jpg -o oeuvre-vague.mp4 `
+  --effect wave `
+  --direction diagonal `
+  --width 1920 `
+  --duration 14 `
+  --outline last `
+  --order chromatic
+```
+
+Le même outil est disponible sans installer la commande globale :
+
+```powershell
+python -m artanimate render oeuvre.jpg -o oeuvre.mp4
+```
+
+## Examiner l’analyse avant le rendu
+
+```powershell
+artanimate analyze oeuvre.jpg `
+  --json analyse.json `
+  --preview analyse.png
+```
+
+La planche montre l’image redimensionnée et les familles retenues. Le JSON contient la couleur représentative, la teinte, la couverture et l’ordre de passage de chaque couche.
+
+## Réglages utiles
+
+```text
+--effect sand|wave
+--order chromatic|reverse|area|luminance
+--outline first|last|together
+--direction left|right|top|bottom|diagonal|radial
+--colors 24                 nombre de centres de quantification
+--duration 12               durée totale, pauses comprises
+--fps 30
+--width 1280                largeur de sortie, ratio conservé
+--start-hue 0               point de départ de l’ordre chromatique
+--background-tolerance 11   tolérance du fond, en Delta E
+--outline-luma 36           seuil de luminosité des contours
+--seed 7                    rendu strictement reproductible
+--config config.json        charge un preset JSON
+--manifest rendu.json       sauvegarde les décisions d’analyse
+```
+
+Les options données en ligne de commande prennent le dessus sur le fichier JSON.
+
+Exemple de preset : [examples/cinematic-sand.json](examples/cinematic-sand.json).
+
+## Conseils selon l’image
+
+- Une illustration à aplats fonctionne généralement avec les valeurs par défaut.
+- Sur une photo ou une toile texturée, augmenter `--colors` vers 32–40 conserve davantage de nuances.
+- Si le blanc du papier apparaît comme une couleur animée, augmenter légèrement `--background-tolerance`.
+- Si un bleu très sombre est pris pour un contour, diminuer `--outline-luma`.
+- Pour une série cohérente, conserver le même fichier de configuration et la même graine.
+
+## Architecture
+
+```text
+image source
+  → redimensionnement et détection du fond
+  → échantillonnage CIELAB et k-means++
+  → fusion en familles chromatiques
+  → extraction des contours
+  → ordonnancement et animation des masques
+  → composition avec les pixels originaux
+  → encodage vidéo atomique
+```
+
+ArtAnimate traite les images localement. Aucun fichier n’est envoyé vers un service externe.

@@ -1,0 +1,15 @@
+{
+  "effect": "sand",
+  "order": "chromatic",
+  "outline": "last",
+  "duration": 14.0,
+  "fps": 30,
+  "width": 1920,
+  "colors": 28,
+  "hold_start": 0.7,
+  "hold_end": 1.5,
+  "overlap": 0.18,
+  "grain_density": 0.003,
+  "grain_size": 1.5,
+  "seed": 7
+}

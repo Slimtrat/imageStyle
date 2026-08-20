@@ -1,0 +1,220 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Iterator
+
+import numpy as np
+
+from .analysis import ArtworkAnalysis, ColorLayer, analyze_artwork
+from .config import RenderConfig
+from .effects import reveal_opacity, sand_field, wave_field
+
+
+@dataclass(slots=True)
+class FallingParticles:
+    target_x: np.ndarray
+    target_y: np.ndarray
+    settle: np.ndarray
+    flight: np.ndarray
+    sway: np.ndarray
+    phase: np.ndarray
+    colors: np.ndarray
+
+
+class ArtworkRenderer:
+    """Prepared, reusable renderer. Frame generation is streaming and deterministic."""
+
+    def __init__(self, analysis: ArtworkAnalysis, config: RenderConfig):
+        self.analysis = analysis
+        self.config = config.validate()
+        self.width, self.height = analysis.size
+        self.color_layers = analysis.ordered_layers(config.order, config.start_hue)
+        self.stages = self._stage_layers()
+        all_layers = list(self.color_layers)
+        if analysis.outline:
+            all_layers.append(analysis.outline)
+        self.fields: dict[str, np.ndarray] = {}
+        self.particles: dict[str, FallingParticles] = {}
+        for index, layer in enumerate(all_layers):
+            layer_seed = config.seed + (index + 1) * 7919
+            if config.effect == "sand":
+                field = sand_field(
+                    self.width,
+                    self.height,
+                    config.turbulence,
+                    layer_seed,
+                )
+            else:
+                field = wave_field(
+                    self.width,
+                    self.height,
+                    config.direction,
+                    config.wave_amplitude,
+                    config.wave_frequency,
+                    config.turbulence,
+                    layer_seed,
+                )
+            self.fields[layer.key] = field
+            if config.effect == "sand" and config.grain_density > 0:
+                particles = self._prepare_particles(layer, field, layer_seed)
+                if particles is not None:
+                    self.particles[layer.key] = particles
+
+        self.blank = np.empty_like(analysis.source)
+        self.blank[:] = analysis.background_color
+        self.blank[analysis.background_mask] = analysis.source[analysis.background_mask]
+
+    def _stage_layers(self) -> list[ColorLayer]:
+        outline = self.analysis.outline
+        if outline is None or self.config.outline == "together":
+            return list(self.color_layers)
+        if self.config.outline == "first":
+            return [outline, *self.color_layers]
+        return [*self.color_layers, outline]
+
+    def _prepare_particles(
+        self,
+        layer: ColorLayer,
+        field: np.ndarray,
+        seed: int,
+    ) -> FallingParticles | None:
+        coordinates = np.argwhere(layer.mask)
+        if len(coordinates) == 0:
+            return None
+        desired = int(round(len(coordinates) * self.config.grain_density))
+        desired = min(len(coordinates), max(80, min(5200, desired)))
+        rng = np.random.default_rng(seed)
+        chosen = rng.choice(len(coordinates), size=desired, replace=False)
+        targets = coordinates[chosen]
+        target_y = targets[:, 0].astype(np.float32)
+        target_x = targets[:, 1].astype(np.float32)
+        settle = field[targets[:, 0], targets[:, 1]].astype(np.float32)
+        return FallingParticles(
+            target_x=target_x,
+            target_y=target_y,
+            settle=settle,
+            flight=rng.uniform(0.10, 0.25, desired).astype(np.float32),
+            sway=rng.uniform(-24.0, 24.0, desired).astype(np.float32),
+            phase=rng.uniform(0.0, np.pi * 2.0, desired).astype(np.float32),
+            colors=self.analysis.source[targets[:, 0], targets[:, 1]],
+        )
+
+    def _global_progress(self, seconds: float) -> float:
+        start = self.config.hold_start
+        end = self.config.duration - self.config.hold_end
+        if seconds <= start:
+            return 0.0
+        if seconds >= end:
+            return 1.0
+        return (seconds - start) / (end - start)
+
+    def _stage_progress(self, global_progress: float, index: int) -> float:
+        count = max(1, len(self.stages))
+        stride = 1.0 - self.config.overlap
+        timeline = 1.0 + (count - 1) * stride
+        return float(np.clip(global_progress * timeline - index * stride, 0.0, 1.0))
+
+    def _layer_progresses(self, global_progress: float) -> list[tuple[ColorLayer, float]]:
+        result = [
+            (layer, self._stage_progress(global_progress, index))
+            for index, layer in enumerate(self.stages)
+        ]
+        if self.analysis.outline and self.config.outline == "together":
+            result.append((self.analysis.outline, global_progress))
+        return result
+
+    def _draw_particles(
+        self,
+        frame: np.ndarray,
+        particles: FallingParticles,
+        progress: float,
+    ) -> None:
+        spawn = np.maximum(0.0, particles.settle - particles.flight)
+        alive = (progress >= spawn) & (progress < particles.settle)
+        if not np.any(alive):
+            return
+        denominator = np.maximum(particles.settle - spawn, 1e-5)
+        phase_progress = np.clip((progress - spawn) / denominator, 0.0, 1.0)
+        eased = phase_progress * phase_progress
+        margin = self.height * 0.14
+        current_y = -margin + (particles.target_y + margin) * eased
+        current_x = (
+            particles.target_x
+            + np.sin(particles.phase + phase_progress * np.pi * 3.0)
+            * particles.sway
+            * (1.0 - phase_progress)
+        )
+        indices = np.flatnonzero(alive)
+        x = np.rint(current_x[indices]).astype(np.int32)
+        y = np.rint(current_y[indices]).astype(np.int32)
+        visible = (x >= 0) & (x < self.width) & (y >= 0) & (y < self.height)
+        x, y, indices = x[visible], y[visible], indices[visible]
+        if not len(indices):
+            return
+        frame[y, x] = particles.colors[indices]
+        radius = max(0, int(round(self.config.grain_size - 0.35)))
+        if radius:
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nx, ny = x + dx, y + dy
+                inside = (nx >= 0) & (nx < self.width) & (ny >= 0) & (ny < self.height)
+                frame[ny[inside], nx[inside]] = particles.colors[indices[inside]]
+
+    def frame_at(self, seconds: float) -> np.ndarray:
+        seconds = float(np.clip(seconds, 0.0, self.config.duration))
+        global_progress = self._global_progress(seconds)
+        if global_progress >= 1.0:
+            return self.analysis.source.copy()
+        frame = self.blank.copy()
+        for layer, progress in self._layer_progresses(global_progress):
+            if progress <= 0.0:
+                continue
+            if progress >= 1.0:
+                frame[layer.mask] = self.analysis.source[layer.mask]
+                continue
+            opacity = reveal_opacity(
+                layer.mask,
+                self.fields[layer.key],
+                progress,
+                self.config.soft_edge,
+            )
+            active = opacity > 0.0
+            if np.any(active):
+                alpha = opacity[active, None]
+                foreground = self.analysis.source[active].astype(np.float32)
+                background = frame[active].astype(np.float32)
+                frame[active] = np.rint(background * (1.0 - alpha) + foreground * alpha).astype(
+                    np.uint8
+                )
+            particles = self.particles.get(layer.key)
+            if particles is not None:
+                self._draw_particles(frame, particles, progress)
+        return frame
+
+    @property
+    def frame_count(self) -> int:
+        return max(2, int(round(self.config.duration * self.config.fps)))
+
+    def frames(self) -> Iterator[np.ndarray]:
+        count = self.frame_count
+        for index in range(count):
+            seconds = self.config.duration * index / (count - 1)
+            yield self.frame_at(seconds)
+
+
+def render_video(
+    input_path: str | Path,
+    output_path: str | Path,
+    config: RenderConfig | None = None,
+    manifest_path: str | Path | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> ArtworkAnalysis:
+    selected_config = (config or RenderConfig()).validate()
+    analysis = analyze_artwork(input_path, selected_config)
+    renderer = ArtworkRenderer(analysis, selected_config)
+    from .video import encode_video
+
+    encode_video(renderer, output_path, progress)
+    if manifest_path:
+        analysis.save_manifest(manifest_path, selected_config)
+    return analysis
