@@ -8,6 +8,7 @@ from typing import Any
 
 EFFECTS = ("sand", "wave")
 ORDERS = ("chromatic", "reverse", "area", "luminance")
+NEUTRAL_POSITIONS = ("first", "last")
 OUTLINE_MODES = ("first", "last", "together")
 DIRECTIONS = ("left", "right", "top", "bottom", "diagonal", "radial")
 
@@ -26,6 +27,8 @@ class RenderConfig:
     hold_end: float = 1.2
     overlap: float = 0.16
     start_hue: float = 0.0
+    neutral_position: str = "last"
+    shape_completion: int = 2
     background_tolerance: float = 11.0
     outline_luma: float = 36.0
     outline_chroma: float = 34.0
@@ -43,6 +46,10 @@ class RenderConfig:
             raise ValueError(f"effect doit être l'un de : {', '.join(EFFECTS)}")
         if self.order not in ORDERS:
             raise ValueError(f"order doit être l'un de : {', '.join(ORDERS)}")
+        if self.neutral_position not in NEUTRAL_POSITIONS:
+            raise ValueError(
+                f"neutral_position doit être l’une de : {', '.join(NEUTRAL_POSITIONS)}"
+            )
         if self.outline not in OUTLINE_MODES:
             raise ValueError(f"outline doit être l'un de : {', '.join(OUTLINE_MODES)}")
         if self.direction not in DIRECTIONS:
@@ -59,6 +66,8 @@ class RenderConfig:
             raise ValueError("la somme des pauses doit être inférieure à la durée")
         if not 0 <= self.overlap < 0.9:
             raise ValueError("overlap doit être compris entre 0 et 0.9")
+        if not isinstance(self.shape_completion, int) or not 0 <= self.shape_completion <= 4:
+            raise ValueError("shape_completion doit être un entier compris entre 0 et 4")
         if self.background_tolerance < 0:
             raise ValueError("background_tolerance ne peut pas être négatif")
         if not 0 <= self.outline_luma <= 100:

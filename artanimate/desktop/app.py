@@ -11,7 +11,6 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -23,7 +22,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -32,6 +30,7 @@ from PySide6.QtWidgets import (
 from ..branding import LOGO_PATH
 from ..core.config import RenderConfig
 from ..observability import attach_handler, configure_file_logging, detach_handler
+from .controls import ChromaticSequenceWheel, ParameterSlider
 from .log_window import LogWindow, QtLogHandler
 from .style import APP_STYLESHEET
 from .widgets import PathDropZone, PreviewCard, ScaledImageLabel
@@ -89,6 +88,9 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._restore_destination()
         self._effect_changed()
+        self._order_changed()
+        self._neutral_changed()
+        self._outline_changed()
         logger.info("Interface desktop prête")
         if startup_warning:
             logger.warning(startup_warning)
@@ -197,8 +199,8 @@ class MainWindow(QMainWindow):
     def _build_controls(self) -> QScrollArea:
         card = QFrame()
         card.setObjectName("card")
-        card.setMinimumWidth(360)
-        card.setMaximumWidth(410)
+        card.setMinimumWidth(390)
+        card.setMaximumWidth(450)
         content = QVBoxLayout(card)
         content.setContentsMargins(18, 16, 18, 18)
         content.setSpacing(12)
@@ -212,52 +214,124 @@ class MainWindow(QMainWindow):
         form.setVerticalSpacing(9)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
-        self.effect_combo = self._combo((("Sable", "sand"), ("Vague", "wave")))
+        self.effect_combo = self._combo(
+            (("Sable — grains en chute", "sand"), ("Vague — front fluide", "wave"))
+        )
         self.order_combo = self._combo(
             (
-                ("Chromatique", "chromatic"),
-                ("Chromatique inversé", "reverse"),
-                ("Grandes zones d’abord", "area"),
-                ("Clair vers sombre", "luminance"),
+                ("Roue chromatique — sens horaire", "chromatic"),
+                ("Roue chromatique — sens antihoraire", "reverse"),
+                ("Surfaces — grandes zones d’abord", "area"),
+                ("Lumière — clair vers sombre", "luminance"),
             )
         )
+        self.neutral_combo = self._combo(
+            (("Après les couleurs", "last"), ("Avant les couleurs", "first"))
+        )
         self.outline_combo = self._combo(
-            (("À la fin", "last"), ("Au début", "first"), ("Progressifs", "together"))
+            (
+                ("À la fin — dessin de clôture", "last"),
+                ("Au début — structure d’abord", "first"),
+                ("Progressifs — avec les couleurs", "together"),
+            )
         )
         self.format_combo = self._combo(
             (("MP4 — H.264", ".mp4"), ("WebM — VP9", ".webm"), ("MOV — H.264", ".mov"))
         )
 
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(320, 3840)
-        self.width_spin.setSingleStep(160)
-        self.width_spin.setValue(1280)
-        self.width_spin.setSuffix(" px")
+        self.width_spin = self._slider(320, 3840, 1280, 160, 0, " px", "Largeur de la vidéo exportée")
+        self.duration_spin = self._slider(3.0, 120.0, 12.0, 0.5, 1, " s", "Durée totale, pauses incluses")
+        self.fps_spin = self._slider(12, 60, 30, 1, 0, " i/s", "Fluidité de la vidéo")
+        self.colors_spin = self._slider(4, 64, 24, 1, 0, "", "Nombre de nuances analysées")
+        self.shape_completion = self._slider(
+            0,
+            4,
+            2,
+            1,
+            0,
+            "",
+            "Complète les petits trous dans les aplats sans modifier l’image finale",
+        )
+        self.background_tolerance = self._slider(
+            0.0,
+            30.0,
+            11.0,
+            0.5,
+            1,
+            " ΔE",
+            "Tolérance utilisée pour séparer le fond de l’œuvre",
+        )
+        self.outline_luma = self._slider(
+            0,
+            70,
+            36,
+            1,
+            0,
+            " L*",
+            "Luminosité maximale reconnue comme contour sombre",
+        )
+        self.overlap_slider = self._slider(
+            0.0,
+            0.8,
+            0.16,
+            0.02,
+            2,
+            "",
+            "Chevauchement temporel entre deux familles de couleurs",
+        )
+        self.seed_spin = self._slider(0, 9999, 7, 1, 0, "", "Graine du mouvement déterministe")
 
-        self.duration_spin = self._double(3.0, 120.0, 12.0, 0.5, 1, " s")
-        self.fps_spin = QSpinBox()
-        self.fps_spin.setRange(12, 60)
-        self.fps_spin.setValue(30)
-        self.fps_spin.setSuffix(" i/s")
-        self.colors_spin = QSpinBox()
-        self.colors_spin.setRange(4, 64)
-        self.colors_spin.setValue(24)
-        self.seed_spin = QSpinBox()
-        self.seed_spin.setRange(0, 999_999)
-        self.seed_spin.setValue(7)
-
-        form.addRow("Mode", self.effect_combo)
-        form.addRow("Ordre", self.order_combo)
+        form.addRow("Animation", self.effect_combo)
+        form.addRow("Séquence", self.order_combo)
+        form.addRow("Noir & blanc", self.neutral_combo)
         form.addRow("Contours", self.outline_combo)
         form.addRow("Format", self.format_combo)
-        form.addRow("Largeur", self.width_spin)
-        form.addRow("Durée", self.duration_spin)
-        form.addRow("Fluidité", self.fps_spin)
-        form.addRow("Nuances", self.colors_spin)
-        form.addRow("Graine", self.seed_spin)
         content.addLayout(form)
 
-        mode_title = QLabel("Réglages du mode")
+        self.mode_description = QLabel()
+        self.mode_description.setObjectName("helperText")
+        self.mode_description.setWordWrap(True)
+        content.addWidget(self.mode_description)
+        self.order_description = QLabel()
+        self.order_description.setObjectName("helperText")
+        self.order_description.setWordWrap(True)
+        content.addWidget(self.order_description)
+
+        self.sequence_panel = QFrame()
+        self.sequence_panel.setObjectName("sequenceCard")
+        sequence_layout = QVBoxLayout(self.sequence_panel)
+        sequence_layout.setContentsMargins(10, 10, 10, 10)
+        sequence_layout.setSpacing(4)
+        sequence_title = QLabel("Séquence chromatique")
+        sequence_title.setObjectName("sectionTitle")
+        sequence_layout.addWidget(sequence_title)
+        sequence_help = QLabel("Glissez la roue : la couleur placée sous 1 ouvre l’animation.")
+        sequence_help.setObjectName("muted")
+        sequence_help.setWordWrap(True)
+        sequence_layout.addWidget(sequence_help)
+        self.chromatic_wheel = ChromaticSequenceWheel()
+        sequence_layout.addWidget(self.chromatic_wheel)
+        content.addWidget(self.sequence_panel)
+
+        quality_title = QLabel("Qualité & sortie")
+        quality_title.setObjectName("sectionTitle")
+        content.addWidget(quality_title)
+        quality_form = QFormLayout()
+        quality_form.setHorizontalSpacing(12)
+        quality_form.setVerticalSpacing(9)
+        quality_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        quality_form.addRow("Largeur", self.width_spin)
+        quality_form.addRow("Durée", self.duration_spin)
+        quality_form.addRow("Fluidité", self.fps_spin)
+        quality_form.addRow("Nuances", self.colors_spin)
+        quality_form.addRow("Formes complètes", self.shape_completion)
+        quality_form.addRow("Fond", self.background_tolerance)
+        quality_form.addRow("Seuil contour", self.outline_luma)
+        quality_form.addRow("Chevauchement", self.overlap_slider)
+        quality_form.addRow("Graine", self.seed_spin)
+        content.addLayout(quality_form)
+
+        mode_title = QLabel("Réglages du mouvement")
         mode_title.setObjectName("sectionTitle")
         content.addWidget(mode_title)
         self.mode_stack = QStackedWidget()
@@ -277,8 +351,8 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(card)
-        scroll.setMinimumWidth(380)
-        scroll.setMaximumWidth(430)
+        scroll.setMinimumWidth(410)
+        scroll.setMaximumWidth(470)
         return scroll
 
     def _build_sand_page(self) -> QWidget:
@@ -286,9 +360,9 @@ class MainWindow(QMainWindow):
         form = QFormLayout(page)
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(9)
-        self.grain_density = self._double(0.0, 0.02, 0.0025, 0.0005, 4)
-        self.grain_size = self._double(0.5, 4.0, 1.35, 0.1, 2, " px")
-        self.sand_turbulence = self._double(0.0, 0.35, 0.10, 0.01, 2)
+        self.grain_density = self._slider(0.0, 0.02, 0.0025, 0.0005, 4)
+        self.grain_size = self._slider(0.5, 4.0, 1.35, 0.05, 2, " px")
+        self.sand_turbulence = self._slider(0.0, 0.35, 0.10, 0.01, 2)
         form.addRow("Densité des grains", self.grain_density)
         form.addRow("Taille des grains", self.grain_size)
         form.addRow("Irrégularité", self.sand_turbulence)
@@ -309,10 +383,10 @@ class MainWindow(QMainWindow):
                 ("Depuis le centre", "radial"),
             )
         )
-        self.wave_amplitude = self._double(0.0, 0.20, 0.055, 0.005, 3)
-        self.wave_frequency = self._double(0.5, 10.0, 2.7, 0.1, 2)
-        self.wave_turbulence = self._double(0.0, 0.35, 0.10, 0.01, 2)
-        self.soft_edge = self._double(0.001, 0.10, 0.012, 0.002, 3)
+        self.wave_amplitude = self._slider(0.0, 0.20, 0.055, 0.005, 3)
+        self.wave_frequency = self._slider(0.5, 10.0, 2.7, 0.1, 2)
+        self.wave_turbulence = self._slider(0.0, 0.35, 0.10, 0.01, 2)
+        self.soft_edge = self._slider(0.001, 0.10, 0.012, 0.002, 3)
         form.addRow("Direction", self.direction_combo)
         form.addRow("Amplitude", self.wave_amplitude)
         form.addRow("Fréquence", self.wave_frequency)
@@ -359,25 +433,32 @@ class MainWindow(QMainWindow):
         return combo
 
     @staticmethod
-    def _double(
+    def _slider(
         minimum: float,
         maximum: float,
         value: float,
         step: float,
         decimals: int,
         suffix: str = "",
-    ) -> QDoubleSpinBox:
-        control = QDoubleSpinBox()
-        control.setRange(minimum, maximum)
-        control.setDecimals(decimals)
-        control.setSingleStep(step)
-        control.setValue(value)
-        control.setSuffix(suffix)
-        return control
+        description: str = "",
+    ) -> ParameterSlider:
+        return ParameterSlider(
+            minimum,
+            maximum,
+            value,
+            step,
+            decimals,
+            suffix,
+            description,
+        )
 
     def _connect_signals(self) -> None:
         self.source_zone.path_selected.connect(self._source_selected)
         self.effect_combo.currentIndexChanged.connect(self._effect_changed)
+        self.order_combo.currentIndexChanged.connect(self._order_changed)
+        self.neutral_combo.currentIndexChanged.connect(self._neutral_changed)
+        self.outline_combo.currentIndexChanged.connect(self._outline_changed)
+        self.chromatic_wheel.hueChanged.connect(self._hue_changed)
         self.format_combo.currentIndexChanged.connect(self._format_changed)
         self.output_name.textEdited.connect(self._filename_edited)
         self.generate_button.clicked.connect(self._start_render)
@@ -425,10 +506,50 @@ class MainWindow(QMainWindow):
         self._auto_filename = False
 
     def _effect_changed(self) -> None:
+        effect = str(self.effect_combo.currentData())
         self.mode_stack.setCurrentIndex(self.effect_combo.currentIndex())
-        logger.info("Mode sélectionné : %s", self.effect_combo.currentData())
+        descriptions = {
+            "sand": (
+                "Sable : les pigments tombent verticalement, se déposent puis complètent "
+                "progressivement chaque forme."
+            ),
+            "wave": (
+                "Vague : un front directionnel traverse l’œuvre et révèle les aplats "
+                "comme une matière fluide."
+            ),
+        }
+        self.mode_description.setText(descriptions[effect])
+        logger.info("Mode sélectionné : %s", effect)
         if self._auto_filename:
             self._suggest_filename()
+
+    def _order_changed(self) -> None:
+        order = str(self.order_combo.currentData())
+        uses_wheel = order in {"chromatic", "reverse"}
+        self.sequence_panel.setVisible(uses_wheel)
+        self.neutral_combo.setEnabled(uses_wheel)
+        self.chromatic_wheel.setReverse(order == "reverse")
+        descriptions = {
+            "chromatic": "Les couleurs suivent les numéros 1 → 6 dans le sens horaire.",
+            "reverse": "Les couleurs suivent les numéros 1 → 6 dans le sens antihoraire.",
+            "area": "Les plus grandes surfaces sont dessinées avant les détails.",
+            "luminance": "Les zones claires apparaissent avant les zones sombres.",
+        }
+        self.order_description.setText(descriptions[order])
+        logger.info("Séquence sélectionnée : %s", order)
+
+    def _neutral_changed(self) -> None:
+        position = str(self.neutral_combo.currentData())
+        self.chromatic_wheel.setNeutralPosition(position)
+        logger.info("Position des neutres : %s", position)
+
+    def _outline_changed(self) -> None:
+        mode = str(self.outline_combo.currentData())
+        self.chromatic_wheel.setOutlineMode(mode)
+        logger.info("Mode des contours : %s", mode)
+
+    def _hue_changed(self, hue: float) -> None:
+        logger.info("Départ de la roue chromatique : %.1f°", hue)
 
     def _format_changed(self) -> None:
         suffix = str(self.format_combo.currentData())
@@ -447,11 +568,17 @@ class MainWindow(QMainWindow):
         values = {
             "effect": effect,
             "order": str(self.order_combo.currentData()),
+            "neutral_position": str(self.neutral_combo.currentData()),
+            "start_hue": self.chromatic_wheel.startHue(),
             "outline": str(self.outline_combo.currentData()),
             "duration": self.duration_spin.value(),
             "fps": self.fps_spin.value(),
             "width": self.width_spin.value(),
             "colors": self.colors_spin.value(),
+            "shape_completion": self.shape_completion.value(),
+            "background_tolerance": self.background_tolerance.value(),
+            "outline_luma": self.outline_luma.value(),
+            "overlap": self.overlap_slider.value(),
             "seed": self.seed_spin.value(),
         }
         if effect == "sand":

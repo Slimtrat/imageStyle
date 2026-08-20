@@ -10,7 +10,14 @@ import time
 from typing import Any
 
 from ..core.analysis import analyze_artwork
-from ..core.config import DIRECTIONS, EFFECTS, ORDERS, OUTLINE_MODES, RenderConfig
+from ..core.config import (
+    DIRECTIONS,
+    EFFECTS,
+    NEUTRAL_POSITIONS,
+    ORDERS,
+    OUTLINE_MODES,
+    RenderConfig,
+)
 from ..core.renderer import ArtworkRenderer
 from ..core.video import encode_video
 from ..observability import configure_console_logging, configure_file_logging
@@ -23,12 +30,25 @@ def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", type=Path, help="preset JSON à charger")
     parser.add_argument("--effect", choices=EFFECTS, default=None, help="moteur de révélation")
     parser.add_argument("--order", choices=ORDERS, default=None, help="ordre des familles")
+    parser.add_argument(
+        "--neutral-position",
+        choices=NEUTRAL_POSITIONS,
+        default=None,
+        help="place les neutres avant ou après les couleurs",
+    )
     parser.add_argument("--outline", choices=OUTLINE_MODES, default=None, help="moment des contours")
     parser.add_argument("--direction", choices=DIRECTIONS, default=None, help="direction de la vague")
     parser.add_argument("--duration", type=float, default=None, help="durée totale en secondes")
     parser.add_argument("--fps", type=int, default=None, help="images par seconde")
     parser.add_argument("--width", type=int, default=None, help="largeur de sortie")
     parser.add_argument("--colors", type=int, default=None, help="centres de quantification (2–64)")
+    parser.add_argument(
+        "--shape-completion",
+        type=int,
+        choices=range(0, 5),
+        default=None,
+        help="complétion morphologique des aplats (0–4)",
+    )
     parser.add_argument("--hold-start", type=float, default=None, help="pause initiale en secondes")
     parser.add_argument("--hold-end", type=float, default=None, help="pause finale en secondes")
     parser.add_argument("--overlap", type=float, default=None, help="chevauchement des familles (0–0.9)")
@@ -56,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="artanimate",
         description="Transforme une œuvre statique en animation chromatique sable ou vague.",
     )
-    parser.add_argument("--version", action="version", version="ArtAnimate 1.0.0")
+    parser.add_argument("--version", action="version", version="ArtAnimate 1.1.0")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     parser.add_argument("--log-file", type=Path, help="copie persistante des logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -87,7 +107,7 @@ def _config_from_namespace(namespace: argparse.Namespace) -> RenderConfig:
 
 
 def _palette_summary(analysis: Any, config: RenderConfig) -> str:
-    ordered = analysis.ordered_layers(config.order, config.start_hue)
+    ordered = analysis.ordered_layers(config.order, config.start_hue, config.neutral_position)
     names = " -> ".join(layer.label for layer in ordered)
     if analysis.outline:
         if config.outline == "first":

@@ -19,6 +19,7 @@ from .colors import (
     rgb_to_lab,
 )
 from .config import RenderConfig
+from .masks import complete_family_labels
 
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,12 @@ class ArtworkAnalysis:
         height, width = self.source.shape[:2]
         return width, height
 
-    def ordered_layers(self, order: str, start_hue: float = 0.0) -> list[ColorLayer]:
+    def ordered_layers(
+        self,
+        order: str,
+        start_hue: float = 0.0,
+        neutral_position: str = "last",
+    ) -> list[ColorLayer]:
         layers = list(self.layers)
         if order == "area":
             return sorted(layers, key=lambda layer: layer.pixel_count, reverse=True)
@@ -83,20 +89,25 @@ class ArtworkAnalysis:
             "rose": 337.0,
         }
 
-        def chromatic_key(layer: ColorLayer) -> tuple[int, float]:
-            if layer.key == "neutral":
-                return 1, layer.luma
-            return 0, (family_hues[layer.key] - start_hue) % 360.0
+        def is_neutral(layer: ColorLayer) -> bool:
+            return layer.key == "neutral" or layer.key.startswith("neutral_")
 
-        result = sorted(layers, key=chromatic_key)
+        chromatic = sorted(
+            (layer for layer in layers if not is_neutral(layer)),
+            key=lambda layer: (family_hues[layer.key] - start_hue) % 360.0,
+        )
+        neutrals = sorted(
+            (layer for layer in layers if is_neutral(layer)),
+            key=lambda layer: layer.luma,
+        )
         if order == "reverse":
-            chromatic = [layer for layer in result if layer.key != "neutral"]
-            neutral = [layer for layer in result if layer.key == "neutral"]
-            result = list(reversed(chromatic)) + neutral
-        return result
+            chromatic.reverse()
+        if neutral_position == "first":
+            return [*neutrals, *chromatic]
+        return [*chromatic, *neutrals]
 
     def manifest(self, config: RenderConfig) -> dict[str, Any]:
-        ordered = self.ordered_layers(config.order, config.start_hue)
+        ordered = self.ordered_layers(config.order, config.start_hue, config.neutral_position)
         entries = [layer.manifest(self.source.shape[0] * self.source.shape[1]) for layer in ordered]
         if self.outline:
             outline_entry = self.outline.manifest(self.source.shape[0] * self.source.shape[1])
@@ -124,7 +135,7 @@ class ArtworkAnalysis:
         logger.info("Manifeste enregistré : %s", destination.resolve())
 
     def save_preview(self, path: str | Path, config: RenderConfig) -> None:
-        ordered = self.ordered_layers(config.order, config.start_hue)
+        ordered = self.ordered_layers(config.order, config.start_hue, config.neutral_position)
         items = ordered + ([self.outline] if self.outline else [])
         width, height = self.size
         palette_height = max(96, min(180, height // 5))
@@ -247,14 +258,39 @@ def analyze_artwork(path: str | Path, config: RenderConfig) -> ArtworkAnalysis:
         representative = np.mean(flat_rgb[members].astype(np.float32), axis=0)
         center_chroma = float(np.linalg.norm(centers[cluster_index, 1:3]))
         family, hue = family_for_color(representative, center_chroma)
+        if family == "neutral":
+            family = "neutral_light" if centers[cluster_index, 0] >= 62.0 else "neutral_dark"
         if family not in family_masks:
             family_masks[family] = np.zeros(height * width, dtype=bool)
             family_colors[family] = []
         family_masks[family][members] = True
         family_colors[family].append((representative, len(members), hue))
 
+    family_order = tuple(family_masks)
+    family_ids = {family: index for index, family in enumerate(family_order)}
+    raw_labels = np.full(height * width, -1, dtype=np.int16)
+    for family, mask_flat in family_masks.items():
+        raw_labels[mask_flat] = family_ids[family]
+    completed_labels = complete_family_labels(
+        raw_labels.reshape(height, width),
+        config.shape_completion,
+    ).reshape(-1)
+    changed = int(np.count_nonzero(completed_labels != raw_labels))
+    active_count = max(1, int(np.count_nonzero(raw_labels >= 0)))
+    if changed:
+        logger.info(
+            "Complétion des formes : niveau=%d, %.2f %% des pixels colorés réattribués",
+            config.shape_completion,
+            changed * 100.0 / active_count,
+        )
+    for family, family_id in family_ids.items():
+        family_masks[family] = completed_labels == family_id
+
     layers: list[ColorLayer] = []
     for family, mask_flat in family_masks.items():
+        if not np.any(mask_flat):
+            logger.info("Famille supprimée par la complétion : %s", family)
+            continue
         weighted = family_colors[family]
         total = sum(count for _, count, _ in weighted)
         rgb = sum(color * count for color, count, _ in weighted) / total

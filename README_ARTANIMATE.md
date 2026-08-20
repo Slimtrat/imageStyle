@@ -7,6 +7,8 @@ Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette
 ## Fonctionnalités
 
 - regroupement automatique des couleurs en espace CIELAB ;
+- complétion morphologique réglable des aplats pour supprimer les micro-trous ;
+- roue chromatique rotative avec séquence numérotée et neutres séparés ;
 - familles chromatiques ordonnées (rouge → orange → jaune → vert → bleu → violet → rose) ;
 - détection séparée du fond et des contours sombres ;
 - effet `sand` avec accumulation irrégulière et grains en chute ;
@@ -42,7 +44,7 @@ python -m pip install -e ".[desktop]"
 artanimate-ui
 ```
 
-Le client accepte le glisser-déposer de l’image et du dossier de destination. Il affiche l’œuvre originale, le rendu en cours avec son pourcentage, puis lit la vidéo finale. Les réglages visibles s’adaptent automatiquement au mode Sable ou Vague. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle. Les événements sont aussi conservés dans un fichier rotatif accessible depuis cette fenêtre.
+Le client accepte le glisser-déposer de l’image et du dossier de destination. Il affiche l’œuvre originale, le rendu en cours avec son pourcentage, puis lit la vidéo finale. Les réglages visibles s’adaptent automatiquement au mode Sable ou Vague. Chaque valeur numérique dispose d’un slider, de sa valeur exacte et de bornes visibles. La roue chromatique se fait tourner à la souris pour choisir la couleur de départ et le sens de progression. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle. Les événements sont aussi conservés dans un fichier rotatif accessible depuis cette fenêtre.
 
 Vous pouvez aussi le lancer sans commande installée :
 
@@ -105,6 +107,8 @@ La planche montre l’image redimensionnée et les familles retenues. Le JSON co
 --outline first|last|together
 --direction left|right|top|bottom|diagonal|radial
 --colors 24                 nombre de centres de quantification
+--shape-completion 2        complétion des formes, de 0 à 4
+--neutral-position last     neutres avant ou après les couleurs
 --duration 12               durée totale, pauses comprises
 --fps 30
 --width 1280                largeur de sortie, ratio conservé

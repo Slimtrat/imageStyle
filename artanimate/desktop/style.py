@@ -95,6 +95,49 @@ QScrollArea {
     border: none;
     background: transparent;
 }
+QFrame#sequenceCard {
+    background: #f8f9fd;
+    border: 1px solid #dfe4ec;
+    border-radius: 11px;
+}
+QLabel#helperText {
+    color: #4e5870;
+    background: #eef1f8;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+QLabel#sliderValue {
+    color: #4050c2;
+    background: #eef0ff;
+    border: 1px solid #d8dcff;
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-weight: 700;
+}
+QLabel#rangeLabel {
+    color: #8a92a1;
+    font-size: 10px;
+}
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #dfe4ec;
+    border-radius: 3px;
+}
+QSlider::sub-page:horizontal {
+    background: #6372e5;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    width: 16px;
+    height: 16px;
+    margin: -5px 0;
+    background: #ffffff;
+    border: 2px solid #5262d9;
+    border-radius: 8px;
+}
+QSlider::handle:horizontal:hover {
+    background: #eef0ff;
+}
 QToolTip {
     color: #ffffff;
     background: #20283a;

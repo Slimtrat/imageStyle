@@ -19,6 +19,8 @@ FAMILY_LABELS = {
     "magenta": "magentas",
     "rose": "roses",
     "neutral": "neutres",
+    "neutral_dark": "neutres sombres",
+    "neutral_light": "neutres clairs",
     "outline": "contours",
 }
 

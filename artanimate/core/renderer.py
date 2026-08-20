@@ -33,7 +33,11 @@ class ArtworkRenderer:
         self.analysis = analysis
         self.config = config.validate()
         self.width, self.height = analysis.size
-        self.color_layers = analysis.ordered_layers(config.order, config.start_hue)
+        self.color_layers = analysis.ordered_layers(
+            config.order,
+            config.start_hue,
+            config.neutral_position,
+        )
         self.stages = self._stage_layers()
         all_layers = list(self.color_layers)
         if analysis.outline:
