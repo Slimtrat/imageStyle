@@ -19,6 +19,7 @@ class EffectCapability(StrEnum):
 
     CHROMATIC_SEQUENCE = "chromatic_sequence"
     FALLING_PARTICLES = "falling_particles"
+    FRAME_COMPOSITOR = "frame_compositor"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,24 @@ class EffectContext:
     def __post_init__(self) -> None:
         if self.width <= 0 or self.height <= 0:
             raise ValueError("Les dimensions du contexte d’effet doivent être positives")
+
+
+@dataclass(frozen=True, slots=True)
+class FrameCompositionContext:
+    """Immutable source data offered to effects that compose a complete frame."""
+
+    source: np.ndarray
+    canvas: np.ndarray
+    config: RenderConfig
+    linear_source: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        if self.source.ndim != 3 or self.source.shape[2] != 3:
+            raise ValueError("La source du compositeur doit être une image RGB")
+        if self.canvas.shape != self.source.shape:
+            raise ValueError("La toile et la source du compositeur doivent avoir la même taille")
+        if self.linear_source is not None and self.linear_source.shape != self.source.shape:
+            raise ValueError("La source linéaire doit avoir la même taille que la source RGB")
 
 
 class AnimationEffect(ABC):
@@ -104,6 +123,33 @@ class AnimationEffect(ABC):
                 f"[{minimum:.4f}, {maximum:.4f}]"
             )
         return np.clip(field, 0.0, 1.0)
+
+    def create_frame(
+        self,
+        context: FrameCompositionContext,
+        progress: float,
+    ) -> np.ndarray | None:
+        """Compose and validate an optional whole-image frame."""
+        frame = self.compose_frame(context, float(np.clip(progress, 0.0, 1.0)))
+        if frame is None:
+            return None
+        result = np.asarray(frame)
+        if result.shape != context.source.shape:
+            raise ValueError(
+                f"L’effet {self.key!r} a composé {result.shape}, "
+                f"attendu {context.source.shape}"
+            )
+        if result.dtype != np.uint8:
+            raise ValueError(f"L’effet {self.key!r} doit composer des pixels RGB uint8")
+        return result
+
+    def compose_frame(
+        self,
+        context: FrameCompositionContext,
+        progress: float,
+    ) -> np.ndarray | None:
+        """Optionally replace the generic layer renderer for the complete frame."""
+        return None
 
     @abstractmethod
     def build_field(self, context: EffectContext) -> np.ndarray:

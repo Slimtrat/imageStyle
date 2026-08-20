@@ -815,10 +815,15 @@ class MainWindow(QMainWindow):
         self._settings_cards["effect"].setDescription(
             f"{effect_label} · {effect_count} paramètres"
         )
-        order = self.order_combo.currentText().replace("Roue chromatique — ", "Roue · ")
-        self._settings_cards["colors"].setDescription(
-            f"{order} · départ {self.chromatic_wheel.startHue():.0f}°"
-        )
+        descriptor = self._effect_descriptors[effect]
+        if descriptor.supports(EffectCapability.FRAME_COMPOSITOR):
+            color_summary = "Composition directe · aucun ordre chromatique"
+        else:
+            order = self.order_combo.currentText().replace(
+                "Roue chromatique — ", "Roue · "
+            )
+            color_summary = f"{order} · départ {self.chromatic_wheel.startHue():.0f}°"
+        self._settings_cards["colors"].setDescription(color_summary)
         self._settings_cards["analysis"].setDescription(
             f"{int(self.colors_spin.value())} nuances · formes {int(self.shape_completion.value())}/4"
         )
@@ -948,9 +953,15 @@ class MainWindow(QMainWindow):
         order = str(self.order_combo.currentData())
         effect = str(self.effect_combo.currentData())
         descriptor = self._effect_descriptors[effect]
-        uses_wheel = order in {"chromatic", "reverse"} and descriptor.supports(
-            EffectCapability.CHROMATIC_SEQUENCE
+        direct_compositor = descriptor.supports(EffectCapability.FRAME_COMPOSITOR)
+        uses_wheel = (
+            not direct_compositor
+            and order in {"chromatic", "reverse"}
+            and descriptor.supports(EffectCapability.CHROMATIC_SEQUENCE)
         )
+        self.order_combo.setEnabled(not direct_compositor)
+        self.outline_combo.setEnabled(not direct_compositor)
+        self.overlap_slider.setEnabled(not direct_compositor)
         self.sequence_panel.setVisible(uses_wheel)
         self.neutral_combo.setEnabled(uses_wheel)
         self.chromatic_wheel.setReverse(order == "reverse")
@@ -960,7 +971,14 @@ class MainWindow(QMainWindow):
             "area": "Les plus grandes surfaces sont dessinées avant les détails.",
             "luminance": "Les zones claires apparaissent avant les zones sombres.",
         }
-        self.order_description.setText(descriptions[order])
+        if direct_compositor:
+            self.order_description.setText(
+                "Le Fondu RGB compose l’image entière : ordre chromatique, neutres "
+                "et contours ne sont pas utilisés."
+            )
+        else:
+            self.order_description.setText(descriptions[order])
+        self._update_settings_summaries()
         logger.info("Séquence sélectionnée : %s", order)
 
     def _neutral_changed(self) -> None:

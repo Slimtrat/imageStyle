@@ -15,7 +15,7 @@ from artanimate.core.effects import (
 
 
 def test_factory_is_the_single_source_of_registered_effects() -> None:
-    assert effect_keys() == EFFECTS == ("sand", "wave")
+    assert effect_keys() == EFFECTS == ("sand", "wave", "rgb_fade")
     assert [descriptor.key for descriptor in effect_descriptors()] == list(EFFECTS)
 
 
@@ -44,9 +44,13 @@ def test_effect_metadata_is_documented_and_references_real_config_fields() -> No
         assert set(descriptor.config_fields) <= config_fields
 
 
-def test_chromatic_wheel_is_a_capability_of_both_effects() -> None:
-    for descriptor in effect_descriptors():
-        assert descriptor.supports(EffectCapability.CHROMATIC_SEQUENCE)
+def test_effect_capabilities_match_their_composition_model() -> None:
+    descriptors = {item.key: item for item in effect_descriptors()}
+    for key in ("sand", "wave"):
+        assert descriptors[key].supports(EffectCapability.CHROMATIC_SEQUENCE)
+        assert not descriptors[key].supports(EffectCapability.FRAME_COMPOSITOR)
+    assert descriptors["rgb_fade"].supports(EffectCapability.FRAME_COMPOSITOR)
+    assert not descriptors["rgb_fade"].supports(EffectCapability.CHROMATIC_SEQUENCE)
 
 
 def test_factory_rejects_unknown_effect() -> None:

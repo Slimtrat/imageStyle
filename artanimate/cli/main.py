@@ -17,8 +17,10 @@ from ..core.config import (
     ORDERS,
     OUTLINE_MODES,
     QUALITY_PROFILES,
+    RGB_MODES,
     RenderConfig,
 )
+from ..core.effects import EffectCapability, create_effect
 from ..core.renderer import ArtworkRenderer
 from ..core.video import encode_video
 from ..observability import configure_console_logging, configure_file_logging
@@ -43,6 +45,12 @@ def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
         choices=QUALITY_PROFILES,
         default=None,
         help="profil de rendu : studio (fluide) ou fast (rapide)",
+    )
+    parser.add_argument(
+        "--rgb-mode",
+        choices=RGB_MODES,
+        default=None,
+        help="construction du fondu RGB : channels (R → G → B) ou together",
     )
     parser.add_argument("--direction", choices=DIRECTIONS, default=None, help="direction de la vague")
     parser.add_argument("--duration", type=float, default=None, help="durée totale en secondes")
@@ -83,7 +91,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="artanimate",
         description="Transforme une œuvre statique en animation chromatique sable ou vague.",
     )
-    parser.add_argument("--version", action="version", version="ArtAnimate 1.4.0")
+    parser.add_argument("--version", action="version", version="ArtAnimate 1.5.0")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     parser.add_argument("--log-file", type=Path, help="copie persistante des logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -114,6 +122,9 @@ def _config_from_namespace(namespace: argparse.Namespace) -> RenderConfig:
 
 
 def _palette_summary(analysis: Any, config: RenderConfig) -> str:
+    effect = create_effect(config.effect)
+    if effect.supports(EffectCapability.FRAME_COMPOSITOR):
+        return "composition directe de l’image · ordre chromatique non utilisé"
     ordered = analysis.ordered_layers(config.order, config.start_hue, config.neutral_position)
     names = " -> ".join(layer.label for layer in ordered)
     if analysis.outline:

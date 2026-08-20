@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from .base import AnimationEffect, EffectDescriptor
+from .base import AnimationEffect, EffectCapability, EffectDescriptor
 
 
 EffectType = TypeVar("EffectType", bound=type[AnimationEffect])
@@ -26,6 +26,13 @@ def register_effect(effect_type: EffectType) -> EffectType:
         raise ValueError(
             f"L’effet {key!r} déclare {effect_type.config_fields}, mais sa documentation "
             f"décrit {documented_fields}"
+        )
+    if (
+        effect_type.supports(EffectCapability.FRAME_COMPOSITOR)
+        and effect_type.compose_frame is AnimationEffect.compose_frame
+    ):
+        raise ValueError(
+            f"L’effet {key!r} déclare un compositeur sans implémenter compose_frame"
         )
     previous = _REGISTRY.get(key)
     if previous is not None and previous is not effect_type:

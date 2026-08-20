@@ -110,6 +110,22 @@
           "description": "Largeur de la transition entre zone masquée et zone révélée."
         }
       ]
+    },
+    "rgb_fade": {
+      "selector_label": "Fondu RGB — lumière numérique",
+      "description": "L’œuvre naît depuis le noir par montée lumineuse simultanée ou par superposition progressive des canaux rouge, vert puis bleu.",
+      "parameters": [
+        {
+          "key": "rgb_mode",
+          "label": "Construction",
+          "control": "choice",
+          "description": "Choisit entre une montée naturelle de toute la lumière et une construction numérique R → G → B avec chevauchement.",
+          "choices": [
+            {"value": "channels", "label": "Canaux successifs — R → G → B"},
+            {"value": "together", "label": "Lumière simultanée — RGB ensemble"}
+          ]
+        }
+      ]
     }
   }
 }

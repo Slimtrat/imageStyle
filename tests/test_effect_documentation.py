@@ -12,6 +12,6 @@ def test_effect_documentation_json_is_packaged_and_valid() -> None:
     documentation = load_effect_documentation()
 
     assert payload["schema_version"] == 1
-    assert set(documentation) == {"sand", "wave"}
+    assert set(documentation) == {"sand", "wave", "rgb_fade"}
     assert documentation_for("sand").parameters[0].description
     assert documentation_for("wave").parameters[0].choices

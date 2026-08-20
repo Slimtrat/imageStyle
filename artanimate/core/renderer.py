@@ -9,8 +9,14 @@ import numpy as np
 
 from .analysis import ArtworkAnalysis, ColorLayer, analyze_artwork
 from .config import RenderConfig
-from .effects import EffectCapability, EffectContext, create_effect, reveal_opacity
-from .quality import ease_in_out, exposure_average
+from .effects import (
+    EffectCapability,
+    EffectContext,
+    FrameCompositionContext,
+    create_effect,
+    reveal_opacity,
+)
+from .quality import ease_in_out, exposure_average, srgb_to_linear
 
 
 logger = logging.getLogger(__name__)
@@ -41,11 +47,23 @@ class ArtworkRenderer:
             config.neutral_position,
         )
         self.stages = self._stage_layers()
+        self.blank = np.empty_like(analysis.source)
+        self.blank[:] = analysis.background_color
+        self.blank[analysis.background_mask] = analysis.source[analysis.background_mask]
+        direct_compositor = self.effect.supports(EffectCapability.FRAME_COMPOSITOR)
+        self.frame_context = FrameCompositionContext(
+            source=analysis.source,
+            canvas=self.blank,
+            config=config,
+            linear_source=srgb_to_linear(analysis.source) if direct_compositor else None,
+        )
         all_layers = list(self.color_layers)
         if analysis.outline:
             all_layers.append(analysis.outline)
         self.fields: dict[str, np.ndarray] = {}
         self.particles: dict[str, FallingParticles] = {}
+        if direct_compositor:
+            all_layers = []
         for index, layer in enumerate(all_layers):
             layer_seed = config.seed + (index + 1) * 7919
             context = EffectContext(
@@ -64,9 +82,6 @@ class ArtworkRenderer:
                 if particles is not None:
                     self.particles[layer.key] = particles
 
-        self.blank = np.empty_like(analysis.source)
-        self.blank[:] = analysis.background_color
-        self.blank[analysis.background_mask] = analysis.source[analysis.background_mask]
         logger.info(
             "Moteur prêt : effet=%s, ordre=%s, couches=%d, images=%d",
             config.effect,
@@ -205,6 +220,9 @@ class ArtworkRenderer:
         global_progress = self._global_progress(seconds)
         if global_progress >= 1.0:
             return self.analysis.source.copy()
+        composed = self.effect.create_frame(self.frame_context, global_progress)
+        if composed is not None:
+            return composed
         frame = self.blank.copy()
         for layer, progress in self._layer_progresses(global_progress):
             if progress <= 0.0:

@@ -13,6 +13,7 @@ ORDERS = ("chromatic", "reverse", "area", "luminance")
 NEUTRAL_POSITIONS = ("first", "last")
 OUTLINE_MODES = ("first", "last", "together")
 QUALITY_PROFILES = ("fast", "studio")
+RGB_MODES = ("channels", "together")
 DIRECTIONS = ("left", "right", "top", "bottom", "diagonal", "radial")
 
 
@@ -22,6 +23,7 @@ class RenderConfig:
     order: str = "chromatic"
     outline: str = "together"
     direction: str = "left"
+    rgb_mode: str = "channels"
     duration: float = 12.0
     fps: int = 30
     width: int = 1280
@@ -51,8 +53,10 @@ class RenderConfig:
         if self.order not in ORDERS:
             raise ValueError(f"order doit être l'un de : {', '.join(ORDERS)}")
         effect = create_effect(self.effect)
-        if self.order in {"chromatic", "reverse"} and not effect.supports(
-            EffectCapability.CHROMATIC_SEQUENCE
+        if (
+            self.order in {"chromatic", "reverse"}
+            and not effect.supports(EffectCapability.CHROMATIC_SEQUENCE)
+            and not effect.supports(EffectCapability.FRAME_COMPOSITOR)
         ):
             raise ValueError(f"L’effet {self.effect!r} ne prend pas en charge la roue chromatique")
         if self.neutral_position not in NEUTRAL_POSITIONS:
@@ -65,6 +69,8 @@ class RenderConfig:
             raise ValueError(f"quality doit être l'un de : {', '.join(QUALITY_PROFILES)}")
         if self.direction not in DIRECTIONS:
             raise ValueError(f"direction doit être l'une de : {', '.join(DIRECTIONS)}")
+        if self.rgb_mode not in RGB_MODES:
+            raise ValueError(f"rgb_mode doit être l'un de : {', '.join(RGB_MODES)}")
         if self.duration <= 0 or self.fps <= 0:
             raise ValueError("duration et fps doivent être strictement positifs")
         if self.width < 64:

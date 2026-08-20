@@ -12,7 +12,13 @@ exports for ``sand_field``, ``wave_field`` and ``reveal_opacity`` are retained f
 callers that use the low-level numerical functions directly.
 """
 
-from .base import AnimationEffect, EffectCapability, EffectContext, EffectDescriptor
+from .base import (
+    AnimationEffect,
+    EffectCapability,
+    EffectContext,
+    EffectDescriptor,
+    FrameCompositionContext,
+)
 from .documentation import (
     ChoiceDocumentation,
     EffectDocumentation,
@@ -24,6 +30,7 @@ from .factory import create_effect, effect_descriptors, effect_keys, register_ef
 from .reveal import reveal_opacity
 from .sand import SandEffect, sand_field
 from .wave import WaveEffect, wave_field
+from .rgb_fade import RgbFadeEffect, rgb_channel_weights
 
 
 __all__ = [
@@ -33,7 +40,9 @@ __all__ = [
     "EffectContext",
     "EffectDescriptor",
     "EffectDocumentation",
+    "FrameCompositionContext",
     "ParameterDocumentation",
+    "RgbFadeEffect",
     "SandEffect",
     "WaveEffect",
     "create_effect",
@@ -43,6 +52,7 @@ __all__ = [
     "load_effect_documentation",
     "register_effect",
     "reveal_opacity",
+    "rgb_channel_weights",
     "sand_field",
     "wave_field",
 ]
