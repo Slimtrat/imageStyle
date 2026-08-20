@@ -48,6 +48,16 @@ def test_workspace_has_actionable_menus_history_and_interactive_3d_studio(
         app.processEvents()
         assert not window.studio_3d.scene_errors
         assert "TEMPS RÉEL" in window.findChild(QLabel, "studioLiveBadge").text()
+        studio_effect = window.studio_3d.effect_combo
+        wow_index = studio_effect.findData("screenprint_laser")
+        assert wow_index >= 0
+        studio_effect.setCurrentIndex(wow_index)
+        assert window.effect_combo.currentData() == "screenprint_laser"
+        assert "contours noirs" in window.studio_3d.effect_description.text()
+        window.studio_3d.effect_settings_button.click()
+        assert window._settings_dialogs["effect"].isVisible()
+        assert window.workspace_tabs.currentIndex() == 1
+        window._settings_dialogs["effect"].close()
 
         destination = tmp_path / "exports"
         destination.mkdir()

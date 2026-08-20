@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from threading import Lock
 
-from PySide6.QtCore import QRect, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QRect, QSize, QSignalBlocker, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtQuick import QQuickImageProvider
 from PySide6.QtQuickWidgets import QQuickWidget
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..branding import LOGO_PATH
+from ..core.effects import EffectDescriptor, effect_descriptors
 from .controls import ParameterSlider
 from .studio3d_particles import StudioParticleModel, StudioSceneData
 
@@ -112,6 +113,8 @@ class Studio3DPanel(QWidget):
     cancel_export_requested = Signal()
     play_output_requested = Signal()
     reveal_output_requested = Signal()
+    effect_selected = Signal(str)
+    edit_effect_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -121,6 +124,9 @@ class Studio3DPanel(QWidget):
         self._scene_loaded = False
         self._current_aspect = 1.6
         self._current_effect = "sand"
+        self._effect_descriptors: dict[str, EffectDescriptor] = {
+            descriptor.key: descriptor for descriptor in effect_descriptors()
+        }
         self._rgb_mode = "channels"
         self._effect_direction = "left"
         self._effect_progress = 0.0
@@ -179,7 +185,7 @@ class Studio3DPanel(QWidget):
         title = QLabel("Studio 3D · cadrage & export")
         title.setObjectName("studioTitle")
         subtitle = QLabel(
-            "Votre œuvre couchée sur un meuble en noyer, sous une suspension en mouvement lent."
+            "Choisissez l’animation, cadrez la scène et exportez sans quitter ce studio."
         )
         subtitle.setObjectName("muted")
         text.addWidget(title)
@@ -223,6 +229,36 @@ class Studio3DPanel(QWidget):
         source_row.addWidget(choose)
         source_row.addWidget(refresh)
         layout.addLayout(source_row)
+
+        effect_title = QLabel("Animation de l’œuvre")
+        effect_title.setObjectName("sectionTitle")
+        layout.addWidget(effect_title)
+        self.effect_combo = QComboBox()
+        for descriptor in self._effect_descriptors.values():
+            self.effect_combo.addItem(descriptor.selector_label, descriptor.key)
+            self.effect_combo.setItemData(
+                self.effect_combo.count() - 1,
+                descriptor.description,
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        self.effect_combo.currentIndexChanged.connect(
+            self._studio_effect_selection_changed
+        )
+        layout.addWidget(self.effect_combo)
+        self.effect_description = QLabel()
+        self.effect_description.setObjectName("helperText")
+        self.effect_description.setWordWrap(True)
+        layout.addWidget(self.effect_description)
+        self.effect_settings_button = QPushButton("Comprendre et régler cet effet…")
+        self.effect_settings_button.clicked.connect(self.edit_effect_requested)
+        layout.addWidget(self.effect_settings_button)
+        shared_hint = QLabel(
+            "Ces réglages pilotent directement le prérendu et la vidéo 3D."
+        )
+        shared_hint.setObjectName("muted")
+        shared_hint.setWordWrap(True)
+        layout.addWidget(shared_hint)
+        self._update_effect_description()
 
         camera_title = QLabel("Cadrage caméra")
         camera_title.setObjectName("sectionTitle")
@@ -362,6 +398,8 @@ class Studio3DPanel(QWidget):
         self._export_controls = (
             choose,
             refresh,
+            self.effect_combo,
+            self.effect_settings_button,
             self.camera_preset,
             self.yaw_slider,
             self.pitch_slider,
@@ -377,6 +415,20 @@ class Studio3DPanel(QWidget):
         )
         scroll.setWidget(panel)
         return scroll
+
+    def _update_effect_description(self) -> None:
+        effect = str(self.effect_combo.currentData())
+        descriptor = self._effect_descriptors[effect]
+        self.effect_description.setText(descriptor.description)
+        self.effect_combo.setToolTip(descriptor.description)
+
+    def _studio_effect_selection_changed(self, *_args: object) -> None:
+        effect = str(self.effect_combo.currentData())
+        if not effect:
+            return
+        self._update_effect_description()
+        self.effect_selected.emit(effect)
+        logger.info("Effet sélectionné depuis le Studio 3D : %s", effect)
 
     def _scene_status_changed(self, status: QQuickWidget.Status) -> None:
         if status == QQuickWidget.Status.Ready:
@@ -500,6 +552,12 @@ class Studio3DPanel(QWidget):
         direction: str = "left",
     ) -> None:
         self._current_effect = effect
+        effect_index = self.effect_combo.findData(effect)
+        if effect_index >= 0 and effect_index != self.effect_combo.currentIndex():
+            blocker = QSignalBlocker(self.effect_combo)
+            self.effect_combo.setCurrentIndex(effect_index)
+            del blocker
+            self._update_effect_description()
         self._rgb_mode = rgb_mode
         self._effect_direction = direction
         self._set_scene_property("effectKind", effect)

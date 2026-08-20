@@ -248,6 +248,10 @@ class MainWindow(QMainWindow):
         self.studio_3d.refresh_preview_requested.connect(
             lambda: self._schedule_preview(0)
         )
+        self.studio_3d.effect_selected.connect(self._studio_effect_selected)
+        self.studio_3d.edit_effect_requested.connect(
+            self._open_studio_effect_settings
+        )
         self.studio_3d.export_requested.connect(self._start_studio_render)
         self.studio_3d.cancel_export_requested.connect(self._cancel_studio_render)
         self.studio_3d.play_output_requested.connect(self._play_studio_output)
@@ -643,11 +647,35 @@ class MainWindow(QMainWindow):
                     parameter.description,
                 )
             control.setToolTip(parameter.description)
+            control.setAccessibleDescription(parameter.description)
             label = QLabel(parameter.label)
             label.setToolTip(parameter.description)
             form.addRow(label, control)
+            help_label = QLabel(self._parameter_help_text(parameter))
+            help_label.setObjectName("parameterHelp")
+            help_label.setWordWrap(True)
+            help_label.setToolTip(parameter.description)
+            form.addRow(help_label)
             controls[parameter.key] = control
         return page, controls
+
+    @staticmethod
+    def _parameter_help_text(parameter) -> str:
+        """Turn compact JSON metadata into permanent, non-technical guidance."""
+        if parameter.control == "choice":
+            options = " · ".join(choice.label for choice in parameter.choices)
+            return f"{parameter.description} Choix disponibles : {options}."
+
+        def display(value: float | None) -> str:
+            if value is None:
+                return "—"
+            rendered = f"{value:.{parameter.decimals}f}".replace(".", ",")
+            return f"{rendered}{parameter.suffix}"
+
+        return (
+            f"{parameter.description} Repères : minimum {display(parameter.minimum)} · "
+            f"conseillé {display(parameter.default)} · maximum {display(parameter.maximum)}."
+        )
 
     def _build_progress(self) -> QFrame:
         card = QFrame()
@@ -798,6 +826,13 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self, key: str) -> None:
         self.workspace_tabs.setCurrentIndex(0)
+        self._show_settings_dialog(key)
+
+    def _open_studio_effect_settings(self) -> None:
+        self._show_settings_dialog("effect")
+        logger.info("Réglages de l’effet ouverts depuis le Studio 3D")
+
+    def _show_settings_dialog(self, key: str) -> None:
         for other_key, other_dialog in self._settings_dialogs.items():
             if other_key != key:
                 other_dialog.hide()
@@ -952,6 +987,14 @@ class MainWindow(QMainWindow):
             self._order_changed()
         if self._auto_filename:
             self._suggest_filename()
+
+    def _studio_effect_selected(self, effect: str) -> None:
+        effect_index = self.effect_combo.findData(effect)
+        if effect_index < 0:
+            logger.error("Effet Studio 3D inconnu : %s", effect)
+            return
+        if effect_index != self.effect_combo.currentIndex():
+            self.effect_combo.setCurrentIndex(effect_index)
 
     def _sync_studio_effect(self) -> None:
         effect = str(self.effect_combo.currentData())

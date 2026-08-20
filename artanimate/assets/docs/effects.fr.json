@@ -165,7 +165,7 @@
           "step": 0.005,
           "decimals": 3,
           "suffix": "",
-          "description": "Épaisseur du rideau de lumière. Étroit, il est précis ; large, il enveloppe davantage les formes."
+          "description": "Épaisseur du rideau lumineux. La valeur est une part de la largeur de l’image : 0,075 correspond à environ 7,5 %. Plus bas donne une ligne précise ; plus haut enveloppe davantage les formes."
         },
         {
           "key": "halo_intensity",
@@ -177,7 +177,7 @@
           "step": 0.05,
           "decimals": 2,
           "suffix": "",
-          "description": "Puissance du halo transitoire, sans modifier la fidélité de l’image finale."
+          "description": "Puissance de la lumière pendant le passage. 0 désactive l’éclat, 1 reste naturel et les valeurs supérieures créent un flash plus spectaculaire, sans modifier l’image finale."
         },
         {
           "key": "soft_edge",
@@ -189,7 +189,7 @@
           "step": 0.001,
           "decimals": 3,
           "suffix": "",
-          "description": "Largeur de la transition entre la zone encore vide et la matière déposée."
+          "description": "Fondu au bord de la zone révélée. 0,012 représente environ 1,2 % du mouvement : faible donne une coupe nette, élevé rend la transition plus douce."
         }
       ]
     },
@@ -207,7 +207,7 @@
           "step": 0.01,
           "decimals": 2,
           "suffix": "",
-          "description": "Largeur de la zone de pression lumineuse qui accompagne la dépose d’une couleur."
+          "description": "Largeur de la racle virtuelle qui dépose la couleur. 0,12 représente environ 12 % de l’œuvre : faible produit un passage sec, élevé une pression plus ample."
         },
         {
           "key": "halo_intensity",
@@ -219,7 +219,7 @@
           "step": 0.05,
           "decimals": 2,
           "suffix": "",
-          "description": "Intensité du reflet de matière au moment où la couleur est déposée."
+          "description": "Reflet de matière au moment où une couleur est déposée. 0 le supprime, autour de 1 reste réaliste et plus haut accentue l’effet brillant."
         },
         {
           "key": "soft_edge",
@@ -231,7 +231,7 @@
           "step": 0.001,
           "decimals": 3,
           "suffix": "",
-          "description": "Largeur de la transition entre la zone encore vide et la matière déposée."
+          "description": "Souplesse du bord de la couche déposée. Une petite valeur évoque une sérigraphie franche ; une grande valeur donne une arrivée plus progressive."
         }
       ]
     },
@@ -249,7 +249,7 @@
           "step": 0.002,
           "decimals": 3,
           "suffix": "",
-          "description": "Largeur temporelle du faisceau : faible pour une ligne nette, forte pour une traîne lumineuse."
+          "description": "Épaisseur visible du faisceau pendant son déplacement. 0,018 équivaut à environ 1,8 % du parcours : faible donne un trait très fin, élevé une traîne lumineuse."
         },
         {
           "key": "laser_intensity",
@@ -261,7 +261,7 @@
           "step": 0.05,
           "decimals": 2,
           "suffix": "",
-          "description": "Intensité du cœur cyan et de son aura sur les contours analysés."
+          "description": "Luminosité du cœur cyan et de son aura. 0 masque la lumière, autour de 1 reste crédible et les valeurs supérieures donnent un laser plus spectaculaire."
         },
         {
           "key": "soft_edge",
@@ -273,7 +273,7 @@
           "step": 0.001,
           "decimals": 3,
           "suffix": "",
-          "description": "Largeur de la transition entre la zone encore vide et la matière déposée."
+          "description": "Fondu de révélation derrière le laser. Faible laisse une limite nette ; élevé adoucit la transition entre la zone vide et l’œuvre terminée."
         }
       ]
     },
@@ -291,7 +291,7 @@
           "step": 0.01,
           "decimals": 2,
           "suffix": "",
-          "description": "Largeur de la passe appliquant chacune des couches colorées."
+          "description": "Largeur de chaque passe couleur. 0,12 représente environ 12 % de l’œuvre : réduisez pour une pose précise, augmentez pour un geste plus ample."
         },
         {
           "key": "halo_intensity",
@@ -303,7 +303,7 @@
           "step": 0.05,
           "decimals": 2,
           "suffix": "",
-          "description": "Reflet transitoire de la matière colorée pendant sa dépose."
+          "description": "Éclat visible sur les encres pendant leur pose. 0 donne une matière mate, autour de 1 un reflet naturel et plus haut un rendu démonstratif."
         },
         {
           "key": "laser_width",
@@ -315,7 +315,7 @@
           "step": 0.002,
           "decimals": 3,
           "suffix": "",
-          "description": "Finesse du passage final réservé aux pixels de contour sombre détectés."
+          "description": "Épaisseur du faisceau réservé au dernier acte noir. 0,018 correspond à environ 1,8 % du parcours : faible est précis, élevé laisse une traîne."
         },
         {
           "key": "laser_intensity",
@@ -327,7 +327,7 @@
           "step": 0.05,
           "decimals": 2,
           "suffix": "",
-          "description": "Puissance du laser cyan qui révèle le dessin noir après les couleurs."
+          "description": "Puissance du laser final qui dessine les contours noirs. 0 retire l’éclat, autour de 1 reste réaliste et plus haut renforce le moment WOW."
         },
         {
           "key": "soft_edge",
@@ -339,7 +339,7 @@
           "step": 0.001,
           "decimals": 3,
           "suffix": "",
-          "description": "Largeur de la transition entre la zone encore vide et la matière déposée."
+          "description": "Souplesse commune des limites révélées. Diminuez pour un résultat graphique et tranché ; augmentez pour un mouvement plus fondu."
         }
       ]
     }

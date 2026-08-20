@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from artanimate.core.effects import effect_descriptors
 from artanimate.desktop.app import MainWindow
@@ -19,6 +19,14 @@ def test_effect_and_parameter_documentation_is_exposed_as_tooltips() -> None:
     try:
         descriptors = effect_descriptors()
         assert window.effect_combo.count() == len(descriptors)
+        parameter_help = window.findChildren(QLabel, "parameterHelp")
+        assert len(parameter_help) == sum(
+            len(descriptor.parameters) for descriptor in descriptors
+        )
+        assert all(
+            "Repères :" in label.text() or "Choix disponibles :" in label.text()
+            for label in parameter_help
+        )
         for index, descriptor in enumerate(descriptors):
             assert window.effect_combo.itemData(index) == descriptor.key
             assert (

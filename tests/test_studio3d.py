@@ -71,6 +71,15 @@ def test_studio_panel_loads_scene_and_accepts_animated_frames(
         assert root.property("lampMotion") == pytest.approx(0.65)
         assert panel.camera_state()["lamp_motion"] == pytest.approx(0.65)
         assert panel.camera_state()["orbit_turns"] == pytest.approx(0.0)
+        selected: list[str] = []
+        panel.effect_selected.connect(selected.append)
+        wow_index = panel.effect_combo.findData("screenprint_laser")
+        panel.effect_combo.setCurrentIndex(wow_index)
+        assert selected == ["screenprint_laser"]
+        assert "contours noirs" in panel.effect_description.text()
+        panel.set_effect("vertical_halo")
+        assert panel.effect_combo.currentData() == "vertical_halo"
+        assert selected == ["screenprint_laser"]
         panel.camera_preset.setCurrentIndex(3)
         assert root.property("cameraOrbitTurns") == pytest.approx(1.0)
         assert root.property("cameraPitch") == pytest.approx(-58.0)
