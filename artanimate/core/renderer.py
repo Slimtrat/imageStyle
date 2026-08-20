@@ -139,6 +139,12 @@ class ArtworkRenderer:
         particles: FallingParticles,
         progress: float,
     ) -> None:
+        """Blend airborne pigment with a soft anti-aliased brush.
+
+        Particles are deliberately translucent and vertically elongated. This
+        avoids the isolated opaque pixels produced by point drawing while keeping
+        their trajectories readable. The completed layer remains the exact source.
+        """
         spawn = np.maximum(0.0, particles.settle - particles.flight)
         alive = (progress >= spawn) & (progress < particles.settle)
         if not np.any(alive):
@@ -161,13 +167,29 @@ class ArtworkRenderer:
         x, y, indices = x[visible], y[visible], indices[visible]
         if not len(indices):
             return
-        frame[y, x] = particles.colors[indices]
-        radius = max(0, int(round(self.config.grain_size - 0.35)))
-        if radius:
-            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+
+        grain_size = max(0.5, float(self.config.grain_size))
+        sigma_x = max(0.65, grain_size * 0.55)
+        sigma_y = max(0.90, grain_size * 0.80)
+        radius_x = max(1, min(5, int(np.ceil(grain_size * 0.75))))
+        radius_y = max(1, min(6, int(np.ceil(grain_size * 1.15))))
+        colors = particles.colors[indices].astype(np.float32)
+
+        for dy in range(-radius_y, radius_y + 1):
+            for dx in range(-radius_x, radius_x + 1):
+                distance = (dx / sigma_x) ** 2 + (dy / sigma_y) ** 2
+                alpha = 0.84 * float(np.exp(-0.5 * distance))
+                if alpha < 0.035:
+                    continue
                 nx, ny = x + dx, y + dy
                 inside = (nx >= 0) & (nx < self.width) & (ny >= 0) & (ny < self.height)
-                frame[ny[inside], nx[inside]] = particles.colors[indices[inside]]
+                if not np.any(inside):
+                    continue
+                background = frame[ny[inside], nx[inside]].astype(np.float32)
+                foreground = colors[inside]
+                frame[ny[inside], nx[inside]] = np.rint(
+                    background * (1.0 - alpha) + foreground * alpha
+                ).astype(np.uint8)
 
     def frame_at(self, seconds: float) -> np.ndarray:
         seconds = float(np.clip(seconds, 0.0, self.config.duration))

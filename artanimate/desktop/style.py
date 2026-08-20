@@ -15,6 +15,11 @@ QLabel#brand {
 QLabel#tagline, QLabel#muted, QLabel#pathText {
     color: #6b7280;
 }
+QLabel#dialogTitle {
+    color: #172033;
+    font-size: 22px;
+    font-weight: 750;
+}
 QLabel#sectionTitle {
     color: #172033;
     font-size: 15px;
@@ -41,6 +46,23 @@ QFrame#dropZone[ready="true"] {
 QFrame#dropZone[invalid="true"] {
     background: #fff4f4;
     border-color: #d85d69;
+}
+QCommandLinkButton#settingsCard {
+    color: #172033;
+    background: #f8f9fd;
+    border: 1px solid #d9dfea;
+    border-radius: 11px;
+    padding: 8px 11px;
+    text-align: left;
+    font-weight: 700;
+}
+QCommandLinkButton#settingsCard:hover {
+    color: #4050c2;
+    background: #eef0ff;
+    border-color: #aeb7f0;
+}
+QCommandLinkButton#settingsCard:focus {
+    border: 2px solid #6775e8;
 }
 QPushButton {
     background: #eef1f6;
@@ -189,10 +211,10 @@ QLabel#historyEmpty {
     background: #f7f8fb;
     border: 1px dashed #cbd2de;
     border-radius: 9px;
-    padding: 24px;
+    padding: 10px;
 }
 QPushButton#compactButton {
-    padding: 4px 8px;
+    padding: 3px 7px;
     font-size: 11px;
 }
 QToolButton#historyMenuButton {

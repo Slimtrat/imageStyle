@@ -34,8 +34,14 @@ def test_workspace_has_actionable_menus_history_and_coming_soon_tab(
     window = MainWindow(history_root=tmp_path / "history")
     try:
         menu_names = [action.text().replace("&", "") for action in window.menuBar().actions()]
-        assert menu_names == ["Fichier", "Génération", "Affichage", "Historique"]
+        assert menu_names == ["Fichier", "Génération", "Réglages", "Affichage", "Historique"]
         assert window.workspace_tabs.count() == 2
+        assert set(window._settings_cards) == {"effect", "colors", "analysis", "video"}
+        assert window.history_panel.scroll.height() == 86
+        window._open_settings("colors")
+        assert window._settings_dialogs["colors"].isVisible()
+        assert window.chromatic_wheel.minimumWidth() >= 400
+        window._settings_dialogs["colors"].close()
         assert window.workspace_tabs.tabText(0) == "Atelier 2D"
         assert "Coming soon" in window.workspace_tabs.tabText(1)
         window.workspace_tabs.setCurrentIndex(1)

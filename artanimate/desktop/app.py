@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QTabWidget,
@@ -37,6 +36,7 @@ from .history import GenerationHistory
 from .history_widgets import HistoryPanel
 from .log_window import LogWindow, QtLogHandler
 from .preview import PREVIEW_INTERVAL_MS, PreviewWorker
+from .settings_windows import SettingsCard, SettingsDialog
 from .problems import (
     UserInputError,
     UserProblem,
@@ -189,6 +189,23 @@ class MainWindow(QMainWindow):
         generation_menu.addActions(
             (self.preview_action, self.generate_action, self.cancel_action)
         )
+
+        settings_menu = menu_bar.addMenu("&Réglages")
+        settings_specs = (
+            ("effect", "Effet & mouvement…", "Ctrl+1"),
+            ("colors", "Couleurs & séquence…", "Ctrl+2"),
+            ("analysis", "Analyse de l’œuvre…", "Ctrl+3"),
+            ("video", "Vidéo & fichier…", "Ctrl+4"),
+        )
+        self.settings_actions: dict[str, QAction] = {}
+        for key, label, shortcut in settings_specs:
+            action = QAction(label, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(
+                lambda _checked=False, selected=key: self._open_settings(selected)
+            )
+            settings_menu.addAction(action)
+            self.settings_actions[key] = action
 
         view_menu = menu_bar.addMenu("&Affichage")
         show_2d = QAction("Atelier 2D", self)
@@ -348,26 +365,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.output_card, 1)
         return layout
 
-    def _build_controls(self) -> QScrollArea:
-        card = QFrame()
-        card.setObjectName("card")
-        card.setMinimumWidth(390)
-        card.setMaximumWidth(450)
-        content = QVBoxLayout(card)
-        content.setContentsMargins(18, 16, 18, 18)
-        content.setSpacing(12)
-
-        title = QLabel("Paramètres")
-        title.setObjectName("sectionTitle")
-        content.addWidget(title)
-
-        form = QFormLayout()
-        form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(9)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-
+    def _build_controls(self) -> QWidget:
         descriptors = effect_descriptors()
         self._effect_descriptors = {descriptor.key: descriptor for descriptor in descriptors}
+
         self.effect_combo = self._combo(
             tuple((descriptor.selector_label, descriptor.key) for descriptor in descriptors)
         )
@@ -404,96 +405,32 @@ class MainWindow(QMainWindow):
         self.fps_spin = self._slider(12, 60, 30, 1, 0, " i/s", "Fluidité de la vidéo")
         self.colors_spin = self._slider(4, 64, 24, 1, 0, "", "Nombre de nuances analysées")
         self.shape_completion = self._slider(
-            0,
-            4,
-            2,
-            1,
-            0,
-            "",
+            0, 4, 2, 1, 0, "",
             "Complète les petits trous dans les aplats sans modifier l’image finale",
         )
         self.background_tolerance = self._slider(
-            0.0,
-            30.0,
-            11.0,
-            0.5,
-            1,
-            " ΔE",
+            0.0, 30.0, 11.0, 0.5, 1, " ΔE",
             "Tolérance utilisée pour séparer le fond de l’œuvre",
         )
         self.outline_luma = self._slider(
-            0,
-            70,
-            36,
-            1,
-            0,
-            " L*",
+            0, 70, 36, 1, 0, " L*",
             "Luminosité maximale reconnue comme contour sombre",
         )
         self.overlap_slider = self._slider(
-            0.0,
-            0.8,
-            0.16,
-            0.02,
-            2,
-            "",
+            0.0, 0.8, 0.16, 0.02, 2, "",
             "Chevauchement temporel entre deux familles de couleurs",
         )
-        self.seed_spin = self._slider(0, 9999, 7, 1, 0, "", "Graine du mouvement déterministe")
-
-        form.addRow("Animation", self.effect_combo)
-        form.addRow("Séquence", self.order_combo)
-        form.addRow("Noir & blanc", self.neutral_combo)
-        form.addRow("Contours", self.outline_combo)
-        form.addRow("Format", self.format_combo)
-        content.addLayout(form)
+        self.seed_spin = self._slider(
+            0, 9999, 7, 1, 0, "", "Graine du mouvement déterministe"
+        )
 
         self.mode_description = QLabel()
         self.mode_description.setObjectName("helperText")
         self.mode_description.setWordWrap(True)
-        content.addWidget(self.mode_description)
         self.order_description = QLabel()
         self.order_description.setObjectName("helperText")
         self.order_description.setWordWrap(True)
-        content.addWidget(self.order_description)
 
-        self.sequence_panel = QFrame()
-        self.sequence_panel.setObjectName("sequenceCard")
-        sequence_layout = QVBoxLayout(self.sequence_panel)
-        sequence_layout.setContentsMargins(10, 10, 10, 10)
-        sequence_layout.setSpacing(4)
-        sequence_title = QLabel("Séquence chromatique")
-        sequence_title.setObjectName("sectionTitle")
-        sequence_layout.addWidget(sequence_title)
-        sequence_help = QLabel("Glissez la roue : la couleur placée sous 1 ouvre l’animation.")
-        sequence_help.setObjectName("muted")
-        sequence_help.setWordWrap(True)
-        sequence_layout.addWidget(sequence_help)
-        self.chromatic_wheel = ChromaticSequenceWheel()
-        sequence_layout.addWidget(self.chromatic_wheel)
-        content.addWidget(self.sequence_panel)
-
-        quality_title = QLabel("Qualité & sortie")
-        quality_title.setObjectName("sectionTitle")
-        content.addWidget(quality_title)
-        quality_form = QFormLayout()
-        quality_form.setHorizontalSpacing(12)
-        quality_form.setVerticalSpacing(9)
-        quality_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        quality_form.addRow("Largeur", self.width_spin)
-        quality_form.addRow("Durée", self.duration_spin)
-        quality_form.addRow("Fluidité", self.fps_spin)
-        quality_form.addRow("Nuances", self.colors_spin)
-        quality_form.addRow("Formes complètes", self.shape_completion)
-        quality_form.addRow("Fond", self.background_tolerance)
-        quality_form.addRow("Seuil contour", self.outline_luma)
-        quality_form.addRow("Chevauchement", self.overlap_slider)
-        quality_form.addRow("Graine", self.seed_spin)
-        content.addLayout(quality_form)
-
-        mode_title = QLabel("Réglages du mouvement")
-        mode_title.setObjectName("sectionTitle")
-        content.addWidget(mode_title)
         self.mode_stack = QStackedWidget()
         self._effect_controls: dict[str, dict[str, QWidget]] = {}
         self._effect_page_indexes: dict[str, int] = {}
@@ -501,23 +438,170 @@ class MainWindow(QMainWindow):
             page, controls = self._build_effect_page(descriptor)
             self._effect_controls[descriptor.key] = controls
             self._effect_page_indexes[descriptor.key] = self.mode_stack.addWidget(page)
-        content.addWidget(self.mode_stack)
 
-        output_title = QLabel("Nom du fichier")
-        output_title.setObjectName("sectionTitle")
-        content.addWidget(output_title)
+        self.sequence_panel = QFrame()
+        self.sequence_panel.setObjectName("sequenceCard")
+        sequence_layout = QVBoxLayout(self.sequence_panel)
+        sequence_layout.setContentsMargins(14, 14, 14, 14)
+        sequence_layout.setSpacing(7)
+        sequence_title = QLabel("Séquence chromatique interactive")
+        sequence_title.setObjectName("sectionTitle")
+        sequence_layout.addWidget(sequence_title)
+        sequence_help = QLabel(
+            "Tournez la roue : la couleur placée sous 1 ouvre l’animation, "
+            "puis les secteurs 2 à 6 suivent."
+        )
+        sequence_help.setObjectName("muted")
+        sequence_help.setWordWrap(True)
+        sequence_layout.addWidget(sequence_help)
+        self.chromatic_wheel = ChromaticSequenceWheel()
+        self.chromatic_wheel.setMinimumSize(410, 450)
+        self.chromatic_wheel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        sequence_layout.addWidget(self.chromatic_wheel, 1)
+
         self.output_name = QLineEdit("animation-sand.mp4")
         self.output_name.setPlaceholderText("mon-animation.mp4")
-        content.addWidget(self.output_name)
-        content.addStretch(1)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(card)
-        scroll.setMinimumWidth(410)
-        scroll.setMaximumWidth(470)
-        return scroll
+        effect_content = QWidget()
+        effect_layout = QVBoxLayout(effect_content)
+        effect_layout.setContentsMargins(4, 4, 4, 4)
+        effect_layout.setSpacing(14)
+        effect_form = QFormLayout()
+        effect_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        effect_form.addRow("Animation", self.effect_combo)
+        effect_layout.addLayout(effect_form)
+        effect_layout.addWidget(self.mode_description)
+        effect_title = QLabel("Réglages propres à l’effet")
+        effect_title.setObjectName("sectionTitle")
+        effect_layout.addWidget(effect_title)
+        effect_layout.addWidget(self.mode_stack)
+        seed_form = QFormLayout()
+        seed_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        seed_form.addRow("Variation", self.seed_spin)
+        effect_layout.addLayout(seed_form)
+        effect_layout.addStretch(1)
+
+        color_content = QWidget()
+        color_layout = QVBoxLayout(color_content)
+        color_layout.setContentsMargins(4, 4, 4, 4)
+        color_layout.setSpacing(12)
+        color_form = QFormLayout()
+        color_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        color_form.addRow("Séquence", self.order_combo)
+        color_form.addRow("Noir & blanc", self.neutral_combo)
+        color_form.addRow("Contours", self.outline_combo)
+        color_layout.addLayout(color_form)
+        color_layout.addWidget(self.order_description)
+        color_layout.addWidget(self.sequence_panel, 1)
+        overlap_form = QFormLayout()
+        overlap_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        overlap_form.addRow("Chevauchement", self.overlap_slider)
+        color_layout.addLayout(overlap_form)
+
+        analysis_content = QWidget()
+        analysis_layout = QVBoxLayout(analysis_content)
+        analysis_layout.setContentsMargins(4, 4, 4, 4)
+        analysis_layout.setSpacing(12)
+        analysis_help = QLabel(
+            "Ces réglages définissent comment ArtAnimate reconnaît les aplats, "
+            "complète leurs formes et isole le fond et les contours."
+        )
+        analysis_help.setObjectName("helperText")
+        analysis_help.setWordWrap(True)
+        analysis_layout.addWidget(analysis_help)
+        analysis_form = QFormLayout()
+        analysis_form.setVerticalSpacing(13)
+        analysis_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        analysis_form.addRow("Nuances", self.colors_spin)
+        analysis_form.addRow("Formes complètes", self.shape_completion)
+        analysis_form.addRow("Séparation du fond", self.background_tolerance)
+        analysis_form.addRow("Seuil des contours", self.outline_luma)
+        analysis_layout.addLayout(analysis_form)
+        analysis_layout.addStretch(1)
+
+        video_content = QWidget()
+        video_layout = QVBoxLayout(video_content)
+        video_layout.setContentsMargins(4, 4, 4, 4)
+        video_layout.setSpacing(12)
+        video_form = QFormLayout()
+        video_form.setVerticalSpacing(13)
+        video_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        video_form.addRow("Format", self.format_combo)
+        video_form.addRow("Largeur", self.width_spin)
+        video_form.addRow("Durée", self.duration_spin)
+        video_form.addRow("Fluidité", self.fps_spin)
+        video_form.addRow("Nom du fichier", self.output_name)
+        video_layout.addLayout(video_form)
+        video_layout.addStretch(1)
+
+        self._settings_dialogs = {
+            "effect": SettingsDialog(
+                "Effet & mouvement",
+                "Choisissez la matière animée, puis réglez uniquement son comportement.",
+                effect_content,
+                self,
+            ),
+            "colors": SettingsDialog(
+                "Couleurs & séquence",
+                "Construisez l’ordre de révélation. La roue dispose ici de tout l’espace nécessaire.",
+                color_content,
+                self,
+                minimum_width=660,
+            ),
+            "analysis": SettingsDialog(
+                "Analyse de l’œuvre",
+                "Ajustez la lecture des formes seulement si le prérendu découpe mal l’image.",
+                analysis_content,
+                self,
+            ),
+            "video": SettingsDialog(
+                "Vidéo & fichier",
+                "Définissez la qualité, la durée et le nom du fichier final.",
+                video_content,
+                self,
+            ),
+        }
+        self._settings_dialogs["colors"].resize(720, 820)
+
+        sidebar = QFrame()
+        sidebar.setObjectName("card")
+        sidebar.setMinimumWidth(315)
+        sidebar.setMaximumWidth(350)
+        sidebar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(16, 16, 16, 16)
+        sidebar_layout.setSpacing(10)
+        title = QLabel("Réglages")
+        title.setObjectName("sectionTitle")
+        helper = QLabel("Ouvrez un panneau. Chaque choix actualise le prérendu.")
+        helper.setObjectName("muted")
+        helper.setWordWrap(True)
+        sidebar_layout.addWidget(title)
+        sidebar_layout.addWidget(helper)
+
+        card_specs = (
+            ("effect", "Effet & mouvement", "Choisir le mode et son comportement"),
+            ("colors", "Couleurs & séquence", "Ordre, roue, neutres et contours"),
+            ("analysis", "Analyse de l’œuvre", "Nuances, formes, fond et contours"),
+            ("video", "Vidéo & fichier", "Format, dimensions, durée et nom"),
+        )
+        self._settings_cards: dict[str, SettingsCard] = {}
+        for key, label, description in card_specs:
+            panel = SettingsCard(label, description)
+            panel.clicked.connect(
+                lambda _checked=False, selected=key: self._open_settings(selected)
+            )
+            self._settings_cards[key] = panel
+            sidebar_layout.addWidget(panel)
+        sidebar_layout.addStretch(1)
+        shortcut_help = QLabel("Raccourcis : Ctrl+1 à Ctrl+4")
+        shortcut_help.setObjectName("muted")
+        sidebar_layout.addWidget(shortcut_help)
+        self._update_settings_summaries()
+        return sidebar
 
     def _build_effect_page(
         self,
@@ -679,6 +763,58 @@ class MainWindow(QMainWindow):
                 elif isinstance(control, ParameterSlider):
                     control.valueChanged.connect(lambda *_: self._schedule_preview())
         self.chromatic_wheel.hueChanged.connect(lambda *_: self._schedule_preview())
+
+        summary_combos = (
+            self.effect_combo,
+            self.order_combo,
+            self.neutral_combo,
+            self.outline_combo,
+            self.format_combo,
+        )
+        for combo in summary_combos:
+            combo.currentIndexChanged.connect(
+                lambda *_: self._update_settings_summaries()
+            )
+        for slider in preview_sliders:
+            slider.valueChanged.connect(
+                lambda *_: self._update_settings_summaries()
+            )
+        self.chromatic_wheel.hueChanged.connect(
+            lambda *_: self._update_settings_summaries()
+        )
+        self.output_name.textChanged.connect(
+            lambda *_: self._update_settings_summaries()
+        )
+
+    def _open_settings(self, key: str) -> None:
+        self.workspace_tabs.setCurrentIndex(0)
+        for other_key, other_dialog in self._settings_dialogs.items():
+            if other_key != key:
+                other_dialog.hide()
+        dialog = self._settings_dialogs[key]
+        dialog.show_raised()
+        logger.info("Panneau de réglages ouvert : %s", key)
+
+    def _update_settings_summaries(self) -> None:
+        if not hasattr(self, "_settings_cards"):
+            return
+        effect = str(self.effect_combo.currentData())
+        effect_label = self._effect_descriptors[effect].selector_label
+        effect_count = len(self._effect_controls[effect])
+        self._settings_cards["effect"].setDescription(
+            f"{effect_label} · {effect_count} paramètres"
+        )
+        order = self.order_combo.currentText().replace("Roue chromatique — ", "Roue · ")
+        self._settings_cards["colors"].setDescription(
+            f"{order} · départ {self.chromatic_wheel.startHue():.0f}°"
+        )
+        self._settings_cards["analysis"].setDescription(
+            f"{int(self.colors_spin.value())} nuances · formes {int(self.shape_completion.value())}/4"
+        )
+        self._settings_cards["video"].setDescription(
+            f"{int(self.width_spin.value())} px · {self.duration_spin.value():g} s · "
+            f"{int(self.fps_spin.value())} i/s"
+        )
 
     def _show_problem(self, problem: UserProblem, *, critical: bool = False) -> None:
         if critical:
@@ -1190,6 +1326,12 @@ class MainWindow(QMainWindow):
         self.cancel_button.setVisible(running)
         self.source_zone.setEnabled(not running)
         self.destination_zone.setEnabled(not running)
+        for card in self._settings_cards.values():
+            card.setEnabled(not running)
+        for dialog in self._settings_dialogs.values():
+            dialog.set_controls_enabled(not running)
+        for action in self.settings_actions.values():
+            action.setEnabled(not running)
 
     def _cancel_render(self) -> None:
         if self._worker:
