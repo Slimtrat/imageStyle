@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import sys
 
@@ -37,6 +38,7 @@ from .history_widgets import HistoryPanel
 from .log_window import LogWindow, QtLogHandler
 from .preview import PREVIEW_INTERVAL_MS, PreviewWorker
 from .settings_windows import SettingsCard, SettingsDialog
+from .studio3d import Studio3DPanel
 from .problems import (
     UserInputError,
     UserProblem,
@@ -133,10 +135,7 @@ class MainWindow(QMainWindow):
         two_d_layout.addWidget(self._build_progress())
 
         self.workspace_tabs.addTab(self.two_d_page, "Atelier 2D")
-        self.workspace_tabs.addTab(
-            self._build_coming_soon(),
-            "Studio 3D · Coming soon",
-        )
+        self.workspace_tabs.addTab(self._build_studio_3d(), "Studio 3D")
         page.addWidget(self.workspace_tabs, 1)
         self._build_menus()
 
@@ -210,7 +209,7 @@ class MainWindow(QMainWindow):
         view_menu = menu_bar.addMenu("&Affichage")
         show_2d = QAction("Atelier 2D", self)
         show_2d.triggered.connect(lambda: self.workspace_tabs.setCurrentIndex(0))
-        show_3d = QAction("Studio 3D · Coming soon", self)
+        show_3d = QAction("Studio 3D", self)
         show_3d.triggered.connect(lambda: self.workspace_tabs.setCurrentIndex(1))
         show_logs = QAction("Logs", self)
         show_logs.setShortcut("Ctrl+L")
@@ -226,37 +225,13 @@ class MainWindow(QMainWindow):
         open_data.triggered.connect(self._open_history_data)
         history_menu.addActions((refresh, open_current, open_data))
 
-    def _build_coming_soon(self) -> QWidget:
-        page = QWidget()
-        page.setObjectName("comingSoonPage")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(80, 80, 80, 80)
-        layout.addStretch(1)
-        badge = QLabel("COMING SOON")
-        badge.setObjectName("comingSoonBadge")
-        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title = QLabel("Mise en scène 3D")
-        title.setObjectName("comingSoonTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        message = QLabel(
-            "Table, lampe, pièce légèrement éclairée et caméra mobile arriveront "
-            "après la consolidation de l’atelier 2D."
+    def _build_studio_3d(self) -> QWidget:
+        self.studio_3d = Studio3DPanel()
+        self.studio_3d.choose_source_requested.connect(self.source_zone.browse)
+        self.studio_3d.refresh_preview_requested.connect(
+            lambda: self._schedule_preview(0)
         )
-        message.setObjectName("comingSoonText")
-        message.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        message.setWordWrap(True)
-        self.coming_soon_feedback = QLabel(
-            "Aucun réglage 3D factice : ce studio sera activé avec son vrai moteur."
-        )
-        self.coming_soon_feedback.setObjectName("muted")
-        self.coming_soon_feedback.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addSpacing(18)
-        layout.addWidget(title)
-        layout.addWidget(message)
-        layout.addWidget(self.coming_soon_feedback)
-        layout.addStretch(1)
-        return page
+        return self.studio_3d
 
     def _build_header(self) -> QHBoxLayout:
         layout = QHBoxLayout()
@@ -916,6 +891,7 @@ class MainWindow(QMainWindow):
             self._handle_path_problem(self.source_zone, problem)
             return
         self.source_preview.image.set_image(pixmap)
+        self.studio_3d.set_source(path)
         logger.info("Image sélectionnée : %s", path)
         if self.destination_zone.path is None:
             self.destination_zone.set_path(path.parent)
@@ -1101,6 +1077,7 @@ class MainWindow(QMainWindow):
         self.output_heading.setText("Prérendu de l’effet")
         self.preview_quality.setText("Calcul basse définition…")
         self.live_preview.clear_image("Mise à jour du prérendu…")
+        self.studio_3d.set_loading()
 
         thread = QThread(self)
         worker = PreviewWorker(source, config, revision)
@@ -1150,6 +1127,9 @@ class MainWindow(QMainWindow):
             return
         frame = self._preview_frames[self._preview_frame_index]
         self.live_preview.set_image(QPixmap.fromImage(frame))
+        self.studio_3d.set_frame(
+            frame, self._preview_frame_index, len(self._preview_frames)
+        )
         self._preview_frame_index = (self._preview_frame_index + 1) % len(
             self._preview_frames
         )
@@ -1285,8 +1265,19 @@ class MainWindow(QMainWindow):
         self._refresh_history()
 
     def _workspace_tab_changed(self, index: int) -> None:
-        if index == 1:
-            logger.info("Onglet Studio 3D consulté : fonctionnalité à venir")
+        if index != 1:
+            return
+        self.studio_3d.activate()
+        if self._preview_frames:
+            frame_index = self._preview_frame_index % len(self._preview_frames)
+            self.studio_3d.set_frame(
+                self._preview_frames[frame_index],
+                frame_index,
+                len(self._preview_frames),
+            )
+        elif self.source_zone.path is not None:
+            self._schedule_preview(0)
+        logger.info("Studio 3D interactif ouvert")
 
     def _start_render(self) -> None:
         suffix = str(self.format_combo.currentData())
@@ -1388,6 +1379,7 @@ class MainWindow(QMainWindow):
 
     def _update_preview(self, image: QImage) -> None:
         self.live_preview.set_image(QPixmap.fromImage(image))
+        self.studio_3d.set_frame(image)
 
     def _render_finished(self, output: str) -> None:
         self._last_video = Path(output)
@@ -1530,6 +1522,8 @@ def main() -> int:
     logger.info("Démarrage du client desktop")
     window = MainWindow(log_path, startup_warning)
     window.show()
+    if os.environ.get("ARTANIMATE_START_WORKSPACE", "").casefold() == "3d":
+        QTimer.singleShot(0, lambda: window.workspace_tabs.setCurrentIndex(1))
     result = app.exec()
     logger.info("Arrêt du client desktop")
     return result

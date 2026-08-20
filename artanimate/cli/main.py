@@ -91,7 +91,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="artanimate",
         description="Transforme une œuvre statique en animation chromatique sable ou vague.",
     )
-    parser.add_argument("--version", action="version", version="ArtAnimate 1.5.0")
+    parser.add_argument("--version", action="version", version="ArtAnimate 1.6.0")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     parser.add_argument("--log-file", type=Path, help="copie persistante des logs")
     subparsers = parser.add_subparsers(dest="command", required=True)

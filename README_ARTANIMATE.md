@@ -17,6 +17,7 @@ Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette
 - effet `wave` avec front sinusoïdal, turbulence et six directions ;
 - effet `rgb_fade` avec montée lumineuse ou construction R → G → B ;
 - contours au début, à la fin ou pendant toute l’animation ;
+- studio 3D temps réel avec pièce, table, lampe, œuvre animée et caméra orbitale ;
 - export MP4 H.264, MOV ou WebM, sans installation manuelle de FFmpeg ;
 - analyse de palette en JSON et planche de contrôle PNG ;
 - presets JSON reproductibles et graine aléatoire configurable.
@@ -49,7 +50,7 @@ artanimate-ui
 
 Le client accepte le glisser-déposer de l’image et du dossier de destination. Chaque modification d’un effet ou de ses paramètres déclenche, après un court délai, un prérendu animé basse définition calculé sans encodage vidéo. Quatre panneaux cliquables ouvrent des fenêtres dédiées — Effet, Couleurs, Analyse et Vidéo — afin de ne jamais empiler tous les paramètres. Chaque valeur numérique dispose d’un slider, de sa valeur exacte et de bornes visibles. La roue chromatique profite d’une grande fenêtre dédiée et se fait tourner à la souris pour choisir la couleur de départ et le sens de progression. Le profil **Studio** ajoute automatiquement easing, exposition temporelle sur trois sous-images et encodage optimisé pour les aplats colorés ; le profil Rapide reste disponible pour les essais.
 
-Les vidéos terminées alimentent une bande historique compacte sous l’atelier : vignette, effet, date, lecture, sélection dans l’Explorateur Windows et suppression confirmée. Les menus **Fichier**, **Génération**, **Réglages**, **Affichage** et **Historique** regroupent les actions et raccourcis. L’onglet **Studio 3D · Coming soon** réserve clairement la future mise en scène sans simuler un moteur inexistant. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle.
+Les vidéos terminées alimentent une bande historique compacte sous l’atelier : vignette, effet, date, lecture, sélection dans l’Explorateur Windows et suppression confirmée. Les menus **Fichier**, **Génération**, **Réglages**, **Affichage** et **Historique** regroupent les actions et raccourcis. L’onglet **Studio 3D** charge un vrai moteur de scène à la demande : la même animation basse définition devient la texture de l’œuvre, posée sur une table avec lampe et éclairage de pièce. La caméra s’orbite par glisser-déposer, se rapproche à la molette et reste réglable avec des sliders accessibles. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle.
 
 Une couleur de bord saturée ou trop minoritaire est animée avec l’œuvre : elle n’est jamais étalée artificiellement sur toute l’image d’ouverture.
 

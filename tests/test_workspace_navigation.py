@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication, QMessageBox, QToolButton
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QToolButton
 
 from artanimate.core.config import RenderConfig
 from artanimate.desktop.app import MainWindow
@@ -27,7 +27,7 @@ def app(tmp_path_factory):
     return QApplication.instance() or QApplication([])
 
 
-def test_workspace_has_actionable_menus_history_and_coming_soon_tab(
+def test_workspace_has_actionable_menus_history_and_interactive_3d_studio(
     app,
     tmp_path: Path,
 ) -> None:
@@ -43,9 +43,11 @@ def test_workspace_has_actionable_menus_history_and_coming_soon_tab(
         assert window.chromatic_wheel.minimumWidth() >= 400
         window._settings_dialogs["colors"].close()
         assert window.workspace_tabs.tabText(0) == "Atelier 2D"
-        assert "Coming soon" in window.workspace_tabs.tabText(1)
+        assert window.workspace_tabs.tabText(1) == "Studio 3D"
         window.workspace_tabs.setCurrentIndex(1)
-        assert "vrai moteur" in window.coming_soon_feedback.text()
+        app.processEvents()
+        assert not window.studio_3d.scene_errors
+        assert "TEMPS RÉEL" in window.findChild(QLabel, "studioLiveBadge").text()
 
         destination = tmp_path / "exports"
         destination.mkdir()

@@ -1,0 +1,59 @@
+import os
+from pathlib import Path
+
+import pytest
+from PIL import Image
+
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QSG_RHI_BACKEND", "software")
+pytest.importorskip("PySide6")
+
+from PySide6.QtGui import QImage
+from PySide6.QtQuickWidgets import QQuickWidget
+from PySide6.QtWidgets import QApplication
+
+from artanimate.desktop.studio3d import QML_SCENE_PATH, Studio3DPanel
+
+
+@pytest.fixture(scope="module")
+def app():
+    return QApplication.instance() or QApplication([])
+
+
+def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
+    scene = QML_SCENE_PATH.read_text(encoding="utf-8")
+
+    assert "View3D" in scene
+    assert "PerspectiveCamera" in scene
+    assert "PointLight" in scene
+    assert "artworkSource" in scene
+    assert "MouseArea" in scene
+
+
+def test_studio_panel_loads_scene_and_accepts_animated_frames(
+    app,
+    tmp_path: Path,
+) -> None:
+    artwork = tmp_path / "artwork.png"
+    Image.new("RGB", (180, 120), (220, 45, 80)).save(artwork)
+    panel = Studio3DPanel()
+    try:
+        panel.activate()
+        app.processEvents()
+        assert panel.view.status() != QQuickWidget.Status.Error, panel.scene_errors
+        assert panel.set_source(artwork)
+
+        frame = QImage(str(artwork))
+        panel.set_frame(frame, 2, 20)
+        app.processEvents()
+
+        root = panel.view.rootObject()
+        assert root is not None
+        assert root.property("artworkSource").toString().startswith(
+            "image://artanimate/"
+        )
+        assert root.property("artworkAspect") == pytest.approx(1.5)
+        assert "image 3/20" in panel.artwork_status.text()
+    finally:
+        panel.close()

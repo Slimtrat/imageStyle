@@ -247,26 +247,32 @@ QMenu {
 QMenu::item {
     padding: 7px 24px 7px 10px;
 }
-QWidget#comingSoonPage {
+QWidget#studio3DPage {
     background: #f7f8fb;
 }
-QLabel#comingSoonBadge {
-    color: #ffffff;
-    background: #5262d9;
-    border-radius: 11px;
-    padding: 7px 14px;
-    font-size: 11px;
-    font-weight: 800;
-}
-QLabel#comingSoonTitle {
+QLabel#studioTitle {
     color: #172033;
-    font-size: 30px;
+    font-size: 23px;
     font-weight: 750;
 }
-QLabel#comingSoonText {
+QLabel#studioLiveBadge {
+    color: #eafff2;
+    background: #23865b;
+    border-radius: 9px;
+    padding: 6px 11px;
+    font-size: 10px;
+    font-weight: 800;
+}
+QFrame#studioControls {
+    background: #ffffff;
+    border: 1px solid #dfe4ec;
+    border-radius: 13px;
+}
+QLabel#studioStatus {
     color: #4e5870;
-    font-size: 16px;
-    padding: 10px;
+    background: #f4f6fa;
+    border-radius: 8px;
+    padding: 9px;
 }
 QToolTip {
     color: #ffffff;

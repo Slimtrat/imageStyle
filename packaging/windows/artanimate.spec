@@ -25,13 +25,25 @@ documentation_datas = [
         "artanimate/assets/docs",
     )
 ]
+qml_datas = [
+    (
+        str(PROJECT_ROOT / "artanimate" / "assets" / "qml" / "Studio3D.qml"),
+        "artanimate/assets/qml",
+    )
+]
+qt_quick_hiddenimports = [
+    "PySide6.QtQml",
+    "PySide6.QtQuick",
+    "PySide6.QtQuick3D",
+    "PySide6.QtQuickWidgets",
+]
 
 analysis = Analysis(
     [str(WINDOWS_DIR / "launcher.py")],
     pathex=[str(PROJECT_ROOT)],
     binaries=imageio_binaries,
-    datas=branding_datas + documentation_datas + imageio_datas,
-    hiddenimports=imageio_hiddenimports,
+    datas=branding_datas + documentation_datas + qml_datas + imageio_datas,
+    hiddenimports=imageio_hiddenimports + qt_quick_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
