@@ -12,6 +12,7 @@ EFFECTS = effect_keys()
 ORDERS = ("chromatic", "reverse", "area", "luminance")
 NEUTRAL_POSITIONS = ("first", "last")
 OUTLINE_MODES = ("first", "last", "together")
+QUALITY_PROFILES = ("fast", "studio")
 DIRECTIONS = ("left", "right", "top", "bottom", "diagonal", "radial")
 
 
@@ -19,7 +20,7 @@ DIRECTIONS = ("left", "right", "top", "bottom", "diagonal", "radial")
 class RenderConfig:
     effect: str = "sand"
     order: str = "chromatic"
-    outline: str = "last"
+    outline: str = "together"
     direction: str = "left"
     duration: float = 12.0
     fps: int = 30
@@ -27,7 +28,7 @@ class RenderConfig:
     colors: int = 24
     hold_start: float = 0.6
     hold_end: float = 1.2
-    overlap: float = 0.16
+    overlap: float = 0.28
     start_hue: float = 0.0
     neutral_position: str = "last"
     shape_completion: int = 2
@@ -41,7 +42,8 @@ class RenderConfig:
     grain_density: float = 0.0015
     grain_size: float = 2.0
     seed: int = 7
-    crf: int = 18
+    crf: int = 16
+    quality: str = "studio"
 
     def validate(self) -> "RenderConfig":
         if self.effect not in EFFECTS:
@@ -59,6 +61,8 @@ class RenderConfig:
             )
         if self.outline not in OUTLINE_MODES:
             raise ValueError(f"outline doit être l'un de : {', '.join(OUTLINE_MODES)}")
+        if self.quality not in QUALITY_PROFILES:
+            raise ValueError(f"quality doit être l'un de : {', '.join(QUALITY_PROFILES)}")
         if self.direction not in DIRECTIONS:
             raise ValueError(f"direction doit être l'une de : {', '.join(DIRECTIONS)}")
         if self.duration <= 0 or self.fps <= 0:

@@ -6,7 +6,7 @@ import numpy as np
 
 from .base import AnimationEffect, EffectCapability, EffectContext
 from .factory import register_effect
-from .noise import fractal_noise, normalized_coordinates
+from .noise import fractal_noise, normalize_reveal_field, normalized_coordinates
 
 
 def wave_field(
@@ -38,9 +38,7 @@ def wave_field(
     oscillation = np.sin(across * frequency * 2.0 * math.pi + base * math.pi) * amplitude
     noise = (fractal_noise(width, height, seed) - 0.5) * turbulence
     field = base + oscillation + noise
-    minimum = float(field.min())
-    maximum = float(field.max())
-    return np.clip((field - minimum) / max(maximum - minimum, 1e-6), 0.0, 1.0)
+    return normalize_reveal_field(field)
 
 
 @register_effect

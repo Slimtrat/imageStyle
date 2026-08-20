@@ -48,7 +48,21 @@ def encode_video(
     codec = "libvpx-vp9" if suffix == ".webm" else "libx264"
     output_params = ["-crf", str(renderer.config.crf)]
     if suffix in {".mp4", ".mov"}:
-        output_params += ["-preset", "medium", "-movflags", "+faststart"]
+        preset = "slow" if renderer.config.quality == "studio" else "medium"
+        output_params += [
+            "-preset",
+            preset,
+            "-tune",
+            "animation",
+            "-movflags",
+            "+faststart",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+        ]
     else:
         output_params += ["-b:v", "0"]
 

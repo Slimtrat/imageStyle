@@ -28,6 +28,16 @@ def fractal_noise(width: int, height: int, seed: int) -> np.ndarray:
     return np.clip(broad * 0.58 + medium * 0.29 + fine * 0.13, 0.0, 1.0)
 
 
+def normalize_reveal_field(values: np.ndarray, margin: float = 0.035) -> np.ndarray:
+    """Normalize a reveal field while keeping quiet time at both endpoints."""
+    field = np.asarray(values, dtype=np.float32)
+    minimum = float(field.min())
+    span = float(field.max() - minimum)
+    normalized = np.clip((field - minimum) / max(span, 1e-6), 0.0, 1.0)
+    padding = float(np.clip(margin, 0.0, 0.2))
+    return padding + normalized * (1.0 - 2.0 * padding)
+
+
 def normalized_coordinates(width: int, height: int) -> tuple[np.ndarray, np.ndarray]:
     """Return normalized X/Y coordinate grids shared by field implementations."""
     x = np.linspace(0.0, 1.0, width, dtype=np.float32)

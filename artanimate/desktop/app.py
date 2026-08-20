@@ -391,13 +391,22 @@ class MainWindow(QMainWindow):
         )
         self.outline_combo = self._combo(
             (
+                ("Progressifs — avec les couleurs", "together"),
                 ("À la fin — dessin de clôture", "last"),
                 ("Au début — structure d’abord", "first"),
-                ("Progressifs — avec les couleurs", "together"),
             )
         )
         self.format_combo = self._combo(
             (("MP4 — H.264", ".mp4"), ("WebM — VP9", ".webm"), ("MOV — H.264", ".mov"))
+        )
+        self.quality_combo = self._combo(
+            (
+                ("Studio — fluide et détaillé", "studio"),
+                ("Rapide — rendu direct", "fast"),
+            )
+        )
+        self.quality_combo.setToolTip(
+            "Studio lisse chaque image dans le temps et optimise l’encodage des aplats."
         )
 
         self.width_spin = self._slider(320, 3840, 1280, 160, 0, " px", "Largeur de la vidéo exportée")
@@ -417,7 +426,7 @@ class MainWindow(QMainWindow):
             "Luminosité maximale reconnue comme contour sombre",
         )
         self.overlap_slider = self._slider(
-            0.0, 0.8, 0.16, 0.02, 2, "",
+            0.0, 0.8, 0.28, 0.02, 2, "",
             "Chevauchement temporel entre deux familles de couleurs",
         )
         self.seed_spin = self._slider(
@@ -530,6 +539,7 @@ class MainWindow(QMainWindow):
         video_form.setVerticalSpacing(13)
         video_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         video_form.addRow("Format", self.format_combo)
+        video_form.addRow("Qualité", self.quality_combo)
         video_form.addRow("Largeur", self.width_spin)
         video_form.addRow("Durée", self.duration_spin)
         video_form.addRow("Fluidité", self.fps_spin)
@@ -770,6 +780,7 @@ class MainWindow(QMainWindow):
             self.neutral_combo,
             self.outline_combo,
             self.format_combo,
+            self.quality_combo,
         )
         for combo in summary_combos:
             combo.currentIndexChanged.connect(
@@ -811,9 +822,10 @@ class MainWindow(QMainWindow):
         self._settings_cards["analysis"].setDescription(
             f"{int(self.colors_spin.value())} nuances · formes {int(self.shape_completion.value())}/4"
         )
+        profile = self.quality_combo.currentText().split("—", 1)[0].strip()
         self._settings_cards["video"].setDescription(
-            f"{int(self.width_spin.value())} px · {self.duration_spin.value():g} s · "
-            f"{int(self.fps_spin.value())} i/s"
+            f"{profile} · {int(self.width_spin.value())} px · "
+            f"{self.duration_spin.value():g} s · {int(self.fps_spin.value())} i/s"
         )
 
     def _show_problem(self, problem: UserProblem, *, critical: bool = False) -> None:
@@ -866,8 +878,19 @@ class MainWindow(QMainWindow):
 
     def _restore_destination(self) -> None:
         saved = self.settings.value("destination", "", str)
-        if saved and Path(saved).is_dir():
-            self.destination_zone.set_path(saved)
+        temporary_root = Path(
+            QStandardPaths.writableLocation(QStandardPaths.StandardLocation.TempLocation)
+        ).resolve()
+        saved_path = Path(saved).resolve() if saved else None
+        if (
+            saved_path is not None
+            and saved_path.is_dir()
+            and not saved_path.is_relative_to(temporary_root)
+        ):
+            self.destination_zone.set_path(saved_path)
+        elif saved:
+            self.settings.remove("destination")
+            logger.warning("Destination temporaire ou obsolète oubliée : %s", saved)
         self.history_panel.set_directory(self.destination_zone.path)
 
     def _source_selected(self, value: str) -> None:
@@ -973,6 +996,7 @@ class MainWindow(QMainWindow):
             "neutral_position": str(self.neutral_combo.currentData()),
             "start_hue": self.chromatic_wheel.startHue(),
             "outline": str(self.outline_combo.currentData()),
+            "quality": str(self.quality_combo.currentData()),
             "duration": self.duration_spin.value(),
             "fps": self.fps_spin.value(),
             "width": self.width_spin.value(),

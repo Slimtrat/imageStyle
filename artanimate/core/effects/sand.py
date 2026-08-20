@@ -4,7 +4,7 @@ import numpy as np
 
 from .base import AnimationEffect, EffectCapability, EffectContext
 from .factory import register_effect
-from .noise import fractal_noise, normalized_coordinates
+from .noise import fractal_noise, normalize_reveal_field, normalized_coordinates
 
 
 def sand_field(width: int, height: int, turbulence: float, seed: int) -> np.ndarray:
@@ -12,9 +12,7 @@ def sand_field(width: int, height: int, turbulence: float, seed: int) -> np.ndar
     _, y = normalized_coordinates(width, height)
     noise = (fractal_noise(width, height, seed) - 0.5) * turbulence
     field = (1.0 - y) + noise
-    minimum = float(field.min())
-    maximum = float(field.max())
-    return np.clip((field - minimum) / max(maximum - minimum, 1e-6), 0.0, 1.0)
+    return normalize_reveal_field(field)
 
 
 @register_effect

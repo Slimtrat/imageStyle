@@ -16,6 +16,7 @@ from ..core.config import (
     NEUTRAL_POSITIONS,
     ORDERS,
     OUTLINE_MODES,
+    QUALITY_PROFILES,
     RenderConfig,
 )
 from ..core.renderer import ArtworkRenderer
@@ -37,6 +38,12 @@ def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
         help="place les neutres avant ou après les couleurs",
     )
     parser.add_argument("--outline", choices=OUTLINE_MODES, default=None, help="moment des contours")
+    parser.add_argument(
+        "--quality",
+        choices=QUALITY_PROFILES,
+        default=None,
+        help="profil de rendu : studio (fluide) ou fast (rapide)",
+    )
     parser.add_argument("--direction", choices=DIRECTIONS, default=None, help="direction de la vague")
     parser.add_argument("--duration", type=float, default=None, help="durée totale en secondes")
     parser.add_argument("--fps", type=int, default=None, help="images par seconde")
@@ -76,7 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="artanimate",
         description="Transforme une œuvre statique en animation chromatique sable ou vague.",
     )
-    parser.add_argument("--version", action="version", version="ArtAnimate 1.3.1")
+    parser.add_argument("--version", action="version", version="ArtAnimate 1.4.0")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     parser.add_argument("--log-file", type=Path, help="copie persistante des logs")
     subparsers = parser.add_subparsers(dest="command", required=True)

@@ -4,4 +4,4 @@ from .core.config import RenderConfig
 from .core.renderer import ArtworkRenderer, render_video
 
 __all__ = ["ArtworkRenderer", "RenderConfig", "render_video"]
-__version__ = "1.3.1"
+__version__ = "1.4.0"

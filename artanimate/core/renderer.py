@@ -10,6 +10,7 @@ import numpy as np
 from .analysis import ArtworkAnalysis, ColorLayer, analyze_artwork
 from .config import RenderConfig
 from .effects import EffectCapability, EffectContext, create_effect, reveal_opacity
+from .quality import ease_in_out, exposure_average
 
 
 logger = logging.getLogger(__name__)
@@ -122,7 +123,8 @@ class ArtworkRenderer:
         count = max(1, len(self.stages))
         stride = 1.0 - self.config.overlap
         timeline = 1.0 + (count - 1) * stride
-        return float(np.clip(global_progress * timeline - index * stride, 0.0, 1.0))
+        linear = float(np.clip(global_progress * timeline - index * stride, 0.0, 1.0))
+        return ease_in_out(linear)
 
     def _layer_progresses(self, global_progress: float) -> list[tuple[ColorLayer, float]]:
         result = [
@@ -174,12 +176,18 @@ class ArtworkRenderer:
         radius_x = max(1, min(5, int(np.ceil(grain_size * 0.75))))
         radius_y = max(1, min(6, int(np.ceil(grain_size * 1.15))))
         colors = particles.colors[indices].astype(np.float32)
+        life = phase_progress[indices]
+        fade_in = np.clip(life / 0.22, 0.0, 1.0)
+        fade_out = np.clip((1.0 - life) / 0.14, 0.0, 1.0)
+        fade_in = fade_in * fade_in * (3.0 - 2.0 * fade_in)
+        fade_out = fade_out * fade_out * (3.0 - 2.0 * fade_out)
+        visibility = (fade_in * fade_out).astype(np.float32)
 
         for dy in range(-radius_y, radius_y + 1):
             for dx in range(-radius_x, radius_x + 1):
                 distance = (dx / sigma_x) ** 2 + (dy / sigma_y) ** 2
-                alpha = 0.84 * float(np.exp(-0.5 * distance))
-                if alpha < 0.035:
+                kernel_alpha = 0.84 * float(np.exp(-0.5 * distance))
+                if kernel_alpha < 0.035:
                     continue
                 nx, ny = x + dx, y + dy
                 inside = (nx >= 0) & (nx < self.width) & (ny >= 0) & (ny < self.height)
@@ -187,6 +195,7 @@ class ArtworkRenderer:
                     continue
                 background = frame[ny[inside], nx[inside]].astype(np.float32)
                 foreground = colors[inside]
+                alpha = (kernel_alpha * visibility[inside])[:, None]
                 frame[ny[inside], nx[inside]] = np.rint(
                     background * (1.0 - alpha) + foreground * alpha
                 ).astype(np.uint8)
@@ -226,11 +235,23 @@ class ArtworkRenderer:
     def frame_count(self) -> int:
         return max(2, int(round(self.config.duration * self.config.fps)))
 
+    def _studio_frame_at(self, seconds: float) -> np.ndarray:
+        """Integrate three subframes over a cinematic 270° shutter."""
+        shutter = 0.75 / self.config.fps
+        offsets = np.linspace(-0.5, 0.5, 3, dtype=np.float32) * shutter
+        return exposure_average(
+            self.frame_at(float(np.clip(seconds + offset, 0.0, self.config.duration)))
+            for offset in offsets
+        )
+
     def frames(self) -> Iterator[np.ndarray]:
         count = self.frame_count
         for index in range(count):
             seconds = self.config.duration * index / (count - 1)
-            yield self.frame_at(seconds)
+            if self.config.quality == "studio" and 0 < index < count - 1:
+                yield self._studio_frame_at(seconds)
+            else:
+                yield self.frame_at(seconds)
 
 
 def render_video(
