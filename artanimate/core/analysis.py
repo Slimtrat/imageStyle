@@ -25,6 +25,14 @@ from .masks import complete_family_labels
 logger = logging.getLogger(__name__)
 
 
+# A color may be a useful segmentation candidate without being a credible
+# full-frame opening canvas. Saturated paper and thin colored borders must take
+# part in the animation instead of flashing across the whole first frame.
+MIN_STATIC_BACKGROUND_COVERAGE = 0.18
+MAX_STATIC_BACKGROUND_CHROMA = 18.0
+PRESENTATION_CANVAS_COLOR = (246, 246, 244)
+
+
 @dataclass(slots=True)
 class ColorLayer:
     key: str
@@ -211,20 +219,37 @@ def analyze_artwork(path: str | Path, config: RenderConfig) -> ArtworkAnalysis:
     flat_rgb = source.reshape(-1, 3)
     flat_lab = rgb_to_lab(flat_rgb)
 
-    background_color = _border_color(source)
-    background_lab = rgb_to_lab(np.asarray(background_color, dtype=np.uint8))[0:3]
+    background_candidate = _border_color(source)
+    background_lab = rgb_to_lab(
+        np.asarray(background_candidate, dtype=np.uint8)
+    )[0:3]
     background_distance = np.linalg.norm(flat_lab - background_lab, axis=1)
     background_mask_flat = background_distance <= config.background_tolerance
     background_coverage = float(np.mean(background_mask_flat))
+    background_chroma = float(np.linalg.norm(background_lab[1:3]))
     logger.info(
-        "Fond détecté : rgb=%s, couverture=%.1f %%",
-        background_color,
+        "Fond candidat : rgb=%s, couverture=%.1f %%, chroma=%.1f",
+        background_candidate,
         background_coverage * 100.0,
+        background_chroma,
     )
-    if background_coverage < 0.02:
-        logger.warning("Le fond détecté couvre moins de 2 %% de l’image")
-    elif background_coverage > 0.95:
-        logger.warning("Le fond détecté couvre plus de 95 %% de l’image")
+    trusted_background = (
+        background_coverage >= MIN_STATIC_BACKGROUND_COVERAGE
+        and background_chroma <= MAX_STATIC_BACKGROUND_CHROMA
+    )
+    if trusted_background:
+        background_color = background_candidate
+        if background_coverage > 0.95:
+            logger.warning("Le fond détecté couvre plus de 95 %% de l’image")
+    else:
+        logger.warning(
+            "Fond candidat reclassé comme couleur animée : couverture=%.1f %%, "
+            "chroma=%.1f",
+            background_coverage * 100.0,
+            background_chroma,
+        )
+        background_color = PRESENTATION_CANVAS_COLOR
+        background_mask_flat = np.zeros(height * width, dtype=bool)
 
     chroma = np.linalg.norm(flat_lab[:, 1:3], axis=1)
     outline_mask_flat = (

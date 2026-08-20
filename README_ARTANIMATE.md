@@ -50,6 +50,8 @@ Le client accepte le glisser-déposer de l’image et du dossier de destination.
 
 Les vidéos terminées alimentent une bande historique compacte sous l’atelier : vignette, effet, date, lecture, sélection dans l’Explorateur Windows et suppression confirmée. Les menus **Fichier**, **Génération**, **Réglages**, **Affichage** et **Historique** regroupent les actions et raccourcis. L’onglet **Studio 3D · Coming soon** réserve clairement la future mise en scène sans simuler un moteur inexistant. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle.
 
+Une couleur de bord saturée ou trop minoritaire est animée avec l’œuvre : elle n’est jamais étalée artificiellement sur toute l’image d’ouverture.
+
 Lorsqu’une entrée n’est plus logique — image déplacée, dossier supprimé, accès refusé, disque plein, image corrompue ou nom interdit par Windows — l’interface met la zone concernée en rouge et explique en français ce qui s’est passé et quoi faire. Les détails techniques restent disponibles séparément pour le diagnostic.
 
 Vous pouvez aussi le lancer sans commande installée :
