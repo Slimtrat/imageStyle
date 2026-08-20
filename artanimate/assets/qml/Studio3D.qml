@@ -9,9 +9,23 @@ Item {
     property real cameraPitch: -11
     property real cameraDistance: 780
     property real lampBrightness: 1.8
+    property string effectKind: "sand"
+    property string rgbMode: "channels"
+    property string effectDirection: "left"
+    property real effectProgress: 0.0
+    property real outputAspect: 16 / 9
+    property bool showHud: true
 
     readonly property real artworkWidth: artworkAspect >= 1.0 ? 300 : 300 * artworkAspect
     readonly property real artworkHeight: artworkAspect >= 1.0 ? 300 / artworkAspect : 300
+    readonly property real artworkCenterY: -35 + artworkHeight / 2
+
+    function rgbWeight(channel) {
+        if (rgbMode === "together")
+            return effectProgress
+        const start = channel * 0.25
+        return Math.max(0, Math.min(1, (effectProgress - start) / 0.5))
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -168,6 +182,129 @@ Item {
                 }
             }
 
+            // Effect-specific volumes make the selected 2D construction inhabit the room.
+            Repeater3D {
+                model: 42
+                delegate: Model {
+                    required property int index
+                    readonly property real fallPhase: (root.effectProgress * 2.4 + index * 0.137) % 1.0
+                    visible: root.effectKind === "sand"
+                        && root.effectProgress > 0.01
+                        && root.effectProgress < 0.99
+                    x: -root.artworkWidth / 2
+                        + (((index * 73) % 101) / 100) * root.artworkWidth
+                    y: -35 + root.artworkHeight * (1.12 - fallPhase * 1.25)
+                    z: -4 + (index % 6) * 2.2
+                    source: "#Sphere"
+                    scale: Qt.vector3d(
+                        0.018 + (index % 4) * 0.004,
+                        0.028 + (index % 3) * 0.006,
+                        0.018 + (index % 4) * 0.004
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: index % 6 === 0 ? "#e15d4f"
+                            : index % 6 === 1 ? "#e8ad3d"
+                            : index % 6 === 2 ? "#55a36b"
+                            : index % 6 === 3 ? "#3d76c2"
+                            : index % 6 === 4 ? "#8759b5" : "#30333a"
+                        roughness: 0.72
+                    }
+                }
+            }
+
+            Model {
+                readonly property bool horizontalFront: root.effectDirection === "left"
+                    || root.effectDirection === "right"
+                visible: root.effectKind === "wave"
+                    && root.effectProgress > 0.01
+                    && root.effectProgress < 0.99
+                x: horizontalFront
+                    ? (root.effectDirection === "right" ? 1 : -1)
+                        * root.artworkWidth * (0.5 - root.effectProgress)
+                    : 0
+                y: horizontalFront
+                    ? root.artworkCenterY
+                    : -35 + root.artworkHeight
+                        * (root.effectDirection === "top"
+                            ? 1 - root.effectProgress : root.effectProgress)
+                z: -5
+                eulerRotation.z: root.effectDirection === "diagonal" ? -24 : 0
+                source: root.effectDirection === "radial" ? "#Cylinder" : "#Cube"
+                eulerRotation.x: root.effectDirection === "radial" ? 90 : 0
+                scale: root.effectDirection === "radial"
+                    ? Qt.vector3d(
+                        0.22 + root.effectProgress * 1.6,
+                        0.018,
+                        0.22 + root.effectProgress * 1.6
+                    )
+                    : horizontalFront
+                        ? Qt.vector3d(0.035, root.artworkHeight / 100, 0.055)
+                        : Qt.vector3d(root.artworkWidth / 100, 0.035, 0.055)
+                materials: PrincipledMaterial {
+                    baseColor: "#4aa6e8"
+                    emissiveFactor: Qt.vector3d(0.18, 0.42, 0.72)
+                    opacity: root.effectDirection === "radial" ? 0.28 : 0.82
+                    roughness: 0.22
+                }
+            }
+            Model {
+                readonly property bool horizontalFront: root.effectDirection === "left"
+                    || root.effectDirection === "right"
+                visible: root.effectKind === "wave"
+                    && root.effectDirection !== "radial"
+                    && root.effectProgress > 0.01
+                    && root.effectProgress < 0.99
+                x: horizontalFront
+                    ? (root.effectDirection === "right" ? 1 : -1)
+                        * root.artworkWidth * (0.5 - root.effectProgress)
+                    : Math.sin(root.effectProgress * 18) * 9
+                y: horizontalFront
+                    ? root.artworkCenterY + Math.sin(root.effectProgress * 18) * 7
+                    : -35 + root.artworkHeight
+                        * (root.effectDirection === "top"
+                            ? 1 - root.effectProgress : root.effectProgress) - 8
+                z: -8
+                eulerRotation.z: root.effectDirection === "diagonal" ? -24 : 0
+                source: "#Cube"
+                scale: horizontalFront
+                    ? Qt.vector3d(0.018, root.artworkHeight / 105, 0.08)
+                    : Qt.vector3d(root.artworkWidth / 105, 0.018, 0.08)
+                materials: PrincipledMaterial {
+                    baseColor: "#a4ddff"
+                    emissiveFactor: Qt.vector3d(0.34, 0.54, 0.78)
+                    opacity: 0.55
+                    roughness: 0.18
+                }
+            }
+
+            PointLight {
+                visible: root.effectKind === "rgb_fade"
+                x: -190
+                y: root.artworkCenterY + 40
+                z: 115
+                color: "#ff2f45"
+                brightness: root.rgbWeight(0) * 1.4
+                quadraticFade: 0.00001
+            }
+            PointLight {
+                visible: root.effectKind === "rgb_fade"
+                x: 0
+                y: root.artworkCenterY + 100
+                z: 95
+                color: "#38e477"
+                brightness: root.rgbWeight(1) * 1.25
+                quadraticFade: 0.00001
+            }
+            PointLight {
+                visible: root.effectKind === "rgb_fade"
+                x: 190
+                y: root.artworkCenterY + 30
+                z: 115
+                color: "#4182ff"
+                brightness: root.rgbWeight(2) * 1.45
+                quadraticFade: 0.00001
+            }
+
             // Burlesque table lamp: weighted base, stem and broad shade.
             Model {
                 x: -275
@@ -210,6 +347,7 @@ Item {
     MouseArea {
         id: orbitArea
         anchors.fill: parent
+        enabled: root.showHud
         acceptedButtons: Qt.LeftButton
         property real lastX: 0
         property real lastY: 0
@@ -235,7 +373,42 @@ Item {
         cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
     }
 
+    Item {
+        id: exportGuide
+        visible: root.showHud
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 38, (parent.height - 38) * root.outputAspect)
+        height: width / root.outputAspect
+
+        Rectangle {
+            anchors.fill: parent
+            color: "transparent"
+            border.color: "#e8edff"
+            border.width: 2
+            radius: 3
+        }
+        Rectangle {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.margins: 8
+            color: "#c7161b25"
+            radius: 5
+            width: frameText.implicitWidth + 14
+            height: frameText.implicitHeight + 8
+            Text {
+                id: frameText
+                anchors.centerIn: parent
+                text: "CADRE EXPORT"
+                color: "#f2f5ff"
+                font.pixelSize: 10
+                font.bold: true
+                font.letterSpacing: 0.7
+            }
+        }
+    }
+
     Rectangle {
+        visible: root.showHud
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.margins: 16

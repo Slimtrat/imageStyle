@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from ..branding import LOGO_PATH
 from ..core.config import RenderConfig
 from ..core.effects import EffectCapability, EffectDescriptor, effect_descriptors
+from ..core.video import VideoFrameEncoder
 from ..observability import attach_handler, configure_file_logging, detach_handler
 from .controls import ChromaticSequenceWheel, ParameterSlider
 from .history import GenerationHistory
@@ -39,6 +40,7 @@ from .log_window import LogWindow, QtLogHandler
 from .preview import PREVIEW_INTERVAL_MS, PreviewWorker
 from .settings_windows import SettingsCard, SettingsDialog
 from .studio3d import Studio3DPanel
+from .studio3d_export import Studio3DFrameWorker, qimage_to_rgb
 from .problems import (
     UserInputError,
     UserProblem,
@@ -84,6 +86,16 @@ class MainWindow(QMainWindow):
         self._render_source: Path | None = None
         self._render_config: RenderConfig | None = None
         self._render_thumbnail: QImage | None = None
+        self._studio_thread: QThread | None = None
+        self._studio_worker: Studio3DFrameWorker | None = None
+        self._studio_encoder: VideoFrameEncoder | None = None
+        self._studio_pending_frame: tuple[int, int] | None = None
+        self._studio_failure: UserProblem | None = None
+        self._studio_source: Path | None = None
+        self._studio_output: Path | None = None
+        self._studio_config: RenderConfig | None = None
+        self._studio_thumbnail: QImage | None = None
+        self._studio_output_size = (1280, 720)
 
         history_location = history_root or (
             Path(
@@ -228,9 +240,16 @@ class MainWindow(QMainWindow):
     def _build_studio_3d(self) -> QWidget:
         self.studio_3d = Studio3DPanel()
         self.studio_3d.choose_source_requested.connect(self.source_zone.browse)
+        self.studio_3d.choose_destination_requested.connect(
+            self.destination_zone.browse
+        )
         self.studio_3d.refresh_preview_requested.connect(
             lambda: self._schedule_preview(0)
         )
+        self.studio_3d.export_requested.connect(self._start_studio_render)
+        self.studio_3d.cancel_export_requested.connect(self._cancel_studio_render)
+        self.studio_3d.play_output_requested.connect(self._play_studio_output)
+        self.studio_3d.reveal_output_requested.connect(self._reveal_studio_output)
         return self.studio_3d
 
     def _build_header(self) -> QHBoxLayout:
@@ -745,6 +764,9 @@ class MainWindow(QMainWindow):
                     control.currentIndexChanged.connect(
                         lambda *_: self._schedule_preview()
                     )
+                    control.currentIndexChanged.connect(
+                        lambda *_: self._sync_studio_effect()
+                    )
                 elif isinstance(control, ParameterSlider):
                     control.valueChanged.connect(lambda *_: self._schedule_preview())
         self.chromatic_wheel.hueChanged.connect(lambda *_: self._schedule_preview())
@@ -872,6 +894,7 @@ class MainWindow(QMainWindow):
             self.settings.remove("destination")
             logger.warning("Destination temporaire ou obsolète oubliée : %s", saved)
         self.history_panel.set_directory(self.destination_zone.path)
+        self.studio_3d.set_destination(self.destination_zone.path)
 
     def _source_selected(self, value: str) -> None:
         try:
@@ -896,6 +919,7 @@ class MainWindow(QMainWindow):
         if self.destination_zone.path is None:
             self.destination_zone.set_path(path.parent)
         self.history_panel.set_directory(self.destination_zone.path)
+        self.studio_3d.set_destination(self.destination_zone.path)
         self._auto_filename = True
         self._suggest_filename()
         self._schedule_preview(120)
@@ -907,6 +931,7 @@ class MainWindow(QMainWindow):
             self._handle_path_problem(self.destination_zone, exc.problem)
             return
         self.history_panel.set_directory(destination)
+        self.studio_3d.set_destination(destination)
         self.settings.setValue("destination", str(destination))
         logger.info("Dossier de destination sélectionné : %s", destination)
 
@@ -920,10 +945,23 @@ class MainWindow(QMainWindow):
         self.mode_description.setText(descriptor.description)
         self.effect_combo.setToolTip(descriptor.description)
         logger.info("Mode sélectionné : %s", effect)
+        self._sync_studio_effect()
         if hasattr(self, "sequence_panel"):
             self._order_changed()
         if self._auto_filename:
             self._suggest_filename()
+
+    def _sync_studio_effect(self) -> None:
+        effect = str(self.effect_combo.currentData())
+        rgb_mode = "channels"
+        direction = "left"
+        rgb_control = self._effect_controls.get("rgb_fade", {}).get("rgb_mode")
+        direction_control = self._effect_controls.get("wave", {}).get("direction")
+        if isinstance(rgb_control, QComboBox):
+            rgb_mode = str(rgb_control.currentData())
+        if isinstance(direction_control, QComboBox):
+            direction = str(direction_control.currentData())
+        self.studio_3d.set_effect(effect, rgb_mode, direction)
 
     def _order_changed(self) -> None:
         order = str(self.order_combo.currentData())
@@ -1279,7 +1317,293 @@ class MainWindow(QMainWindow):
             self._schedule_preview(0)
         logger.info("Studio 3D interactif ouvert")
 
+    def _start_studio_render(self) -> None:
+        if self._worker is not None or self._studio_worker is not None:
+            return
+        self.workspace_tabs.setCurrentIndex(1)
+        self.studio_3d.activate()
+        if self.studio_3d.scene_errors:
+            QMessageBox.critical(
+                self,
+                "Moteur 3D indisponible",
+                "Le moteur de scène n’a pas démarré. Consultez les logs pour le détail.",
+            )
+            return
+        settings = self.studio_3d.export_settings()
+        try:
+            source, destination = validate_render_paths(
+                self.source_zone.path,
+                self.destination_zone.path,
+                settings.output_name,
+                settings.suffix,
+            )
+            config = self.build_config()
+        except UserInputError as exc:
+            problem = exc.problem
+            if problem.code.startswith("source_"):
+                self.source_zone.mark_invalid(problem)
+            elif problem.code.startswith("destination_"):
+                self.destination_zone.mark_invalid(problem)
+            self.studio_3d.fail_export(problem.display_text)
+            self._show_problem(problem)
+            return
+        except ValueError as exc:
+            problem = translate_exception(exc, "render")
+            self.studio_3d.fail_export(problem.display_text)
+            self._show_problem(problem)
+            return
+
+        if destination.exists():
+            answer = QMessageBox.question(
+                self,
+                "Remplacer la vidéo 3D ?",
+                f"{destination.name} existe déjà. Voulez-vous la remplacer ?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                logger.info("Remplacement du rendu 3D refusé : %s", destination)
+                return
+
+        total = max(2, int(round(config.duration * config.fps)))
+        try:
+            encoder = VideoFrameEncoder(
+                destination,
+                settings.width,
+                settings.height,
+                config.fps,
+                crf=config.crf,
+                quality=config.quality,
+                total_frames=total,
+            )
+            encoder.open()
+        except Exception as exc:
+            problem = translate_exception(
+                exc, "render", source=source, destination=destination.parent
+            )
+            self.studio_3d.fail_export(problem.display_text)
+            self._show_problem(problem, critical=True)
+            return
+
+        self._suspend_preview()
+        self.player.stop()
+        self._studio_encoder = encoder
+        self._studio_source = source.resolve()
+        self._studio_output = destination.resolve()
+        self._studio_config = config
+        self._studio_thumbnail = None
+        self._studio_failure = None
+        self._studio_pending_frame = None
+        self._studio_output_size = (settings.width, settings.height)
+        self.studio_3d.set_effect(config.effect, config.rgb_mode, config.direction)
+        self.studio_3d.begin_export(total)
+        self._set_studio_running(True)
+        self.status_label.setText("Rendu du Studio 3D en cours…")
+
+        logger.info(
+            "Création 3D lancée : %s -> %s, cadre=%dx%d, caméra=%s",
+            source,
+            destination,
+            settings.width,
+            settings.height,
+            self.studio_3d.camera_state(),
+        )
+        thread = QThread(self)
+        worker = Studio3DFrameWorker(source, config)
+        self._studio_thread = thread
+        self._studio_worker = worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.prepared.connect(self._studio_render_prepared)
+        worker.frame_ready.connect(self._studio_frame_ready)
+        worker.finished.connect(self._studio_render_finished)
+        worker.cancelled.connect(self._studio_render_cancelled)
+        worker.failed.connect(self._studio_render_failed)
+        worker.finished.connect(thread.quit)
+        worker.cancelled.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._studio_thread_finished)
+        thread.start()
+
+    def _studio_render_prepared(
+        self, total: int, texture_width: int, texture_height: int
+    ) -> None:
+        self.studio_3d.export_status.setText(
+            f"Texture {texture_width}×{texture_height} prête · {total} images à capturer"
+        )
+
+    def _studio_frame_ready(
+        self,
+        image: QImage,
+        index: int,
+        total: int,
+        progress: float,
+    ) -> None:
+        if self._studio_worker is None or self._studio_encoder is None:
+            return
+        if self._studio_pending_frame is not None:
+            self._studio_failure = translate_exception(
+                RuntimeError("Deux images 3D attendent simultanément la capture"),
+                "render",
+                source=self._studio_source,
+                destination=(self._studio_output.parent if self._studio_output else None),
+            )
+            self._studio_worker.cancel()
+            return
+        self.studio_3d.set_frame(image, index, total, progress)
+        self._studio_pending_frame = (index, total)
+        QTimer.singleShot(18, self._capture_studio_frame)
+
+    def _capture_studio_frame(self) -> None:
+        pending = self._studio_pending_frame
+        worker = self._studio_worker
+        encoder = self._studio_encoder
+        if pending is None or worker is None or encoder is None:
+            return
+        index, total = pending
+        try:
+            width, height = self._studio_output_size
+            captured = self.studio_3d.capture_frame(width, height)
+            encoder.write(qimage_to_rgb(captured))
+            if self._studio_thumbnail is None and index >= total // 2:
+                self._studio_thumbnail = captured.scaled(
+                    480,
+                    270,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            self.studio_3d.update_export_progress(index + 1, total)
+            self.progress_bar.setValue(int(round((index + 1) * 100 / total)))
+            self.percent_label.setText(f"{int(round((index + 1) * 100 / total))} %")
+            self._studio_pending_frame = None
+            worker.acknowledge()
+        except Exception as exc:
+            logger.exception("Capture ou encodage d’une image 3D impossible")
+            self._studio_failure = translate_exception(
+                exc,
+                "render",
+                source=self._studio_source,
+                destination=(self._studio_output.parent if self._studio_output else None),
+            )
+            self._studio_pending_frame = None
+            worker.cancel()
+
+    def _studio_render_finished(self) -> None:
+        encoder = self._studio_encoder
+        output = self._studio_output
+        source = self._studio_source
+        config = self._studio_config
+        if encoder is None or output is None or source is None or config is None:
+            self._studio_render_failed(
+                translate_exception(RuntimeError("Contexte du rendu 3D incomplet"))
+            )
+            return
+        try:
+            result = encoder.finish()
+            self._studio_encoder = None
+            self._last_video = result
+            descriptor = self._effect_descriptors[config.effect]
+            self.history_store.add(
+                result,
+                source,
+                config,
+                f"Studio 3D · {descriptor.selector_label}",
+                self._studio_thumbnail,
+            )
+            self._refresh_history()
+            self.studio_3d.finish_export(result)
+            self.status_label.setText(f"Vidéo 3D prête : {result.name}")
+            self.progress_bar.setValue(100)
+            self.percent_label.setText("100 %")
+            self._set_studio_running(False)
+            logger.info("Vidéo du Studio 3D prête : %s", result)
+        except Exception as exc:
+            logger.exception("Finalisation du rendu 3D impossible")
+            problem = translate_exception(
+                exc, "render", source=source, destination=output.parent
+            )
+            self._studio_encoder = None
+            self.studio_3d.fail_export(problem.display_text)
+            self._set_studio_running(False)
+            self._show_problem(problem, critical=True)
+
+    def _cancel_studio_render(self) -> None:
+        if self._studio_worker is None:
+            return
+        self.studio_3d.export_status.setText("Annulation du rendu 3D…")
+        self._studio_worker.cancel()
+
+    def _studio_render_cancelled(self) -> None:
+        if self._studio_encoder is not None:
+            self._studio_encoder.abort()
+            self._studio_encoder = None
+        problem = self._studio_failure
+        self._studio_failure = None
+        self._studio_pending_frame = None
+        self._set_studio_running(False)
+        if problem is None:
+            self.studio_3d.cancel_export()
+            self.status_label.setText("Rendu 3D annulé.")
+            logger.warning("Rendu du Studio 3D annulé")
+        else:
+            self.studio_3d.fail_export(problem.display_text)
+            self.status_label.setText(f"{problem.title} — {problem.action}")
+            self._show_problem(problem, critical=True)
+
+    def _studio_render_failed(self, problem: object) -> None:
+        if not isinstance(problem, UserProblem):
+            problem = translate_exception(
+                RuntimeError(str(problem)),
+                "render",
+                source=self._studio_source,
+                destination=(self._studio_output.parent if self._studio_output else None),
+            )
+        if self._studio_encoder is not None:
+            self._studio_encoder.abort()
+            self._studio_encoder = None
+        self._studio_pending_frame = None
+        self._set_studio_running(False)
+        self.studio_3d.fail_export(problem.display_text)
+        self.status_label.setText(f"{problem.title} — {problem.action}")
+        self._show_problem(problem, critical=True)
+
+    def _studio_thread_finished(self) -> None:
+        thread = self._studio_thread
+        self._studio_worker = None
+        self._studio_thread = None
+        self._studio_pending_frame = None
+        if thread is not None:
+            thread.deleteLater()
+        if self._close_when_done:
+            self.close()
+
+    def _set_studio_running(self, running: bool) -> None:
+        self.generate_button.setEnabled(not running)
+        self.generate_action.setEnabled(not running)
+        self.preview_action.setEnabled(not running)
+        self.source_zone.setEnabled(not running)
+        self.destination_zone.setEnabled(not running)
+        for card in self._settings_cards.values():
+            card.setEnabled(not running)
+        for dialog in self._settings_dialogs.values():
+            dialog.set_controls_enabled(not running)
+        for action in self.settings_actions.values():
+            action.setEnabled(not running)
+
+    def _play_studio_output(self) -> None:
+        if self._studio_output is None:
+            return
+        self.workspace_tabs.setCurrentIndex(0)
+        self._play_history(str(self._studio_output))
+
+    def _reveal_studio_output(self) -> None:
+        if self._studio_output is not None:
+            self._reveal_history_file(str(self._studio_output))
+
     def _start_render(self) -> None:
+        if self._studio_worker is not None:
+            return
         suffix = str(self.format_combo.currentData())
         try:
             source, destination = validate_render_paths(
@@ -1365,6 +1689,7 @@ class MainWindow(QMainWindow):
             dialog.set_controls_enabled(not running)
         for action in self.settings_actions.values():
             action.setEnabled(not running)
+        self.studio_3d.export_button.setEnabled(not running)
 
     def _cancel_render(self) -> None:
         if self._worker:
@@ -1486,6 +1811,21 @@ class MainWindow(QMainWindow):
                 return
             self._close_when_done = True
             self._cancel_render()
+            event.ignore()
+            return
+        if self._studio_worker:
+            answer = QMessageBox.question(
+                self,
+                "Rendu 3D en cours",
+                "Annuler le rendu 3D et fermer ArtAnimate ?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            self._close_when_done = True
+            self._cancel_studio_render()
             event.ignore()
             return
         self._preview_debounce.stop()

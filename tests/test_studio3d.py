@@ -29,6 +29,10 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "PointLight" in scene
     assert "artworkSource" in scene
     assert "MouseArea" in scene
+    assert "effectKind" in scene
+    assert "effectDirection" in scene
+    assert "Repeater3D" in scene
+    assert "CADRE EXPORT" in scene
 
 
 def test_studio_panel_loads_scene_and_accepts_animated_frames(
@@ -54,6 +58,9 @@ def test_studio_panel_loads_scene_and_accepts_animated_frames(
             "image://artanimate/"
         )
         assert root.property("artworkAspect") == pytest.approx(1.5)
+        panel.set_effect("wave", direction="right")
+        assert root.property("effectKind") == "wave"
+        assert root.property("effectDirection") == "right"
         assert "image 3/20" in panel.artwork_status.text()
     finally:
         panel.close()
