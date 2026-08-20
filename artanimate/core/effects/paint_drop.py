@@ -61,161 +61,131 @@ def paint_drop_field(
     return field
 
 
-def _mix(color: tuple[int, int, int], target: int, amount: float) -> tuple[int, int, int]:
+def _mix(
+    color: tuple[int, int, int], target: int, amount: float
+) -> tuple[int, int, int]:
     return tuple(
         int(round(channel * (1.0 - amount) + target * amount))
         for channel in color
     )
 
 
-def _draw_paint_tool(
+def _draw_paint_drop(
     frame: np.ndarray,
     mask: np.ndarray,
     color: tuple[int, int, int],
     progress: float,
-    brush_ratio: float,
     drop_ratio: float,
     fall_ratio: float,
 ) -> np.ndarray:
-    """Draw a polished transient brush/drop overlay for the flat 2D presentation."""
+    """Draw one large falling drop and a short impact splash, with no fake tool."""
     height, width = frame.shape[:2]
     target_x, target_y = paint_drop_target(mask)
-    brush_width = max(30.0, width * float(brush_ratio))
-    half_brush = brush_width * 0.5
-    centre_x = float(np.clip(target_x, half_brush + 2.0, width - half_brush - 2.0))
-    tip_y = min(height * 0.12, max(height * 0.045, target_y - height * 0.06))
-    drop_diameter = max(4.0, min(width, height) * float(drop_ratio))
-    if progress < fall_ratio:
-        linear = float(np.clip(progress / max(fall_ratio, 1e-6), 0.0, 1.0))
+    diameter = max(12.0, min(width, height) * float(drop_ratio))
+    radius = diameter * 0.5
+    landing = float(np.clip(fall_ratio, 0.05, 0.9))
+    falling = progress < landing
+    if falling:
+        linear = float(np.clip(progress / landing, 0.0, 1.0))
         eased = linear**3 * (linear * (linear * 6.0 - 15.0) + 10.0)
-        drop_y = tip_y + (target_y - tip_y) * eased
+        drop_y = -radius * 1.8 + (target_y + radius * 0.12) * eased
+        impact = 0.0
+        alpha = min(1.0, progress / 0.045)
     else:
         drop_y = float(target_y)
+        impact = float(np.clip((progress - landing) / 0.28, 0.0, 1.0))
+        alpha = max(0.0, 1.0 - impact)
+    if alpha <= 0.0:
+        return frame
 
-    margin = max(8.0, drop_diameter * 3.0)
-    x0 = max(0, int(math.floor(min(centre_x - half_brush, target_x - margin))))
-    x1 = min(width, int(math.ceil(max(centre_x + half_brush, target_x + margin))))
-    y1 = min(height, int(math.ceil(max(tip_y + margin, drop_y + margin))))
+    splash_radius = radius * (1.0 + 4.2 * math.sqrt(impact))
+    margin = max(radius * 3.0, splash_radius + radius)
+    x0 = max(0, int(math.floor(target_x - margin)))
+    x1 = min(width, int(math.ceil(target_x + margin)))
+    y1 = min(height, int(math.ceil(max(target_y + margin, drop_y + radius * 2.0))))
     if x1 <= x0 or y1 <= 0:
         return frame
 
-    supersample = 2 if max(width, height) <= 1920 else 1
+    supersample = 3 if max(width, height) <= 1920 else 2
     overlay = Image.new("RGBA", ((x1 - x0) * supersample, y1 * supersample))
     draw = ImageDraw.Draw(overlay, "RGBA")
 
     def px(value: float) -> int:
         return int(round(value * supersample))
 
-    local_centre = centre_x - x0
-    local_target = target_x - x0
-    ferrule_top = -height * 0.018
-    ferrule_bottom = tip_y * 0.47
-    bristle_top = ferrule_bottom * 0.78
-    fade_in = min(1.0, progress / 0.06)
-    fade_out = min(1.0, (1.0 - progress) / 0.12)
-    opacity = int(round(255 * fade_in * fade_out))
-    if opacity <= 0:
-        return frame
+    local_x = float(target_x - x0)
+    opacity = int(round(255 * alpha))
+    dark = _mix(color, 12, 0.34)
+    light = _mix(color, 255, 0.58)
 
-    handle_width = brush_width * 0.17
-    draw.rounded_rectangle(
-        (
-            px(local_centre - handle_width / 2),
-            px(-height * 0.09),
-            px(local_centre + handle_width / 2),
-            px(ferrule_top + height * 0.018),
-        ),
-        radius=px(handle_width * 0.24),
-        fill=(112, 61, 32, opacity),
-        outline=(176, 113, 65, opacity),
-        width=max(1, px(1.0)),
-    )
-    ferrule_half = brush_width * 0.38
-    draw.rounded_rectangle(
-        (
-            px(local_centre - ferrule_half),
-            px(ferrule_top),
-            px(local_centre + ferrule_half),
-            px(ferrule_bottom),
-        ),
-        radius=px(max(2.0, brush_width * 0.025)),
-        fill=(82, 91, 104, opacity),
-        outline=(196, 207, 217, opacity),
-        width=max(1, px(1.2)),
-    )
-    bristle_half_top = brush_width * 0.36
-    bristle_half_tip = brush_width * 0.28
-    bristle_points = [
-        (px(local_centre - bristle_half_top), px(bristle_top)),
-        (px(local_centre + bristle_half_top), px(bristle_top)),
-        (px(local_centre + bristle_half_tip), px(tip_y)),
-        (px(local_centre - bristle_half_tip), px(tip_y)),
-    ]
-    dark_paint = _mix(color, 12, 0.58)
-    draw.polygon(bristle_points, fill=(*dark_paint, opacity))
-    for fraction in np.linspace(-0.25, 0.25, 7):
-        x_line = local_centre + brush_width * float(fraction)
-        draw.line(
-            (px(x_line), px(bristle_top), px(x_line * 0.98 + local_centre * 0.02), px(tip_y)),
-            fill=(*_mix(color, 255, 0.22), int(opacity * 0.38)),
-            width=max(1, px(0.7)),
+    if falling:
+        velocity = min(1.0, max(0.0, progress / landing))
+        tail = radius * (1.25 + velocity * 1.2)
+        draw.rounded_rectangle(
+            (
+                px(local_x - radius * 0.18),
+                px(drop_y - tail),
+                px(local_x + radius * 0.18),
+                px(drop_y - radius * 0.36),
+            ),
+            radius=max(1, px(radius * 0.16)),
+            fill=(*color, int(opacity * 0.52)),
         )
-    draw.line(
-        (
-            px(local_centre - bristle_half_tip),
-            px(tip_y),
-            px(local_centre + bristle_half_tip),
-            px(tip_y),
-        ),
-        fill=(*color, opacity),
-        width=max(2, px(height * 0.006)),
-    )
-
-    if progress < fall_ratio:
-        radius = drop_diameter * 0.5
         draw.polygon(
-            [
-                (px(local_target), px(drop_y - radius * 1.45)),
-                (px(local_target - radius * 0.72), px(drop_y - radius * 0.20)),
-                (px(local_target + radius * 0.72), px(drop_y - radius * 0.20)),
-            ],
+            (
+                (px(local_x), px(drop_y - radius * 1.52)),
+                (px(local_x - radius * 0.78), px(drop_y - radius * 0.18)),
+                (px(local_x + radius * 0.78), px(drop_y - radius * 0.18)),
+            ),
             fill=(*color, opacity),
         )
         draw.ellipse(
             (
-                px(local_target - radius),
+                px(local_x - radius),
                 px(drop_y - radius),
-                px(local_target + radius),
+                px(local_x + radius),
                 px(drop_y + radius),
             ),
             fill=(*color, opacity),
-            outline=(*_mix(color, 12, 0.36), opacity),
-            width=max(1, px(0.8)),
+            outline=(*dark, opacity),
+            width=max(1, px(radius * 0.08)),
         )
-        highlight = max(1.0, radius * 0.24)
+        highlight = max(1.5, radius * 0.28)
         draw.ellipse(
             (
-                px(local_target - radius * 0.42),
-                px(drop_y - radius * 0.48),
-                px(local_target - radius * 0.42 + highlight),
-                px(drop_y - radius * 0.48 + highlight),
+                px(local_x - radius * 0.46),
+                px(drop_y - radius * 0.49),
+                px(local_x - radius * 0.46 + highlight),
+                px(drop_y - radius * 0.49 + highlight),
             ),
-            fill=(255, 255, 255, int(opacity * 0.62)),
+            fill=(*light, int(opacity * 0.88)),
         )
     else:
-        fill_progress = (progress - fall_ratio) / max(1.0 - fall_ratio, 1e-6)
-        ring_alpha = int(opacity * max(0.0, 1.0 - fill_progress * 2.4) * 0.7)
-        if ring_alpha > 0:
-            ring = drop_diameter * (1.0 + 4.0 * math.sqrt(fill_progress))
+        ring_alpha = int(opacity * 0.86)
+        draw.ellipse(
+            (
+                px(local_x - splash_radius),
+                px(target_y - splash_radius * 0.30),
+                px(local_x + splash_radius),
+                px(target_y + splash_radius * 0.30),
+            ),
+            outline=(*light, ring_alpha),
+            width=max(1, px(radius * 0.19 * (1.0 - impact * 0.55))),
+        )
+        for index in range(7):
+            angle = -math.pi * 0.92 + index * math.pi * 0.31
+            distance = radius * (0.9 + impact * (1.9 + (index % 3) * 0.35))
+            dot = radius * max(0.10, 0.27 - impact * 0.15)
+            dot_x = local_x + math.cos(angle) * distance
+            dot_y = target_y + math.sin(angle) * distance * 0.42
             draw.ellipse(
                 (
-                    px(local_target - ring),
-                    px(target_y - ring * 0.42),
-                    px(local_target + ring),
-                    px(target_y + ring * 0.42),
+                    px(dot_x - dot),
+                    px(dot_y - dot),
+                    px(dot_x + dot),
+                    px(dot_y + dot),
                 ),
-                outline=(*_mix(color, 255, 0.22), ring_alpha),
-                width=max(1, px(drop_diameter * 0.16)),
+                fill=(*color, int(opacity * 0.80)),
             )
 
     if supersample > 1:
@@ -233,7 +203,6 @@ class PaintDropEffect(AnimationEffect):
 
     key = "paint_drop"
     config_fields = (
-        "paint_brush_width",
         "paint_drop_size",
         "paint_fall_ratio",
         "paint_flow",
@@ -268,12 +237,11 @@ class PaintDropEffect(AnimationEffect):
         )
         if active is None:
             return frame
-        return _draw_paint_tool(
+        return _draw_paint_drop(
             frame,
             active.mask,
             active.color,
             active.progress,
-            context.config.paint_brush_width,
             context.config.paint_drop_size,
             context.config.paint_fall_ratio,
         )

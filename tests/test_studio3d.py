@@ -47,10 +47,15 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "id: laserGantry" in scene
     assert "laserTargetU" in scene
     assert "DÉCOUPEUSE LASER · ÉCRITURE DES FORMES" in scene
-    assert "id: paintBrushDeck" in scene
+    assert "id: paintDropDeck" in scene
+    assert "id: paintBrushDeck" not in scene
     assert "GOUTTE EN CHUTE" in scene
     assert "paintStageTargetU" in scene
     assert "artworkSource" in scene
+    assert "generateMipmaps: false" in scene
+    assert "mipFilter: Texture.None" in scene
+    assert "root.effectToolProgress / Math.max(root.paintFallRatio" in scene
+    assert "brightness: 0.18 * (1.0 - paintDropDeck.impactProgress)" not in scene
     assert "MouseArea" in scene
     assert "effectKind" in scene
     assert "effectDirection" in scene

@@ -52,9 +52,8 @@ class StudioSceneData:
     stage_count: int
     outline_stage: int
     tool_stages: tuple[StudioToolStageRecord, ...] = ()
-    paint_brush_width: float = 0.34
-    paint_drop_size: float = 0.024
-    paint_fall_ratio: float = 0.30
+    paint_drop_size: float = 0.12
+    paint_fall_ratio: float = 0.38
     laser_path: tuple[StudioLaserPathRecord, ...] = ()
 
 
@@ -117,7 +116,6 @@ def build_studio_scene_data(
             stage_count=len(renderer.stages),
             outline_stage=outline_stage,
             tool_stages=tool_stages,
-            paint_brush_width=renderer.config.paint_brush_width,
             paint_drop_size=renderer.config.paint_drop_size,
             paint_fall_ratio=renderer.config.paint_fall_ratio,
             laser_path=laser_path,

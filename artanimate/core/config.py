@@ -50,9 +50,8 @@ class RenderConfig:
     screenprint_width: float = 0.12
     laser_width: float = 0.018
     laser_intensity: float = 1.35
-    paint_brush_width: float = 0.34
-    paint_drop_size: float = 0.024
-    paint_fall_ratio: float = 0.30
+    paint_drop_size: float = 0.12
+    paint_fall_ratio: float = 0.38
     paint_flow: float = 0.14
     seed: int = 7
     crf: int = 16
@@ -117,10 +116,8 @@ class RenderConfig:
             raise ValueError("laser_width doit être compris entre 0.002 et 0.10")
         if not 0.0 <= self.laser_intensity <= 4.0:
             raise ValueError("laser_intensity doit être compris entre 0 et 4")
-        if not 0.18 <= self.paint_brush_width <= 0.65:
-            raise ValueError("paint_brush_width doit être compris entre 0.18 et 0.65")
-        if not 0.006 <= self.paint_drop_size <= 0.06:
-            raise ValueError("paint_drop_size doit être compris entre 0.006 et 0.06")
+        if not 0.006 <= self.paint_drop_size <= 0.18:
+            raise ValueError("paint_drop_size doit être compris entre 0.006 et 0.18")
         if not 0.15 <= self.paint_fall_ratio <= 0.55:
             raise ValueError("paint_fall_ratio doit être compris entre 0.15 et 0.55")
         if not 0.0 <= self.paint_flow <= 0.35:
@@ -134,11 +131,15 @@ class RenderConfig:
 
     @classmethod
     def from_dict(cls, values: dict[str, Any]) -> "RenderConfig":
+        normalized = dict(values)
+        # ArtAnimate <= 2.7 exposed this now-removed brush setting. Ignore it so
+        # existing presets remain loadable while new manifests stay unambiguous.
+        normalized.pop("paint_brush_width", None)
         allowed = {field.name for field in fields(cls)}
-        unknown = sorted(set(values) - allowed)
+        unknown = sorted(set(normalized) - allowed)
         if unknown:
             raise ValueError(f"Clé(s) de configuration inconnue(s) : {', '.join(unknown)}")
-        return cls(**values).validate()
+        return cls(**normalized).validate()
 
     @classmethod
     def from_json(cls, path: str | Path) -> "RenderConfig":

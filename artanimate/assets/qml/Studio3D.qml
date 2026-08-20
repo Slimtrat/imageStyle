@@ -21,9 +21,8 @@ Item {
     property var paintStageTargetU: []
     property var paintStageTargetV: []
     property var paintStageColors: []
-    property real paintBrushWidth: 0.34
-    property real paintDropSize: 0.024
-    property real paintFallRatio: 0.30
+    property real paintDropSize: 0.12
+    property real paintFallRatio: 0.38
     property var laserPathU: []
     property var laserPathV: []
     property var laserPathOn: []
@@ -359,7 +358,10 @@ Item {
                                 cache: false
                                 asynchronous: false
                             }
-                            generateMipmaps: true
+                            generateMipmaps: false
+                            minFilter: Texture.Linear
+                            magFilter: Texture.Linear
+                            mipFilter: Texture.None
                         }
                     }
                 }
@@ -594,150 +596,143 @@ Item {
             }
 
 
-            // A real oversized flat brush drops the analyzed layer color onto its true zone.
+            // A large autonomous drop falls vertically onto the true analyzed zone.
             Node {
-                id: paintBrushDeck
+                id: paintDropDeck
                 visible: root.effectKind === "paint_drop"
                     && root.effectProgress > 0.005
                     && root.effectProgress < 0.995
                 x: -root.artworkWidth / 2 + root.artworkWidth * root.paintTargetU
-                z: root.artworkCenterZ
-                eulerRotation.y: -3
-                readonly property real targetZ: (root.paintTargetV - 0.5)
+                z: root.artworkCenterZ + (root.paintTargetV - 0.5)
                     * root.artworkDepth
+                eulerRotation.y: -3
                 readonly property real fallProgress: Math.min(
                     1.0,
-                    root.effectToolLinearProgress / Math.max(root.paintFallRatio, 0.001)
+                    root.effectToolProgress / Math.max(root.paintFallRatio, 0.001)
+                )
+                readonly property real fallEased: root.smootherstep(fallProgress)
+                readonly property real impactProgress: Math.max(
+                    0.0,
+                    Math.min(
+                        1.0,
+                        (root.effectToolProgress - root.paintFallRatio) / 0.30
+                    )
                 )
                 readonly property real dropScale: Math.max(
-                    0.045,
+                    0.06,
                     Math.min(root.artworkWidth, root.artworkDepth)
                         * root.paintDropSize / 100.0
                 )
+                readonly property real dropY: root.artworkSurfaceY + 3
+                    + 185 * (1.0 - fallEased)
 
                 Model {
-                    y: root.artworkSurfaceY + 132
-                    z: paintBrushDeck.targetZ
+                    id: fallingPaintDrop
+                    visible: root.effectToolProgress < root.paintFallRatio
+                    y: paintDropDeck.dropY
+                    source: "#Sphere"
+                    castsShadows: false
+                    scale: Qt.vector3d(
+                        paintDropDeck.dropScale,
+                        paintDropDeck.dropScale * (1.28 + 0.34 * (1.0 - paintDropDeck.fallProgress)),
+                        paintDropDeck.dropScale
+                    )
+                    materials: PrincipledMaterial {
+                        baseColor: root.paintActiveColor
+                        emissiveFactor: Qt.vector3d(
+                            root.paintActiveColor.r * 0.20,
+                            root.paintActiveColor.g * 0.20,
+                            root.paintActiveColor.b * 0.20
+                        )
+                        roughness: 0.10
+                        clearcoatAmount: 0.82
+                        clearcoatRoughnessAmount: 0.06
+                    }
+                }
+                Model {
+                    visible: fallingPaintDrop.visible
+                    y: paintDropDeck.dropY + paintDropDeck.dropScale * 82
                     source: "#Cylinder"
-                    scale: Qt.vector3d(0.105, 1.02, 0.105)
+                    castsShadows: false
+                    scale: Qt.vector3d(
+                        paintDropDeck.dropScale * 0.28,
+                        paintDropDeck.dropScale * 0.72,
+                        paintDropDeck.dropScale * 0.28
+                    )
                     materials: PrincipledMaterial {
-                        baseColor: "#7b4328"
-                        roughness: 0.38
-                        metalness: 0.05
+                        baseColor: root.paintActiveColor
+                        emissiveFactor: Qt.vector3d(
+                            root.paintActiveColor.r * 0.12,
+                            root.paintActiveColor.g * 0.12,
+                            root.paintActiveColor.b * 0.12
+                        )
+                        opacity: 0.68
+                        roughness: 0.16
                     }
                 }
                 Model {
-                    y: root.artworkSurfaceY + 72
-                    z: paintBrushDeck.targetZ
-                    source: "#Cube"
+                    visible: fallingPaintDrop.visible
+                        && paintDropDeck.fallProgress > 0.18
+                    x: -paintDropDeck.dropScale * 54
+                    y: paintDropDeck.dropY + paintDropDeck.dropScale * 118
+                    z: paintDropDeck.dropScale * 24
+                    source: "#Sphere"
+                    castsShadows: false
                     scale: Qt.vector3d(
-                        root.artworkWidth * root.paintBrushWidth / 100,
-                        0.16,
-                        0.20
+                        paintDropDeck.dropScale * 0.26,
+                        paintDropDeck.dropScale * 0.38,
+                        paintDropDeck.dropScale * 0.26
                     )
                     materials: PrincipledMaterial {
-                        baseColor: "#d3b27a"
-                        metalness: 0.62
-                        roughness: 0.24
+                        baseColor: root.paintActiveColor
+                        roughness: 0.13
+                        clearcoatAmount: 0.72
                     }
                 }
                 Model {
-                    y: root.artworkSurfaceY + 43
-                    z: paintBrushDeck.targetZ + 1.6
-                    source: "#Cube"
+                    visible: root.effectToolProgress >= root.paintFallRatio
+                        && paintDropDeck.impactProgress < 1.0
+                    y: root.artworkSurfaceY + 1.1
+                    source: "#Cylinder"
+                    castsShadows: false
                     scale: Qt.vector3d(
-                        root.artworkWidth * root.paintBrushWidth * 0.84 / 100,
-                        0.235,
-                        0.115
+                        0.07 + paintDropDeck.impactProgress * 0.42,
+                        0.005,
+                        0.07 + paintDropDeck.impactProgress * 0.24
                     )
                     materials: PrincipledMaterial {
-                        baseColor: Qt.darker(root.paintActiveColor, 2.15)
-                        roughness: 0.98
+                        baseColor: root.paintActiveColor
+                        opacity: Math.max(0.0, 0.64 * (1.0 - paintDropDeck.impactProgress))
+                        roughness: 0.20
+                        clearcoatAmount: 0.36
                     }
                 }
                 Repeater3D {
-                    model: 13
+                    model: 7
                     delegate: Model {
                         required property int index
-                        x: (index - 6) * root.artworkWidth
-                            * root.paintBrushWidth * 0.061
-                        y: root.artworkSurfaceY + 42
-                            - Math.abs(index - 6) * 0.42
-                            + Math.sin(index * 1.7) * 0.9
-                        z: paintBrushDeck.targetZ + Math.sin(index * 2.1) * 1.3
-                        source: "#Cube"
+                        readonly property real angle: -2.85 + index * 0.52
+                        readonly property real distance: 6
+                            + paintDropDeck.impactProgress * (13 + (index % 3) * 3)
+                        visible: root.effectToolProgress >= root.paintFallRatio
+                            && paintDropDeck.impactProgress < 0.92
+                        x: Math.cos(angle) * distance
+                        y: root.artworkSurfaceY + 2.0
+                            + Math.sin(paintDropDeck.impactProgress * Math.PI) * (5 + index % 2 * 3)
+                        z: Math.sin(angle) * distance * 0.52
+                        source: "#Sphere"
+                    castsShadows: false
                         scale: Qt.vector3d(
-                            0.024,
-                            0.255 + Math.sin(index * 1.3) * 0.018,
-                            0.145
+                            0.025 * (1.0 - paintDropDeck.impactProgress * 0.55),
+                            0.018 * (1.0 - paintDropDeck.impactProgress * 0.55),
+                            0.025 * (1.0 - paintDropDeck.impactProgress * 0.55)
                         )
                         materials: PrincipledMaterial {
-                            baseColor: Qt.darker(root.paintActiveColor, 1.72)
-                            roughness: 0.96
+                            baseColor: root.paintActiveColor
+                            opacity: 0.82 * (1.0 - paintDropDeck.impactProgress)
+                            roughness: 0.16
                         }
                     }
-                }
-                Model {
-                    y: root.artworkSurfaceY + 28
-                    z: paintBrushDeck.targetZ
-                    source: "#Cube"
-                    scale: Qt.vector3d(
-                        root.artworkWidth * root.paintBrushWidth * 0.82 / 100,
-                        0.035,
-                        0.17
-                    )
-                    materials: PrincipledMaterial {
-                        baseColor: root.paintActiveColor
-                        roughness: 0.16
-                        clearcoatAmount: 0.64
-                        clearcoatRoughnessAmount: 0.10
-                    }
-                }
-                Model {
-                    visible: root.effectToolLinearProgress < root.paintFallRatio
-                    y: root.artworkSurfaceY + 3
-                        + 22 * (1.0 - root.smootherstep(paintBrushDeck.fallProgress))
-                    z: paintBrushDeck.targetZ
-                    source: "#Sphere"
-                    scale: Qt.vector3d(
-                        paintBrushDeck.dropScale,
-                        paintBrushDeck.dropScale * 1.45,
-                        paintBrushDeck.dropScale
-                    )
-                    materials: PrincipledMaterial {
-                        baseColor: root.paintActiveColor
-                        roughness: 0.12
-                        clearcoatAmount: 0.72
-                        clearcoatRoughnessAmount: 0.08
-                    }
-                }
-                Model {
-                    visible: root.effectToolLinearProgress >= root.paintFallRatio
-                        && root.effectToolLinearProgress < root.paintFallRatio + 0.24
-                    readonly property real bloom: Math.max(
-                        0.0,
-                        (root.effectToolLinearProgress - root.paintFallRatio) / 0.24
-                    )
-                    y: root.artworkSurfaceY + 1.2
-                    z: paintBrushDeck.targetZ
-                    source: "#Cylinder"
-                    scale: Qt.vector3d(
-                        0.05 + bloom * 0.34,
-                        0.006,
-                        0.05 + bloom * 0.34
-                    )
-                    materials: PrincipledMaterial {
-                        baseColor: root.paintActiveColor
-                        opacity: Math.max(0.0, 0.52 * (1.0 - bloom))
-                        roughness: 0.24
-                    }
-                }
-                PointLight {
-                    y: root.artworkSurfaceY + 48
-                    z: paintBrushDeck.targetZ
-                    color: root.paintActiveColor
-                    brightness: 0.22
-                    quadraticFade: 0.00034
                 }
             }
 
@@ -939,7 +934,7 @@ Item {
             text: root.effectKind === "paint_drop"
                 ? "COUCHE " + (root.effectToolStage + 1) + "/"
                     + root.effectStageCount + " · "
-                    + (root.effectToolLinearProgress < root.paintFallRatio
+                    + (root.effectToolProgress < root.paintFallRatio
                         ? "GOUTTE EN CHUTE" : "PEINTURE EN EXPANSION")
                 : root.effectKind === "screenprint_laser"
                 ? (root.effectToolIsOutline

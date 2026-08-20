@@ -15,7 +15,7 @@ Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette
 - détection séparée du fond et des contours sombres ;
 - effet `sand` avec accumulation irrégulière et grains en chute ;
 - effet `wave` avec front sinusoïdal, turbulence et six directions ;
-- effet `paint_drop` avec pinceau géant, goutte ciblée sur le vrai masque et remplissage liquide ;
+- effet `paint_drop` avec grosse goutte verticale, impact ciblé sur le vrai masque et remplissage liquide ;
 - effet `rgb_fade` avec montée lumineuse ou construction R → G → B ;
 - effet `vertical_halo` avec un rideau unique qui ne révèle que la partie déjà traversée ;
 - effet `screenprint` avec dépose séquentielle des couches couleur ;

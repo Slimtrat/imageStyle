@@ -34,7 +34,16 @@ def test_drop_targets_a_real_mask_pixel_and_waits_for_impact() -> None:
     assert np.all(field[~mask] == 1.0)
 
 
-def test_flat_render_draws_brush_but_studio_texture_does_not(tmp_path: Path) -> None:
+def test_legacy_brush_parameter_is_ignored_without_leaking_to_new_configs() -> None:
+    values = RenderConfig(effect="paint_drop").to_dict()
+    values["paint_brush_width"] = 0.34
+
+    restored = RenderConfig.from_dict(values)
+
+    assert "paint_brush_width" not in restored.to_dict()
+
+
+def test_flat_render_draws_drop_but_studio_texture_does_not(tmp_path: Path) -> None:
     source = tmp_path / "paint.png"
     _source(source)
     config = RenderConfig(
@@ -46,8 +55,8 @@ def test_flat_render_draws_brush_but_studio_texture_does_not(tmp_path: Path) -> 
         hold_end=0.1,
     )
     renderer = ArtworkRenderer(analyze_artwork(source, config), config)
-    flat = renderer.frame_at(0.22, presentation="2d")
-    texture = renderer.frame_at(0.22, presentation="texture")
+    flat = renderer.frame_at(0.40, presentation="2d")
+    texture = renderer.frame_at(0.40, presentation="texture")
 
     assert not np.array_equal(flat, texture)
     assert np.any(flat[: max(5, renderer.height // 8)] != texture[: max(5, renderer.height // 8)])

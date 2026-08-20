@@ -130,32 +130,20 @@
       ]
     },
     "paint_drop": {
-      "selector_label": "Pinceau & goutte — peinture liquide",
-      "description": "Un pinceau géant se place au-dessus de chaque vraie zone colorée, libère une goutte de sa couleur, puis la peinture remplit la forme depuis l’impact.",
+      "selector_label": "Goutte géante — peinture liquide",
+      "description": "Une grosse goutte de la vraie couleur chute verticalement sur sa zone, éclabousse brièvement puis remplit la forme depuis l’impact.",
       "parameters": [
-        {
-          "key": "paint_brush_width",
-          "label": "Largeur du pinceau",
-          "control": "slider",
-          "minimum": 0.18,
-          "maximum": 0.65,
-          "default": 0.34,
-          "step": 0.01,
-          "decimals": 2,
-          "suffix": "",
-          "description": "Largeur du pinceau par rapport à l’œuvre. 0,34 crée un outil imposant sans masquer la zone d’impact."
-        },
         {
           "key": "paint_drop_size",
           "label": "Taille de la goutte",
           "control": "slider",
-          "minimum": 0.006,
-          "maximum": 0.06,
-          "default": 0.024,
-          "step": 0.002,
+          "minimum": 0.02,
+          "maximum": 0.18,
+          "default": 0.12,
+          "step": 0.005,
           "decimals": 3,
           "suffix": "",
-          "description": "Diamètre visuel de la goutte. 0,024 correspond à environ 2,4 % du petit côté de l’image."
+          "description": "Diamètre visuel de la goutte par rapport au petit côté. 0,12 donne une grosse masse très lisible ; augmentez pour un impact encore plus spectaculaire."
         },
         {
           "key": "paint_fall_ratio",
@@ -163,11 +151,11 @@
           "control": "slider",
           "minimum": 0.15,
           "maximum": 0.55,
-          "default": 0.3,
+          "default": 0.38,
           "step": 0.01,
           "decimals": 2,
           "suffix": "",
-          "description": "Part de chaque passage réservée à la chute avant que la forme commence à se remplir. 0,30 donne un impact lisible sans ralentir l’ensemble."
+          "description": "Part de chaque passage réservée à la chute verticale. 0,38 laisse lire le mouvement avant l’impact sans ralentir excessivement le remplissage."
         },
         {
           "key": "paint_flow",

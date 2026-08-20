@@ -535,7 +535,6 @@ class Studio3DPanel(QWidget):
             "paintStageColors",
             ["#%02x%02x%02x" % stage.color for stage in data.tool_stages],
         )
-        self._set_scene_property("paintBrushWidth", data.paint_brush_width)
         self._set_scene_property("paintDropSize", data.paint_drop_size)
         self._set_scene_property("paintFallRatio", data.paint_fall_ratio)
         self._set_scene_property(

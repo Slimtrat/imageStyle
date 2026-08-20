@@ -82,9 +82,10 @@ segmentation sans modifier la frame finale, qui reste toujours la source exacte.
 Le halo vertical suit un autre contrat visuel : c’est un compositeur global, donc un
 seul front sépare à tout instant la partie révélée derrière le halo de la partie encore
 cachée devant lui. Pour `paint_drop`, le renderer calcule un pixel d’impact appartenant
-réellement à chaque masque. La présentation 2D dessine le pinceau dans la frame ; la
-texture Studio l’omet et laisse la scène 3D afficher le pinceau, la goutte et l’impact
-comme géométrie physique, sans double outil incrusté dans l’œuvre.
+réellement à chaque masque. La présentation 2D dessine uniquement la grosse goutte et
+son impact ; la texture Studio les omet et laisse la scène 3D afficher cette matière comme
+géométrie physique. Aucun outil persistant ne change brutalement de position entre deux
+couches. La texture animée désactive aussi les mipmaps afin de préserver des limites nettes.
 
 ## 4. Atelier desktop et coût du prérendu
 
