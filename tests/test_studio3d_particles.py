@@ -1,11 +1,19 @@
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw
+import pytest
 
 from artanimate.core.analysis import analyze_artwork
 from artanimate.core.config import RenderConfig
 from artanimate.core.renderer import ArtworkRenderer
-from artanimate.desktop.studio3d_particles import build_studio_scene_data
+from artanimate.core.quality import ease_in_out
+from artanimate.desktop.studio3d_particles import (
+    StudioLaserPathRecord,
+    StudioSceneData,
+    build_studio_scene_data,
+    studio_laser_cursor,
+)
 
 
 def _artwork(path: Path) -> None:
@@ -72,6 +80,64 @@ def test_laser_studio_path_matches_the_detected_contour_stage(tmp_path: Path) ->
         x = min(renderer.width - 1, int(point.target_u * renderer.width))
         y = min(renderer.height - 1, int(point.target_v * renderer.height))
         assert outline.mask[y, x]
+
+
+def test_laser_cursor_matches_the_renderer_eased_contour_field(tmp_path: Path) -> None:
+    source = tmp_path / "cursor.png"
+    _artwork(source)
+    config = RenderConfig(effect="contour_laser", width=140, colors=6)
+    renderer = ArtworkRenderer(analyze_artwork(source, config), config)
+    scene = build_studio_scene_data(renderer)
+    outline = next(layer for layer in renderer.stages if layer.is_outline)
+    field = renderer.fields[outline.key]
+    errors = []
+
+    for progress in np.linspace(0.04, 0.96, 80):
+        cursor = studio_laser_cursor(scene, "contour_laser", float(progress))
+        if not cursor.beam_on:
+            continue
+        x = min(renderer.width - 1, int(cursor.target_u * renderer.width))
+        y = min(renderer.height - 1, int(cursor.target_v * renderer.height))
+        assert outline.mask[y, x]
+        errors.append(abs(float(field[y, x]) - ease_in_out(float(progress))))
+
+    assert len(errors) > 30
+    assert float(np.percentile(errors, 95)) < 0.025
+
+
+def test_laser_cursor_stays_off_while_crossing_between_shapes() -> None:
+    data = StudioSceneData(
+        particles=(),
+        stage_count=1,
+        outline_stage=0,
+        laser_path=(
+            StudioLaserPathRecord(0.0, 0.2, True),
+            StudioLaserPathRecord(0.4, 0.2, False),
+            StudioLaserPathRecord(0.6, 0.8, True),
+            StudioLaserPathRecord(1.0, 0.8, True),
+        ),
+    )
+
+    cursor = studio_laser_cursor(data, "contour_laser", 0.5)
+
+    assert cursor.beam_on is False
+
+
+def test_wow_laser_cursor_uses_only_the_outline_stage() -> None:
+    path = tuple(
+        StudioLaserPathRecord(index / 100, 0.5, True)
+        for index in range(101)
+    )
+    data = StudioSceneData(
+        particles=(), stage_count=3, outline_stage=2, laser_path=path
+    )
+
+    color_pass = studio_laser_cursor(data, "screenprint_laser", 0.5)
+    outline_pass = studio_laser_cursor(data, "screenprint_laser", 0.8)
+
+    assert color_pass.beam_on is False
+    assert outline_pass.beam_on is True
+    assert outline_pass.target_u == pytest.approx(ease_in_out(0.4), abs=0.002)
 
 
 def test_non_particle_effect_clears_the_studio_particle_bank(tmp_path: Path) -> None:

@@ -385,7 +385,7 @@
     },
     "contour_laser": {
       "selector_label": "Découpeuse laser — tracé des formes",
-      "description": "Les formes sont détectées, réduites en chemins continus puis tracées contour par contour par un rayon vertical venu du ciel, exactement aligné sur l’œuvre.",
+      "description": "Les formes sont détectées, réduites en chemins continus puis tracées contour par contour par un rayon vertical venu du ciel, exactement synchronisé avec le trait lumineux écrit sur l’œuvre.",
       "parameters": [
         {
           "key": "laser_width",

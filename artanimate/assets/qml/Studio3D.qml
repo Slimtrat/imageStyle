@@ -25,9 +25,9 @@ Item {
     property var paintStageColors: []
     property real paintDropSize: 0.12
     property real paintFallRatio: 0.38
-    property var laserPathU: []
-    property var laserPathV: []
-    property var laserPathOn: []
+    property real laserCursorU: 0.5
+    property real laserCursorV: 0.5
+    property bool laserCursorOn: false
     property real outputAspect: 16 / 9
     property bool showHud: true
 
@@ -59,26 +59,6 @@ Item {
         ? paintStageTargetV[effectToolStage] : 0.5
     readonly property color paintActiveColor: effectToolStage < paintStageColors.length
         ? paintStageColors[effectToolStage] : "#d94c4c"
-    readonly property real laserPathPosition: effectToolProgress
-        * Math.max(0, laserPathU.length - 1)
-    readonly property int laserPathIndex: Math.min(
-        Math.max(0, laserPathU.length - 2),
-        Math.floor(laserPathPosition)
-    )
-    readonly property real laserPathMix: laserPathPosition - laserPathIndex
-    readonly property real laserTargetU: laserPathU.length > 1
-        ? laserPathU[laserPathIndex]
-            + (laserPathU[laserPathIndex + 1] - laserPathU[laserPathIndex])
-                * laserPathMix
-        : effectToolProgress
-    readonly property real laserTargetV: laserPathV.length > 1
-        ? laserPathV[laserPathIndex]
-            + (laserPathV[laserPathIndex + 1] - laserPathV[laserPathIndex])
-                * laserPathMix
-        : 0.5
-    readonly property bool laserBeamOn: laserPathOn.length > 1
-        ? laserPathOn[Math.min(laserPathIndex + 1, laserPathOn.length - 1)]
-        : true
     readonly property bool satelliteView: cameraPitch < -48
 
     function smootherstep(value) {
@@ -509,12 +489,12 @@ Item {
                     readonly property bool active: root.effectKind === "contour_laser"
                         || (root.effectKind === "screenprint_laser"
                             && root.effectToolIsOutline)
-                    visible: active && root.laserBeamOn
+                    visible: active && root.laserCursorOn
                         && root.effectToolProgress > 0.005
                         && root.effectToolProgress < 0.995
                     x: -root.artworkWidth / 2
-                        + root.artworkWidth * root.laserTargetU
-                    z: (root.laserTargetV - 0.5) * root.artworkDepth
+                        + root.artworkWidth * root.laserCursorU
+                    z: (root.laserCursorV - 0.5) * root.artworkDepth
 
                     Model {
                         id: skyLaserAura

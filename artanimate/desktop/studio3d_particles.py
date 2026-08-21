@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor
 from ..core.effects import EffectCapability
 from ..core.effects.contour_paths import sample_laser_path
 from ..core.effects.paint_drop import paint_drop_target
+from ..core.quality import ease_in_out
 from ..core.renderer import ArtworkRenderer
 
 
@@ -44,7 +45,7 @@ class StudioToolStageRecord:
 
 @dataclass(frozen=True, slots=True)
 class StudioLaserPathRecord:
-    """One uniformly timed cutter-head position for the 3D gantry."""
+    """One uniformly timed position on the analyzed contour route."""
 
     target_u: float
     target_v: float
@@ -62,6 +63,56 @@ class StudioSceneData:
     paint_drop_size: float = 0.12
     paint_fall_ratio: float = 0.38
     laser_path: tuple[StudioLaserPathRecord, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class StudioLaserCursor:
+    """Exact artwork-local cursor published to the QML sky ray."""
+
+    target_u: float = 0.5
+    target_v: float = 0.5
+    beam_on: bool = False
+
+
+def studio_laser_cursor(
+    data: StudioSceneData | None,
+    effect: str,
+    global_progress: float,
+) -> StudioLaserCursor:
+    """Resolve the laser cursor on the renderer's exact eased stage timeline.
+
+    The beam is disabled across connector segments between detected shapes. This
+    prevents a visible diagonal jump from being mistaken for a drawn contour.
+    """
+    if data is None or len(data.laser_path) < 2:
+        return StudioLaserCursor()
+    progress = float(np.clip(global_progress, 0.0, 1.0))
+    active = effect == "contour_laser"
+    local_linear = progress
+    if effect == "screenprint_laser":
+        stage_count = max(1, data.stage_count)
+        timeline = min(stage_count - 0.0001, progress * stage_count)
+        stage = int(np.floor(timeline))
+        active = stage == data.outline_stage
+        local_linear = timeline - stage
+    if not active:
+        return StudioLaserCursor(beam_on=False)
+
+    local_progress = ease_in_out(local_linear)
+    path_position = local_progress * (len(data.laser_path) - 1)
+    index = min(len(data.laser_path) - 2, max(0, int(np.floor(path_position))))
+    mix = path_position - index
+    before = data.laser_path[index]
+    after = data.laser_path[index + 1]
+    return StudioLaserCursor(
+        target_u=before.target_u + (after.target_u - before.target_u) * mix,
+        target_v=before.target_v + (after.target_v - before.target_v) * mix,
+        beam_on=(
+            0.005 < local_progress < 0.995
+            and before.laser_on
+            and after.laser_on
+        ),
+    )
 
 
 def _inverse_ease(values: np.ndarray) -> np.ndarray:

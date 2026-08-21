@@ -28,7 +28,11 @@ from ..branding import LOGO_PATH
 from ..core.effects import EffectDescriptor, effect_descriptors
 from .controls import ParameterSlider
 from .studio3d_camera import CAMERA_MOTIONS, camera_motion
-from .studio3d_particles import StudioParticleModel, StudioSceneData
+from .studio3d_particles import (
+    StudioParticleModel,
+    StudioSceneData,
+    studio_laser_cursor,
+)
 from .studio3d_wave import (
     OrganicWaveGeometry,
     OrganicWaveSettings,
@@ -134,6 +138,7 @@ class Studio3DPanel(QWidget):
         self._wave_base_frame = QImage()
         self._output_auto = True
         self._particle_model = StudioParticleModel()
+        self._scene_data: StudioSceneData | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 10, 2, 2)
@@ -552,6 +557,7 @@ class Studio3DPanel(QWidget):
 
     def set_scene_data(self, data: StudioSceneData) -> None:
         """Publish analysis-backed particles and the exact effect stage timeline."""
+        self._scene_data = data
         self._particle_model.replace(data.particles)
         self._set_scene_property("effectStageCount", max(1, data.stage_count))
         self._set_scene_property("effectOutlineStage", data.outline_stage)
@@ -567,15 +573,7 @@ class Studio3DPanel(QWidget):
         )
         self._set_scene_property("paintDropSize", data.paint_drop_size)
         self._set_scene_property("paintFallRatio", data.paint_fall_ratio)
-        self._set_scene_property(
-            "laserPathU", [point.target_u for point in data.laser_path]
-        )
-        self._set_scene_property(
-            "laserPathV", [point.target_v for point in data.laser_path]
-        )
-        self._set_scene_property(
-            "laserPathOn", [point.laser_on for point in data.laser_path]
-        )
+        self._publish_laser_cursor()
         logger.info(
             "Scène 3D synchronisée : grains=%d, passages=%d, contour=%d, points laser=%d",
             len(data.particles),
@@ -583,6 +581,14 @@ class Studio3DPanel(QWidget):
             data.outline_stage,
             len(data.laser_path),
         )
+
+    def _publish_laser_cursor(self) -> None:
+        cursor = studio_laser_cursor(
+            self._scene_data, self._current_effect, self._effect_progress
+        )
+        self._set_scene_property("laserCursorU", cursor.target_u)
+        self._set_scene_property("laserCursorV", cursor.target_v)
+        self._set_scene_property("laserCursorOn", cursor.beam_on)
 
     def set_source(self, path: Path) -> bool:
         image = QImage(str(path))
@@ -624,6 +630,7 @@ class Studio3DPanel(QWidget):
         self._set_scene_property("rgbMode", rgb_mode)
         self._set_scene_property("effectDirection", direction)
         self._wave_geometry.configure(self._wave_settings, direction)
+        self._publish_laser_cursor()
         if effect == "wave":
             logger.info(
                 "Matière Vague 3D : amplitude=%.3f, fréquence=%.2f, "
@@ -655,6 +662,7 @@ class Studio3DPanel(QWidget):
         elif frame_index is not None and frame_count and frame_count > 1:
             self._effect_progress = frame_index / (frame_count - 1)
         self._wave_geometry.set_progress(self._effect_progress)
+        self._publish_laser_cursor()
 
         texture = image
         if self._current_effect == "wave":
@@ -695,6 +703,7 @@ class Studio3DPanel(QWidget):
         self._set_scene_property("rgbMode", self._rgb_mode)
         self._set_scene_property("effectDirection", self._effect_direction)
         self._set_scene_property("effectProgress", self._effect_progress)
+        self._publish_laser_cursor()
         self._output_ratio_changed()
 
     def begin_export(self, total_frames: int) -> None:

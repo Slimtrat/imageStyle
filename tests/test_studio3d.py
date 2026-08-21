@@ -57,8 +57,10 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "id: effectLaserEmitter" not in scene
     assert "id: effectLaserCollar" not in scene
     assert "id: laserGantry" not in scene
-    assert "root.artworkWidth * root.laserTargetU" in scene
-    assert "(root.laserTargetV - 0.5) * root.artworkDepth" in scene
+    assert "root.artworkWidth * root.laserCursorU" in scene
+    assert "(root.laserCursorV - 0.5) * root.artworkDepth" in scene
+    assert "laserPathPosition" not in scene
+    assert "laserCursorOn" in scene
     assert "RAYON DU CIEL · TRACÉ DES CONTOURS" in scene
     assert "LIGNE DE SÉRIGRAPHIE · COUCHE" in scene
     assert "id: paintDropDeck" in scene
