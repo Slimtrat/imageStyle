@@ -7,7 +7,9 @@ ArtAnimate sépare la séquence chromatique, l’effet de matière et la présen
 La séquence décide **quand** chaque famille de couleurs apparaît. La roue chromatique,
 son sens, son angle de départ et la position des neutres appartiennent à cette couche.
 Tous les effets par couches déclarent la capacité `chromatic_sequence`; `rgb_fade`
-utilise son propre compositeur d’image complète.
+utilise son propre compositeur d’image complète. `pigment_sweep` déclare au contraire
+`global_reveal` : il construit un unique masque de premier plan et traverse l’œuvre une
+seule fois, indépendamment de la roue chromatique.
 
 Les capacités `strict_sequence` et `outline_finale` expriment deux contraintes métier
 sans créer de branche par nom d’effet dans le renderer. Le mode signature peut ainsi
@@ -56,6 +58,17 @@ par la scène Qt Quick 3D. Cette scène existe aujourd’hui : pièce vide, meub
 Le Studio propose quatre presets, dont un satellite animé sur 360°, plus les réglages
 d’azimut, élévation, distance, nombre de tours et lumière. Le cadre affiché correspond
 au ratio réellement capturé par l’encodeur MP4, MOV ou WebM.
+
+Pour Pigment Sweep, son module dédié prépare une banque déterministe de pigments ciblés
+derrière le contrat `targeted_particles`. Le contrat vérifie les dimensions, les temps,
+les cibles dans le masque et l’identité entre chaque couleur transportée et son pixel source.
+Chaque entrée contient le pixel destination, sa couleur source exacte, son point d’entrée
+hors cadre, son vecteur de dépassement, sa boucle organique et son instant de dépôt. Le
+Studio 3D échantillonne directement cette banque : il ne réinvente ni cible ni mouvement.
+La texture Studio omet les touches volantes 2D, remplacées par la géométrie physique ;
+l’œuvre déjà déposée reste composée avec les pixels source exacts.
+La trajectoire approche la destination pendant 78 % du vol, la dépasse puis effectue un
+retour amorti ; au dépôt, le grain disparaît et le pixel exact de la texture prend le relais.
 
 Pour le sable, `build_studio_scene_data()` échantillonne uniquement les masques analysés.
 Chaque grain conserve les coordonnées normalisées du pixel source, sa couleur RGB exacte

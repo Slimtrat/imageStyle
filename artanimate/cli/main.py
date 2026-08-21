@@ -52,7 +52,10 @@ def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="construction du fondu RGB : channels (R → G → B) ou together",
     )
-    parser.add_argument("--direction", choices=DIRECTIONS, default=None, help="direction de la vague")
+    parser.add_argument(
+        "--direction", choices=DIRECTIONS, default=None,
+        help="direction de la vague ou du balayage de pigments",
+    )
     parser.add_argument("--duration", type=float, default=None, help="durée totale en secondes")
     parser.add_argument("--fps", type=int, default=None, help="images par seconde")
     parser.add_argument("--width", type=int, default=None, help="largeur de sortie")
@@ -82,6 +85,22 @@ def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--soft-edge", type=float, default=None, help="largeur du bord progressif")
     parser.add_argument("--grain-density", type=float, default=None, help="densité des grains volants")
     parser.add_argument("--grain-size", type=float, default=None, help="taille des grains")
+    parser.add_argument(
+        "--sweep-density", type=float, default=None,
+        help="densité de la masse Pigment Sweep",
+    )
+    parser.add_argument(
+        "--sweep-grain-size", type=float, default=None,
+        help="taille des pigments ciblés",
+    )
+    parser.add_argument(
+        "--sweep-turbulence", type=float, default=None,
+        help="mouvement organique du Pigment Sweep",
+    )
+    parser.add_argument(
+        "--sweep-rebound", type=float, default=None,
+        help="dépassement et rebond des pigments ciblés",
+    )
     parser.add_argument("--seed", type=int, default=None, help="graine du rendu")
     parser.add_argument("--crf", type=int, default=None, help="qualité vidéo H.264/VP9 (0–51)")
 
@@ -91,7 +110,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="artanimate",
         description="Transforme une œuvre statique en animation chromatique sable ou vague.",
     )
-    parser.add_argument("--version", action="version", version="ArtAnimate 2.8.0")
+    parser.add_argument("--version", action="version", version="ArtAnimate 2.9.0")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     parser.add_argument("--log-file", type=Path, help="copie persistante des logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -127,6 +146,8 @@ def _palette_summary(analysis: Any, config: RenderConfig) -> str:
         return "composition directe de l’image · ordre chromatique non utilisé"
     if effect.supports(EffectCapability.DETECTED_CONTOURS):
         return "formes détectées · parcours continu des contours"
+    if effect.supports(EffectCapability.GLOBAL_REVEAL):
+        return "passage pigmentaire global · destinations issues des vrais pixels"
     ordered = analysis.ordered_layers(config.order, config.start_hue, config.neutral_position)
     names = " -> ".join(layer.label for layer in ordered)
     if analysis.outline:

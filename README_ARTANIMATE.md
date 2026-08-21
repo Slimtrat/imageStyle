@@ -14,6 +14,7 @@ Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette
 - familles chromatiques ordonnées (rouge → orange → jaune → vert → bleu → violet → rose) ;
 - détection séparée du fond et des contours sombres ;
 - effet `sand` avec accumulation irrégulière et grains en chute ;
+- effet `pigment_sweep` : masse organique globale, pigments liés aux vrais pixels, dépassement puis verrouillage exact ;
 - effet `wave` avec front sinusoïdal, turbulence et six directions ;
 - effet `paint_drop` avec grosse goutte verticale, impact ciblé sur le vrai masque et remplissage liquide ;
 - effet `rgb_fade` avec montée lumineuse ou construction R → G → B ;
@@ -55,7 +56,7 @@ artanimate-ui
 
 La version installée reste visible dans l’en-tête du client. Le client accepte le glisser-déposer de l’image et du dossier de destination. Chaque modification d’un effet ou de ses paramètres déclenche, après un court délai, un prérendu animé basse définition calculé sans encodage vidéo. Quatre panneaux cliquables ouvrent des fenêtres dédiées — Effet, Couleurs, Analyse et Vidéo — afin de ne jamais empiler tous les paramètres. Chaque valeur numérique dispose d’un slider, de sa valeur exacte et de bornes visibles. La roue chromatique profite d’une grande fenêtre dédiée et se fait tourner à la souris pour choisir la couleur de départ et le sens de progression. Le profil **Studio** ajoute automatiquement easing, exposition temporelle sur trois sous-images et encodage optimisé pour les aplats colorés ; le profil Rapide reste disponible pour les essais.
 
-Les vidéos terminées alimentent une bande historique compacte sous l’atelier : vignette, effet, date, lecture, sélection dans l’Explorateur Windows et suppression confirmée. Les menus **Fichier**, **Génération**, **Réglages**, **Affichage** et **Historique** regroupent les actions et raccourcis. L’onglet **Studio 3D** charge un vrai moteur de scène à la demande : l’effet se choisit et se règle directement dans le Studio, puis l’animation devient la matière de l’œuvre posée sur le meuble avec lampe et éclairage de pièce. Chaque grain de sable 3D reprend un pixel, une couleur et un instant de dépôt issus de la même analyse que le rendu 2D. La vague dispose d’un front en relief synchronisé, les halos et lasers deviennent des outils lumineux au-dessus de l’œuvre, et le fondu RGB colore l’éclairage de la pièce. Pour le mode WOW, l’outil lumineux partage exactement l’axe et l’easing de l’œuvre ; un badge annonce distinctement l’acte de sérigraphie couleur puis la passe laser des contours noirs. La lumière traverse spatialement toute l’œuvre au lieu de dessiner les limites des masques, tandis qu’une sous-encre temporaire raccorde les aplats jusqu’au passage du laser. La caméra s’orbite sur 360° par glisser-déposer, se rapproche à la molette, propose une vue satellite animable et reste réglable avec des sliders accessibles. Le cadre affiché est exactement celui de l’export vidéo. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle.
+Les vidéos terminées alimentent une bande historique compacte sous l’atelier : vignette, effet, date, lecture, sélection dans l’Explorateur Windows et suppression confirmée. Les menus **Fichier**, **Génération**, **Réglages**, **Affichage** et **Historique** regroupent les actions et raccourcis. L’onglet **Studio 3D** charge un vrai moteur de scène à la demande : l’effet se choisit et se règle directement dans le Studio, puis l’animation devient la matière de l’œuvre posée sur le meuble avec lampe et éclairage de pièce. Chaque grain de sable 3D reprend un pixel, une couleur et un instant de dépôt issus de la même analyse que le rendu 2D. Pigment Sweep va plus loin : la scène réutilise directement les cibles, couleurs, entrées, boucles et rebonds calculés par le renderer 2D, puis verrouille la texture sur l’œuvre exacte. La vague dispose d’un front en relief synchronisé, les halos et lasers deviennent des outils lumineux au-dessus de l’œuvre, et le fondu RGB colore l’éclairage de la pièce. Pour le mode WOW, l’outil lumineux partage exactement l’axe et l’easing de l’œuvre ; un badge annonce distinctement l’acte de sérigraphie couleur puis la passe laser des contours noirs. La lumière traverse spatialement toute l’œuvre au lieu de dessiner les limites des masques, tandis qu’une sous-encre temporaire raccorde les aplats jusqu’au passage du laser. La caméra s’orbite sur 360° par glisser-déposer, se rapproche à la molette, propose une vue satellite animable et reste réglable avec des sliders accessibles. Le cadre affiché est exactement celui de l’export vidéo. Le bouton **Logs** ouvre un journal défilant, filtrable par niveau et composant, avec recherche textuelle.
 
 ### Export du Studio 3D
 
@@ -121,7 +122,7 @@ La planche montre l’image redimensionnée et les familles retenues. Le JSON co
 ## Réglages utiles
 
 ```text
---effect sand|wave
+--effect sand|pigment_sweep|wave|paint_drop|rgb_fade|vertical_halo|screenprint|contour_laser|screenprint_laser
 --order chromatic|reverse|area|luminance
 --outline first|last|together
 --direction left|right|top|bottom|diagonal|radial

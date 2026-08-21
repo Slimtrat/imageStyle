@@ -369,7 +369,7 @@ Item {
 
             // Every grain comes from a real analyzed pixel and settles at its 2D time.
             Repeater3D {
-                model: sandParticleModel
+                model: pigmentParticleModel
                 delegate: Model {
                     required property real targetU
                     required property real targetV
@@ -379,29 +379,81 @@ Item {
                     required property real driftX
                     required property real driftZ
                     required property real particleSize
+                    required property real originU
+                    required property real originV
+                    required property real overshootU
+                    required property real overshootV
+                    required property real curlU
+                    required property real curlV
+                    required property real motionPhase
+                    readonly property bool isSweep: root.effectKind === "pigment_sweep"
+                    readonly property real motionProgress: isSweep
+                        ? root.smootherstep(root.effectProgress) : root.effectProgress
                     readonly property real travel: Math.max(0, Math.min(1,
-                        (root.effectProgress - birthProgress)
+                        (motionProgress - birthProgress)
                         / Math.max(0.0001, settleProgress - birthProgress)))
                     readonly property real fall: travel * travel
-                    visible: root.effectKind === "sand"
+                    readonly property real approach: Math.max(0, Math.min(1, travel / 0.78))
+                    readonly property real approachEase: root.smootherstep(approach)
+                    readonly property real curlWave: Math.sin(Math.PI * approachEase)
+                        * Math.sin(motionPhase + approachEase * Math.PI * 2)
+                    readonly property real rebound: Math.max(0, Math.min(1,
+                        (travel - 0.78) / 0.22))
+                    readonly property real reboundResidual: Math.pow(1 - rebound, 2)
+                        * Math.cos(rebound * Math.PI * 1.25)
+                    readonly property real reboundCurl: Math.sin(Math.PI * rebound)
+                        * (1 - rebound)
+                        * Math.sin(motionPhase + rebound * Math.PI) * 0.18
+                    readonly property real targetDeckX: (targetU - 0.5) * root.artworkWidth
+                    readonly property real targetDeckZ: root.artworkCenterZ
+                        + (targetV - 0.5) * root.artworkDepth
+                    readonly property real originDeckX: (originU - 0.5) * root.artworkWidth
+                    readonly property real originDeckZ: root.artworkCenterZ
+                        + (originV - 0.5) * root.artworkDepth
+                    readonly property real sweepX: travel < 0.78
+                        ? originDeckX
+                            + (targetDeckX + overshootU * root.artworkWidth - originDeckX)
+                                * approachEase
+                            + curlU * root.artworkWidth * curlWave
+                        : targetDeckX + overshootU * root.artworkWidth * reboundResidual
+                            + curlU * root.artworkWidth * reboundCurl
+                    readonly property real sweepZ: travel < 0.78
+                        ? originDeckZ
+                            + (targetDeckZ + overshootV * root.artworkDepth - originDeckZ)
+                                * approachEase
+                            + curlV * root.artworkDepth * curlWave
+                        : targetDeckZ + overshootV * root.artworkDepth * reboundResidual
+                            + curlV * root.artworkDepth * reboundCurl
+                    visible: (root.effectKind === "sand" || isSweep)
                         && travel > 0.0 && travel < 1.0
-                    x: (targetU - 0.5) * root.artworkWidth
-                        + driftX * (1 - fall)
-                        + Math.sin(targetU * 91 + targetV * 57 + travel * 6.28)
-                        * (1 - fall) * 3.2
-                    y: root.artworkSurfaceY + 245 * (1 - fall)
-                    z: root.artworkCenterZ + (targetV - 0.5) * root.artworkDepth
-                        + driftZ * (1 - fall)
+                    x: isSweep ? sweepX
+                        : (targetU - 0.5) * root.artworkWidth
+                            + driftX * (1 - fall)
+                            + Math.sin(targetU * 91 + targetV * 57 + travel * 6.28)
+                                * (1 - fall) * 3.2
+                    y: isSweep
+                        ? root.artworkSurfaceY + 2.2
+                            + Math.sin(Math.PI * travel) * (18 + particleSize * 8)
+                        : root.artworkSurfaceY + 245 * (1 - fall)
+                    z: isSweep ? sweepZ
+                        : root.artworkCenterZ + (targetV - 0.5) * root.artworkDepth
+                            + driftZ * (1 - fall)
                     source: "#Sphere"
-                    scale: Qt.vector3d(
-                        particleSize * 1.55 / 100,
-                        particleSize * 3.8 / 100,
-                        particleSize * 1.55 / 100
-                    )
+                    scale: isSweep
+                        ? Qt.vector3d(
+                            particleSize * 3.25 / 100,
+                            particleSize * 1.9 / 100,
+                            particleSize * 3.25 / 100
+                        )
+                        : Qt.vector3d(
+                            particleSize * 1.55 / 100,
+                            particleSize * 3.8 / 100,
+                            particleSize * 1.55 / 100
+                        )
                     materials: PrincipledMaterial {
                         baseColor: particleColor
-                        opacity: 0.82
-                        roughness: 0.84
+                        opacity: isSweep ? 0.91 : 0.82
+                        roughness: isSweep ? 0.68 : 0.84
                     }
                 }
             }
@@ -912,7 +964,8 @@ Item {
                 || root.effectKind === "screenprint"
                 || root.effectKind === "contour_laser"
                 || root.effectKind === "screenprint_laser"
-                || root.effectKind === "paint_drop")
+                || root.effectKind === "paint_drop"
+                || root.effectKind === "pigment_sweep")
             && root.effectProgress > 0.005
             && root.effectProgress < 0.995
         anchors.top: parent.top
@@ -922,7 +975,9 @@ Item {
         color: "#d0161b25"
         border.color: root.effectKind === "paint_drop"
             ? root.paintActiveColor
-            : (root.effectToolIsOutline ? "#ff6a32" : "#c99a67")
+            : (root.effectKind === "pigment_sweep"
+                ? "#65d7c4"
+                : (root.effectToolIsOutline ? "#ff6a32" : "#c99a67"))
         border.width: 1
         width: effectActText.implicitWidth + 26
         height: 34
@@ -931,7 +986,13 @@ Item {
             id: effectActText
             anchors.centerIn: parent
             color: root.effectToolIsOutline ? "#ffd1b6" : "#ffe0b9"
-            text: root.effectKind === "paint_drop"
+            text: root.effectKind === "pigment_sweep"
+                ? "PIGMENT SWEEP · CIBLAGE "
+                    + (root.effectDirection === "right" ? "DROITE → GAUCHE"
+                        : root.effectDirection === "top" ? "HAUT → BAS"
+                        : root.effectDirection === "bottom" ? "BAS → HAUT"
+                        : "GAUCHE → DROITE")
+                : root.effectKind === "paint_drop"
                 ? "COUCHE " + (root.effectToolStage + 1) + "/"
                     + root.effectStageCount + " · "
                     + (root.effectToolProgress < root.paintFallRatio

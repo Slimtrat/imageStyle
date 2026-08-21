@@ -33,19 +33,30 @@ def test_mode_switch_changes_visible_parameters_and_config(app) -> None:
     assert window._settings_dialogs["effect"].scroll.viewport().objectName() == "settingsViewport"
     assert window.effect_combo.currentData() == "sand"
     assert window.mode_stack.currentIndex() == 0
-    window.effect_combo.setCurrentIndex(1)
+    wave_index = window.effect_combo.findData("wave")
+    window.effect_combo.setCurrentIndex(wave_index)
     assert window.effect_combo.currentData() == "wave"
-    assert window.mode_stack.currentIndex() == 1
+    assert window.mode_stack.currentIndex() == wave_index
     halo_index = window.effect_combo.findData("vertical_halo")
     window.effect_combo.setCurrentIndex(halo_index)
     halo_direction = window._effect_controls["vertical_halo"]["halo_direction"]
     right_index = halo_direction.findData("right")
     halo_direction.setCurrentIndex(right_index)
     assert window.studio_3d._effect_direction == "right"
-    window.effect_combo.setCurrentIndex(1)
+    window.effect_combo.setCurrentIndex(wave_index)
     config = window.build_config()
     assert config.effect == "wave"
     assert config.direction == "left"
+    pigment_index = window.effect_combo.findData("pigment_sweep")
+    window.effect_combo.setCurrentIndex(pigment_index)
+    pigment_direction = window._effect_controls["pigment_sweep"]["direction"]
+    pigment_direction.setCurrentIndex(pigment_direction.findData("bottom"))
+    assert window.studio_3d._effect_direction == "bottom"
+    assert not window.order_combo.isEnabled()
+    assert not window.sequence_panel.isVisible()
+    pigment_config = window.build_config()
+    assert pigment_config.direction == "bottom"
+    assert pigment_config.sweep_density == pytest.approx(0.018)
     window.close()
 
 

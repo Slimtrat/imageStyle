@@ -24,6 +24,13 @@ class StudioParticleRecord:
     drift_x: float
     drift_z: float
     size: float
+    origin_u: float = 0.0
+    origin_v: float = 0.0
+    overshoot_u: float = 0.0
+    overshoot_v: float = 0.0
+    curl_u: float = 0.0
+    curl_v: float = 0.0
+    motion_phase: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +79,7 @@ def _inverse_ease(values: np.ndarray) -> np.ndarray:
 
 def build_studio_scene_data(
     renderer: ArtworkRenderer,
-    particle_count: int = 240,
+    particle_count: int = 720,
 ) -> StudioSceneData:
     """Map 3D grains to true pixels and to their true 2D settling instants."""
     outline_stage = next(
@@ -120,6 +127,50 @@ def build_studio_scene_data(
             paint_fall_ratio=renderer.config.paint_fall_ratio,
             laser_path=laser_path,
         )
+
+    if renderer.effect.supports(EffectCapability.TARGETED_PARTICLES):
+        bank = next(iter(renderer.particles.values()), None)
+        if bank is None or particle_count <= 0:
+            return scene(())
+        if (
+            bank.origin_x is None
+            or bank.origin_y is None
+            or bank.overshoot_x is None
+            or bank.overshoot_y is None
+            or bank.curl_x is None
+            or bank.curl_y is None
+        ):
+            raise ValueError("La banque de pigments ciblés est incomplète")
+        available = len(bank.target_x)
+        count = min(int(particle_count), available)
+        rng = np.random.default_rng(renderer.config.seed + 104729)
+        selected = np.sort(rng.choice(available, size=count, replace=False))
+        records: list[StudioParticleRecord] = []
+        for index in selected:
+            phase = float(bank.phase[index])
+            records.append(
+                StudioParticleRecord(
+                    target_u=(float(bank.target_x[index]) + 0.5) / width,
+                    target_v=(float(bank.target_y[index]) + 0.5) / height,
+                    color=tuple(int(channel) for channel in bank.colors[index]),
+                    birth_progress=max(
+                        0.0,
+                        float(bank.settle[index] - bank.flight[index]),
+                    ),
+                    settle_progress=float(bank.settle[index]),
+                    drift_x=float(bank.sway[index]),
+                    drift_z=0.0,
+                    size=0.62 + 0.34 * (0.5 + 0.5 * np.sin(phase * 1.71)),
+                    origin_u=(float(bank.origin_x[index]) + 0.5) / width,
+                    origin_v=(float(bank.origin_y[index]) + 0.5) / height,
+                    overshoot_u=float(bank.overshoot_x[index]) / width,
+                    overshoot_v=float(bank.overshoot_y[index]) / height,
+                    curl_u=float(bank.curl_x[index]) / width,
+                    curl_v=float(bank.curl_y[index]) / height,
+                    motion_phase=phase,
+                )
+            )
+        return scene(tuple(records))
 
     if not renderer.effect.supports(EffectCapability.FALLING_PARTICLES):
         return scene(())
@@ -175,6 +226,13 @@ class StudioParticleModel(QAbstractListModel):
     DRIFT_X = TARGET_U + 5
     DRIFT_Z = TARGET_U + 6
     PARTICLE_SIZE = TARGET_U + 7
+    ORIGIN_U = TARGET_U + 8
+    ORIGIN_V = TARGET_U + 9
+    OVERSHOOT_U = TARGET_U + 10
+    OVERSHOOT_V = TARGET_U + 11
+    CURL_U = TARGET_U + 12
+    CURL_V = TARGET_U + 13
+    MOTION_PHASE = TARGET_U + 14
 
     def __init__(self) -> None:
         super().__init__()
@@ -190,6 +248,13 @@ class StudioParticleModel(QAbstractListModel):
             self.DRIFT_X: b"driftX",
             self.DRIFT_Z: b"driftZ",
             self.PARTICLE_SIZE: b"particleSize",
+            self.ORIGIN_U: b"originU",
+            self.ORIGIN_V: b"originV",
+            self.OVERSHOOT_U: b"overshootU",
+            self.OVERSHOOT_V: b"overshootV",
+            self.CURL_U: b"curlU",
+            self.CURL_V: b"curlV",
+            self.MOTION_PHASE: b"motionPhase",
         }
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
@@ -208,6 +273,13 @@ class StudioParticleModel(QAbstractListModel):
             self.DRIFT_X: item.drift_x,
             self.DRIFT_Z: item.drift_z,
             self.PARTICLE_SIZE: item.size,
+            self.ORIGIN_U: item.origin_u,
+            self.ORIGIN_V: item.origin_v,
+            self.OVERSHOOT_U: item.overshoot_u,
+            self.OVERSHOOT_V: item.overshoot_v,
+            self.CURL_U: item.curl_u,
+            self.CURL_V: item.curl_v,
+            self.MOTION_PHASE: item.motion_phase,
         }
         return values.get(role)
 

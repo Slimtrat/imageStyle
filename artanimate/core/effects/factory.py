@@ -28,6 +28,13 @@ def register_effect(effect_type: EffectType) -> EffectType:
             f"décrit {documented_fields}"
         )
     if (
+        effect_type.supports(EffectCapability.TARGETED_PARTICLES)
+        and effect_type.build_targeted_particles is AnimationEffect.build_targeted_particles
+    ):
+        raise ValueError(
+            f"L’effet {key!r} déclare des pigments ciblés sans construire leur banque"
+        )
+    if (
         effect_type.supports(EffectCapability.FRAME_COMPOSITOR)
         and effect_type.compose_frame is AnimationEffect.compose_frame
     ):

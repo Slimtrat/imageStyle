@@ -34,7 +34,7 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "overheadLamp" in scene
     assert "lampMotion" in scene
     assert "dark-walnut-v2.png" in scene
-    assert "model: sandParticleModel" in scene
+    assert "model: pigmentParticleModel" in scene
     assert "cameraOrbitTurns" in scene
     assert "effectToolIsOutline" in scene
     assert "id: effectToolDeck" in scene
@@ -59,6 +59,9 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "MouseArea" in scene
     assert "effectKind" in scene
     assert "effectDirection" in scene
+    assert "pigment_sweep" in scene
+    assert "overshootU" in scene
+    assert "reboundResidual" in scene
     assert "Repeater3D" in scene
     assert "CADRE EXPORT" in scene
 

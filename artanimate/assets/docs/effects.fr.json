@@ -43,6 +43,84 @@
         }
       ]
     },
+    "pigment_sweep": {
+      "selector_label": "Pigment Sweep — matière ciblée",
+      "description": "Une masse organique traverse l’œuvre une seule fois : chaque pigment transporte la vraie couleur d’un pixel, dépasse légèrement sa destination puis s’y verrouille.",
+      "parameters": [
+        {
+          "key": "direction",
+          "label": "Direction du balayage",
+          "control": "choice",
+          "description": "Bord depuis lequel la masse de pigments entre dans l’œuvre.",
+          "choices": [
+            {
+              "value": "left",
+              "label": "Gauche → droite"
+            },
+            {
+              "value": "right",
+              "label": "Droite → gauche"
+            },
+            {
+              "value": "top",
+              "label": "Haut → bas"
+            },
+            {
+              "value": "bottom",
+              "label": "Bas → haut"
+            }
+          ]
+        },
+        {
+          "key": "sweep_density",
+          "label": "Densité de matière",
+          "control": "slider",
+          "minimum": 0.002,
+          "maximum": 0.04,
+          "default": 0.018,
+          "step": 0.001,
+          "decimals": 3,
+          "suffix": "",
+          "description": "Nombre de pigments ciblés visibles dans le front. 0,018 forme une masse continue ; augmentez pour un passage plus dense et plus coûteux à calculer."
+        },
+        {
+          "key": "sweep_grain_size",
+          "label": "Taille des pigments",
+          "control": "slider",
+          "minimum": 0.8,
+          "maximum": 6.0,
+          "default": 2.8,
+          "step": 0.1,
+          "decimals": 1,
+          "suffix": " px",
+          "description": "Épaisseur de la matière en mouvement. Autour de 2,8 px, les touches se fusionnent en un front doux sans créer de pixels isolés ni brouiller l’œuvre déposée."
+        },
+        {
+          "key": "sweep_turbulence",
+          "label": "Mouvement organique",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 0.45,
+          "default": 0.16,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Irrégularité commune du front et des trajectoires. Zéro produit un balayage calme ; les grandes valeurs créent des plis et des boucles plus vivants."
+        },
+        {
+          "key": "sweep_rebound",
+          "label": "Dépassement & rebond",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 0.35,
+          "default": 0.12,
+          "step": 0.01,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Distance dépassée avant le retour sur le pixel exact. 0 supprime le rebond ; 0,12 donne un mouvement physique discret sans faire flotter l’image finale."
+        }
+      ]
+    },
     "wave": {
       "selector_label": "Vague — front fluide",
       "description": "Un front directionnel traverse l’œuvre et révèle les aplats comme une matière fluide.",

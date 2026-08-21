@@ -20,6 +20,8 @@ from .base import (
     FrameCompositionContext,
     FrameDecorationContext,
     LayerFrameState,
+    TargetedParticleBank,
+    TargetedParticleContext,
 )
 from .documentation import (
     ChoiceDocumentation,
@@ -31,6 +33,12 @@ from .documentation import (
 from .factory import create_effect, effect_descriptors, effect_keys, register_effect
 from .reveal import reveal_opacity
 from .sand import SandEffect, sand_field
+from .pigment_sweep import (
+    PIGMENT_SWEEP_DIRECTIONS,
+    PigmentSweepEffect,
+    pigment_sweep_field,
+    targeted_particle_position,
+)
 from .wave import WaveEffect, wave_field
 from .paint_drop import PaintDropEffect, paint_drop_field, paint_drop_target
 from .rgb_fade import RgbFadeEffect, rgb_channel_weights
@@ -62,7 +70,11 @@ __all__ = [
     "LaserPathPoint",
     "ParameterDocumentation",
     "PaintDropEffect",
+    "PIGMENT_SWEEP_DIRECTIONS",
+    "PigmentSweepEffect",
     "RgbFadeEffect",
+    "TargetedParticleBank",
+    "TargetedParticleContext",
     "SandEffect",
     "ScreenPrintEffect",
     "ScreenPrintLaserEffect",
@@ -80,11 +92,13 @@ __all__ = [
     "load_effect_documentation",
     "paint_drop_field",
     "paint_drop_target",
+    "pigment_sweep_field",
     "register_effect",
     "reveal_opacity",
     "rgb_channel_weights",
     "sample_laser_path",
     "thin_contours",
+    "targeted_particle_position",
     "sand_field",
     "wave_field",
 ]

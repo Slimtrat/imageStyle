@@ -153,7 +153,7 @@ class Studio3DPanel(QWidget):
         self._provider = StudioTextureProvider(initial)
         self.view.engine().addImageProvider("artanimate", self._provider)
         self.view.rootContext().setContextProperty(
-            "sandParticleModel", self._particle_model
+            "pigmentParticleModel", self._particle_model
         )
         self.view.statusChanged.connect(self._scene_status_changed)
         content.addWidget(self.view, 1)

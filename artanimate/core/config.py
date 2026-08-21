@@ -5,7 +5,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .effects import EffectCapability, create_effect, effect_keys
+from .effects import (
+    PIGMENT_SWEEP_DIRECTIONS,
+    EffectCapability,
+    create_effect,
+    effect_keys,
+)
 
 
 EFFECTS = effect_keys()
@@ -45,6 +50,10 @@ class RenderConfig:
     soft_edge: float = 0.012
     grain_density: float = 0.004
     grain_size: float = 1.35
+    sweep_density: float = 0.018
+    sweep_grain_size: float = 2.8
+    sweep_turbulence: float = 0.16
+    sweep_rebound: float = 0.12
     halo_width: float = 0.075
     halo_intensity: float = 0.9
     screenprint_width: float = 0.12
@@ -68,6 +77,7 @@ class RenderConfig:
             and not effect.supports(EffectCapability.CHROMATIC_SEQUENCE)
             and not effect.supports(EffectCapability.FRAME_COMPOSITOR)
             and not effect.supports(EffectCapability.DETECTED_CONTOURS)
+            and not effect.supports(EffectCapability.GLOBAL_REVEAL)
         ):
             raise ValueError(f"L’effet {self.effect!r} ne prend pas en charge la roue chromatique")
         if self.neutral_position not in NEUTRAL_POSITIONS:
@@ -80,6 +90,11 @@ class RenderConfig:
             raise ValueError(f"quality doit être l'un de : {', '.join(QUALITY_PROFILES)}")
         if self.direction not in DIRECTIONS:
             raise ValueError(f"direction doit être l'une de : {', '.join(DIRECTIONS)}")
+        if self.effect == "pigment_sweep" and self.direction not in PIGMENT_SWEEP_DIRECTIONS:
+            raise ValueError(
+                "Pigment Sweep accepte uniquement : "
+                + ", ".join(PIGMENT_SWEEP_DIRECTIONS)
+            )
         if self.rgb_mode not in RGB_MODES:
             raise ValueError(f"rgb_mode doit être l'un de : {', '.join(RGB_MODES)}")
         if self.halo_direction not in HALO_DIRECTIONS:
@@ -106,6 +121,14 @@ class RenderConfig:
             raise ValueError("outline_luma doit être compris entre 0 et 100")
         if self.grain_density < 0 or self.grain_size < 0:
             raise ValueError("les paramètres de grain ne peuvent pas être négatifs")
+        if not 0.002 <= self.sweep_density <= 0.04:
+            raise ValueError("sweep_density doit être compris entre 0.002 et 0.04")
+        if not 0.8 <= self.sweep_grain_size <= 6.0:
+            raise ValueError("sweep_grain_size doit être compris entre 0.8 et 6")
+        if not 0.0 <= self.sweep_turbulence <= 0.45:
+            raise ValueError("sweep_turbulence doit être compris entre 0 et 0.45")
+        if not 0.0 <= self.sweep_rebound <= 0.35:
+            raise ValueError("sweep_rebound doit être compris entre 0 et 0.35")
         if not 0.005 <= self.halo_width <= 0.30:
             raise ValueError("halo_width doit être compris entre 0.005 et 0.30")
         if not 0.0 <= self.halo_intensity <= 3.0:

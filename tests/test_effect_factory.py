@@ -17,6 +17,7 @@ from artanimate.core.effects import (
 def test_factory_is_the_single_source_of_registered_effects() -> None:
     assert effect_keys() == EFFECTS == (
         "sand",
+        "pigment_sweep",
         "wave",
         "paint_drop",
         "rgb_fade",
@@ -67,6 +68,11 @@ def test_effect_capabilities_match_their_composition_model() -> None:
     for key in ("paint_drop", "screenprint", "contour_laser", "screenprint_laser"):
         assert descriptors[key].supports(EffectCapability.FRAME_DECORATOR)
     assert descriptors["contour_laser"].supports(EffectCapability.DETECTED_CONTOURS)
+    assert descriptors["pigment_sweep"].supports(EffectCapability.GLOBAL_REVEAL)
+    assert descriptors["pigment_sweep"].supports(EffectCapability.TARGETED_PARTICLES)
+    assert not descriptors["pigment_sweep"].supports(
+        EffectCapability.CHROMATIC_SEQUENCE
+    )
     assert descriptors["vertical_halo"].supports(EffectCapability.FRAME_COMPOSITOR)
     assert descriptors["rgb_fade"].supports(EffectCapability.FRAME_COMPOSITOR)
     assert not descriptors["contour_laser"].supports(EffectCapability.CHROMATIC_SEQUENCE)

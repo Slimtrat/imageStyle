@@ -20,10 +20,12 @@ class EffectCapability(StrEnum):
     CHROMATIC_SEQUENCE = "chromatic_sequence"
     DETECTED_CONTOURS = "detected_contours"
     FALLING_PARTICLES = "falling_particles"
+    GLOBAL_REVEAL = "global_reveal"
     FRAME_COMPOSITOR = "frame_compositor"
     FRAME_DECORATOR = "frame_decorator"
     STRICT_SEQUENCE = "strict_sequence"
     OUTLINE_FINALE = "outline_finale"
+    TARGETED_PARTICLES = "targeted_particles"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +61,47 @@ class EffectContext:
             raise ValueError("Les dimensions du contexte d’effet doivent être positives")
         if self.layer_mask is not None and self.layer_mask.shape != (self.height, self.width):
             raise ValueError("Le masque de couche doit correspondre aux dimensions du contexte")
+
+
+@dataclass(frozen=True, slots=True)
+class TargetedParticleContext:
+    """Immutable source data offered to target-seeking material effects."""
+
+    source: np.ndarray
+    mask: np.ndarray
+    field: np.ndarray
+    width: int
+    height: int
+    seed: int
+    config: RenderConfig
+
+    def __post_init__(self) -> None:
+        if self.source.shape != (self.height, self.width, 3):
+            raise ValueError("La source des pigments doit être une image RGB complète")
+        if self.mask.shape != (self.height, self.width):
+            raise ValueError("Le masque des pigments doit correspondre à la source")
+        if self.field.shape != self.mask.shape:
+            raise ValueError("Le champ des pigments doit correspondre au masque")
+
+
+@dataclass(frozen=True, slots=True)
+class TargetedParticleBank:
+    """Deterministic motion bank produced by one targeted material effect."""
+
+    target_x: np.ndarray
+    target_y: np.ndarray
+    settle: np.ndarray
+    flight: np.ndarray
+    sway: np.ndarray
+    phase: np.ndarray
+    colors: np.ndarray
+    origin_x: np.ndarray
+    origin_y: np.ndarray
+    overshoot_x: np.ndarray
+    overshoot_y: np.ndarray
+    curl_x: np.ndarray
+    curl_y: np.ndarray
+    brush_size: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +201,48 @@ class AnimationEffect(ABC):
                 f"[{minimum:.4f}, {maximum:.4f}]"
             )
         return np.clip(field, 0.0, 1.0)
+
+    def create_targeted_particles(
+        self,
+        context: TargetedParticleContext,
+    ) -> TargetedParticleBank | None:
+        """Build and validate an optional bank tied to exact source pixels."""
+        bank = self.build_targeted_particles(context)
+        if bank is None:
+            return None
+        if not isinstance(bank, TargetedParticleBank):
+            raise TypeError(f"L’effet {self.key!r} doit produire TargetedParticleBank")
+        count = len(bank.target_x)
+        vectors = (
+            bank.target_x, bank.target_y, bank.settle, bank.flight, bank.sway,
+            bank.phase, bank.origin_x, bank.origin_y, bank.overshoot_x,
+            bank.overshoot_y, bank.curl_x, bank.curl_y,
+        )
+        if count <= 0 or any(np.asarray(vector).shape != (count,) for vector in vectors):
+            raise ValueError(f"La banque ciblée de {self.key!r} a des tailles incohérentes")
+        if bank.colors.shape != (count, 3) or bank.colors.dtype != np.uint8:
+            raise ValueError(f"La banque ciblée de {self.key!r} doit contenir des couleurs RGB uint8")
+        if not all(np.all(np.isfinite(vector)) for vector in vectors):
+            raise ValueError(f"La banque ciblée de {self.key!r} contient des valeurs non finies")
+        x = bank.target_x.astype(np.int32)
+        y = bank.target_y.astype(np.int32)
+        inside = (x >= 0) & (x < context.width) & (y >= 0) & (y < context.height)
+        if not np.all(inside) or not np.all(context.mask[y, x]):
+            raise ValueError(f"La banque ciblée de {self.key!r} vise hors du masque analysé")
+        if not np.array_equal(bank.colors, context.source[y, x]):
+            raise ValueError(f"La banque ciblée de {self.key!r} n’utilise pas les vrais pixels")
+        if np.any(bank.settle < 0.0) or np.any(bank.settle > 1.0):
+            raise ValueError(f"Les temps de dépôt de {self.key!r} doivent rester dans [0, 1]")
+        if np.any(bank.flight <= 0.0) or bank.brush_size <= 0.0:
+            raise ValueError(f"Les durées et tailles de {self.key!r} doivent être positives")
+        return bank
+
+    def build_targeted_particles(
+        self,
+        context: TargetedParticleContext,
+    ) -> TargetedParticleBank | None:
+        """Optionally create target-seeking material; implemented by capable effects."""
+        return None
 
     def create_frame(
         self,

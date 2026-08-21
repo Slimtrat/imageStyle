@@ -860,6 +860,8 @@ class MainWindow(QMainWindow):
         descriptor = self._effect_descriptors[effect]
         if descriptor.supports(EffectCapability.DETECTED_CONTOURS):
             color_summary = "Trajet automatique · aucun ordre chromatique"
+        elif descriptor.supports(EffectCapability.GLOBAL_REVEAL):
+            color_summary = "Passage global unique · roue chromatique non utilisée"
         elif descriptor.supports(EffectCapability.FRAME_COMPOSITOR):
             color_summary = "Composition directe · aucun ordre chromatique"
         else:
@@ -1011,7 +1013,9 @@ class MainWindow(QMainWindow):
         rgb_mode = "channels"
         direction = "left"
         rgb_control = self._effect_controls.get("rgb_fade", {}).get("rgb_mode")
-        direction_control = self._effect_controls.get("wave", {}).get("direction")
+        direction_control = self._effect_controls.get(effect, {}).get("direction")
+        if direction_control is None:
+            direction_control = self._effect_controls.get("wave", {}).get("direction")
         halo_control = self._effect_controls.get("vertical_halo", {}).get(
             "halo_direction"
         )
@@ -1030,6 +1034,7 @@ class MainWindow(QMainWindow):
         direct_compositor = (
             descriptor.supports(EffectCapability.FRAME_COMPOSITOR)
             or descriptor.supports(EffectCapability.DETECTED_CONTOURS)
+            or descriptor.supports(EffectCapability.GLOBAL_REVEAL)
         )
         uses_wheel = (
             not direct_compositor
@@ -1054,6 +1059,12 @@ class MainWindow(QMainWindow):
                     "La découpeuse détecte et ordonne directement les formes : la roue "
                     "chromatique, les neutres et le placement manuel des contours ne "
                     "modifient pas son trajet."
+                )
+            elif descriptor.supports(EffectCapability.GLOBAL_REVEAL):
+                self.order_description.setText(
+                    "Pigment Sweep traverse toute l’œuvre en un seul passage. Chaque "
+                    "pigment vise son pixel : la roue chromatique, les neutres, le "
+                    "chevauchement et l’ordre des contours ne modifient pas ce trajet."
                 )
             else:
                 self.order_description.setText(

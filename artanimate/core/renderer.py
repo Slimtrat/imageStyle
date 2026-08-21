@@ -15,9 +15,12 @@ from .effects import (
     FrameCompositionContext,
     FrameDecorationContext,
     LayerFrameState,
+    TargetedParticleBank,
+    TargetedParticleContext,
     create_effect,
     detected_contour_mask,
     reveal_opacity,
+    targeted_particle_position,
 )
 from .quality import ease_in_out, exposure_average, srgb_to_linear
 
@@ -50,6 +53,7 @@ class ArtworkRenderer:
             config.neutral_position,
         )
         self.detected_contour_layer = self._build_detected_contour_layer()
+        self.global_reveal_layer = self._build_global_reveal_layer()
         self.stages = self._stage_layers()
         self.blank = np.empty_like(analysis.source)
         if (
@@ -70,14 +74,17 @@ class ArtworkRenderer:
             config=config,
             linear_source=srgb_to_linear(analysis.source) if direct_compositor else None,
         )
-        if self.effect.supports(EffectCapability.DETECTED_CONTOURS):
+        if (
+            self.effect.supports(EffectCapability.DETECTED_CONTOURS)
+            or self.effect.supports(EffectCapability.GLOBAL_REVEAL)
+        ):
             all_layers = list(self.stages)
         else:
             all_layers = list(self.color_layers)
             if analysis.outline:
                 all_layers.append(analysis.outline)
         self.fields: dict[str, np.ndarray] = {}
-        self.particles: dict[str, FallingParticles] = {}
+        self.particles: dict[str, FallingParticles | TargetedParticleBank] = {}
         if direct_compositor:
             all_layers = []
         for index, layer in enumerate(all_layers):
@@ -93,13 +100,26 @@ class ArtworkRenderer:
             )
             field = self.effect.create_field(context)
             self.fields[layer.key] = field
-            if (
+            particles = None
+            if self.effect.supports(EffectCapability.TARGETED_PARTICLES):
+                particles = self.effect.create_targeted_particles(
+                    TargetedParticleContext(
+                        source=analysis.source,
+                        mask=layer.mask,
+                        field=field,
+                        width=self.width,
+                        height=self.height,
+                        seed=layer_seed,
+                        config=config,
+                    )
+                )
+            elif (
                 self.effect.supports(EffectCapability.FALLING_PARTICLES)
                 and config.grain_density > 0
             ):
                 particles = self._prepare_particles(layer, field, layer_seed)
-                if particles is not None:
-                    self.particles[layer.key] = particles
+            if particles is not None:
+                self.particles[layer.key] = particles
 
         logger.info(
             "Moteur prêt : effet=%s, ordre=%s, couches=%d, images=%d",
@@ -107,6 +127,26 @@ class ArtworkRenderer:
             config.order,
             len(self.stages),
             self.frame_count,
+        )
+
+    def _build_global_reveal_layer(self) -> ColorLayer | None:
+        """Create one foreground stage for effects that cross the artwork once."""
+        if not self.effect.supports(EffectCapability.GLOBAL_REVEAL):
+            return None
+        mask = np.logical_not(self.analysis.background_mask)
+        if not np.any(mask):
+            return None
+        pixels = self.analysis.source[mask].astype(np.float32)
+        color = tuple(int(value) for value in np.rint(pixels.mean(axis=0)))
+        return ColorLayer(
+            key="pigment_sweep",
+            label="matière pigmentaire globale",
+            color=color,
+            mask=mask,
+            hue=0.0,
+            luma=float(np.mean(color)),
+            pixel_count=int(mask.sum()),
+            is_outline=False,
         )
 
     def _build_detected_contour_layer(self) -> ColorLayer | None:
@@ -132,6 +172,8 @@ class ArtworkRenderer:
         )
 
     def _stage_layers(self) -> list[ColorLayer]:
+        if self.effect.supports(EffectCapability.GLOBAL_REVEAL):
+            return [self.global_reveal_layer] if self.global_reveal_layer else []
         if self.effect.supports(EffectCapability.DETECTED_CONTOURS):
             return [self.detected_contour_layer] if self.detected_contour_layer else []
         outline = self.analysis.outline
@@ -203,6 +245,7 @@ class ArtworkRenderer:
             and self.config.outline == "together"
             and not self.effect.supports(EffectCapability.OUTLINE_FINALE)
             and not self.effect.supports(EffectCapability.DETECTED_CONTOURS)
+            and not self.effect.supports(EffectCapability.GLOBAL_REVEAL)
         ):
             result.append((self.analysis.outline, global_progress))
         return result
@@ -210,15 +253,14 @@ class ArtworkRenderer:
     def _draw_particles(
         self,
         frame: np.ndarray,
-        particles: FallingParticles,
+        particles: FallingParticles | TargetedParticleBank,
         progress: float,
     ) -> None:
-        """Blend airborne pigment with a soft anti-aliased brush.
+        """Blend soft airborne matter; dispatch targeted banks to their path model."""
+        if isinstance(particles, TargetedParticleBank):
+            self._draw_targeted_particles(frame, particles, progress)
+            return
 
-        Particles are deliberately translucent and vertically elongated. This
-        avoids the isolated opaque pixels produced by point drawing while keeping
-        their trajectories readable. The completed layer remains the exact source.
-        """
         spawn = np.maximum(0.0, particles.settle - particles.flight)
         alive = (progress >= spawn) & (progress < particles.settle)
         if not np.any(alive):
@@ -274,6 +316,70 @@ class ArtworkRenderer:
                     background * (1.0 - alpha) + foreground * alpha
                 ).astype(np.uint8)
 
+    def _draw_targeted_particles(
+        self,
+        frame: np.ndarray,
+        particles: TargetedParticleBank,
+        progress: float,
+    ) -> None:
+        """Blend the organic front while every pigment seeks its true target."""
+        spawn = np.maximum(0.0, particles.settle - particles.flight)
+        alive = (progress >= spawn) & (progress < particles.settle)
+        if not np.any(alive):
+            return
+        denominator = np.maximum(particles.settle - spawn, 1e-5)
+        travel = np.clip((progress - spawn) / denominator, 0.0, 1.0)
+        current_x, current_y = targeted_particle_position(
+            particles.origin_x,
+            particles.origin_y,
+            particles.target_x,
+            particles.target_y,
+            particles.overshoot_x,
+            particles.overshoot_y,
+            particles.curl_x,
+            particles.curl_y,
+            particles.phase,
+            travel,
+        )
+        indices = np.flatnonzero(alive)
+        x = np.rint(current_x[indices]).astype(np.int32)
+        y = np.rint(current_y[indices]).astype(np.int32)
+        visible = (x >= 0) & (x < self.width) & (y >= 0) & (y < self.height)
+        x, y, indices = x[visible], y[visible], indices[visible]
+        if not len(indices):
+            return
+
+        grain_size = max(0.8, float(particles.brush_size))
+        sigma = max(0.85, grain_size * 0.86)
+        radius = max(2, min(6, int(np.ceil(grain_size * 1.7))))
+        colors = particles.colors[indices].astype(np.float32)
+        life = travel[indices]
+        fade_in = np.clip(life / 0.10, 0.0, 1.0)
+        fade_out = np.clip((1.0 - life) / 0.075, 0.0, 1.0)
+        fade_in = fade_in * fade_in * (3.0 - 2.0 * fade_in)
+        fade_out = fade_out * fade_out * (3.0 - 2.0 * fade_out)
+        size_variation = 0.78 + 0.28 * (
+            0.5 + 0.5 * np.sin(particles.phase[indices] * 1.71)
+        )
+        visibility = (fade_in * fade_out * size_variation).astype(np.float32)
+
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                distance = (dx / sigma) ** 2 + (dy / sigma) ** 2
+                kernel_alpha = 0.70 * float(np.exp(-0.5 * distance))
+                if kernel_alpha < 0.022:
+                    continue
+                nx, ny = x + dx, y + dy
+                inside = (nx >= 0) & (nx < self.width) & (ny >= 0) & (ny < self.height)
+                if not np.any(inside):
+                    continue
+                background = frame[ny[inside], nx[inside]].astype(np.float32)
+                foreground = colors[inside]
+                alpha = (kernel_alpha * visibility[inside])[:, None]
+                frame[ny[inside], nx[inside]] = np.rint(
+                    background * (1.0 - alpha) + foreground * alpha
+                ).astype(np.uint8)
+
     def frame_at(self, seconds: float, presentation: str = "2d") -> np.ndarray:
         seconds = float(np.clip(seconds, 0.0, self.config.duration))
         global_progress = self.global_progress_at(seconds)
@@ -305,7 +411,12 @@ class ArtworkRenderer:
                     np.uint8
                 )
             particles = self.particles.get(layer.key)
-            if particles is not None:
+            targeted_geometry_in_studio = (
+                presentation == "texture"
+                and particles is not None
+                and isinstance(particles, TargetedParticleBank)
+            )
+            if particles is not None and not targeted_geometry_in_studio:
                 self._draw_particles(frame, particles, progress)
         if self.effect.supports(EffectCapability.FRAME_DECORATOR):
             states = tuple(
