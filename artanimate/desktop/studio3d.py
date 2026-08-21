@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from ..branding import LOGO_PATH
 from ..core.effects import EffectDescriptor, effect_descriptors
 from .controls import ParameterSlider
+from .studio3d_camera import CAMERA_MOTIONS, camera_motion
 from .studio3d_particles import StudioParticleModel, StudioSceneData
 
 
@@ -34,14 +35,6 @@ logger = logging.getLogger(__name__)
 QML_SCENE_PATH = (
     Path(__file__).resolve().parents[1] / "assets" / "qml" / "Studio3D.qml"
 )
-CAMERA_PRESETS = {
-    "artwork": (0.0, 72.0, 650.0, -8.0, 0.0),
-    "furniture": (-18.0, 22.0, 950.0, 48.0, 0.0),
-    "room": (-27.0, 17.0, 1060.0, 55.0, 0.0),
-    "satellite": (-32.0, 58.0, 780.0, -5.0, 1.0),
-}
-
-
 @dataclass(frozen=True, slots=True)
 class StudioExportSettings:
     output_name: str
@@ -130,6 +123,7 @@ class Studio3DPanel(QWidget):
         self._rgb_mode = "channels"
         self._effect_direction = "left"
         self._effect_progress = 0.0
+        self._camera_motion = camera_motion("flyover")
         self._output_auto = True
         self._particle_model = StudioParticleModel()
 
@@ -260,31 +254,42 @@ class Studio3DPanel(QWidget):
         layout.addWidget(shared_hint)
         self._update_effect_description()
 
-        camera_title = QLabel("Cadrage caméra")
+        camera_title = QLabel("Mouvement caméra")
         camera_title.setObjectName("sectionTitle")
         layout.addWidget(camera_title)
         self.camera_preset = QComboBox()
-        self.camera_preset.addItem("Œuvre · plongée", "artwork")
-        self.camera_preset.addItem("Meuble · trois quarts", "furniture")
-        self.camera_preset.addItem("Pièce · plan large", "room")
-        self.camera_preset.addItem("Satellite · orbite 360°", "satellite")
-        self.camera_preset.setCurrentIndex(1)
+        for preset in CAMERA_MOTIONS:
+            self.camera_preset.addItem(preset.label, preset.key)
+            self.camera_preset.setItemData(
+                self.camera_preset.count() - 1,
+                preset.description,
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        self.camera_preset.setCurrentIndex(0)
         self.camera_preset.currentIndexChanged.connect(self._apply_selected_preset)
         layout.addWidget(self.camera_preset)
 
         form = QFormLayout()
         form.setSpacing(8)
         self.yaw_slider = ParameterSlider(
-            -180, 180, -18, 1, 0, "°", "Rotation horizontale complète autour de la scène."
+            -45, 45, 0, 1, 0, "°",
+            "Orientation du cadrage final autour de l’œuvre.",
         )
         self.pitch_slider = ParameterSlider(
-            -5, 82, 22, 1, 0, "°", "Hauteur du point de vue, jusqu’à la vue satellite."
+            58, 82, 78, 1, 0, "°",
+            "Plongée du cadrage final. Le rail rase-motte y revient automatiquement.",
         )
         self.distance_slider = ParameterSlider(
-            420, 1400, 950, 10, 0, "", "Distance entre la caméra et l’œuvre."
+            420, 1400, 560, 10, 0, "",
+            "Distance finale. En vertical, ArtAnimate recule si nécessaire pour garder toute l’œuvre.",
         )
         self.orbit_slider = ParameterSlider(
-            -2.0, 2.0, 0.0, 0.05, 2, " tour", "Nombre de tours automatiques pendant la vidéo."
+            -0.25, 0.25, 0.0, 0.01, 2, " tour",
+            "Rotation subtile ajoutée au trajet, limitée à un quart de tour.",
+        )
+        self.camera_motion_slider = ParameterSlider(
+            0.0, 1.25, 1.0, 0.05, 2, "×",
+            "Amplitude du survol ou de la dérive. Zéro conserve uniquement la plongée finale.",
         )
         self.lamp_slider = ParameterSlider(
             0.2, 5.0, 2.4, 0.1, 1, "×", "Intensité de la suspension au-dessus du meuble."
@@ -292,10 +297,11 @@ class Studio3DPanel(QWidget):
         self.lamp_motion_slider = ParameterSlider(
             0.0, 1.0, 0.65, 0.05, 2, "", "Amplitude de l’oscillation lente de la suspension."
         )
-        form.addRow("Angle", self.yaw_slider)
-        form.addRow("Hauteur", self.pitch_slider)
-        form.addRow("Distance", self.distance_slider)
-        form.addRow("Orbite vidéo", self.orbit_slider)
+        form.addRow("Angle final", self.yaw_slider)
+        form.addRow("Plongée finale", self.pitch_slider)
+        form.addRow("Distance finale", self.distance_slider)
+        form.addRow("Rotation douce", self.orbit_slider)
+        form.addRow("Amplitude trajet", self.camera_motion_slider)
         form.addRow("Suspension", self.lamp_slider)
         form.addRow("Mouvement", self.lamp_motion_slider)
         layout.addLayout(form)
@@ -312,6 +318,9 @@ class Studio3DPanel(QWidget):
         self.orbit_slider.valueChanged.connect(
             lambda value: self._set_scene_property("cameraOrbitTurns", value)
         )
+        self.camera_motion_slider.valueChanged.connect(
+            lambda value: self._set_scene_property("cameraMotionStrength", value)
+        )
         self.lamp_slider.valueChanged.connect(
             lambda value: self._set_scene_property("lampBrightness", value)
         )
@@ -320,8 +329,8 @@ class Studio3DPanel(QWidget):
         )
 
         hint = QLabel(
-            "Le cadre blanc est la sortie vidéo. Glissez dans la scène pour orbiter ; "
-            "la molette règle la distance."
+            "Le rail Signature traverse la matière au ras de l’œuvre, puis atteint "
+            "la plongée finale avant la fin. Angle et distance règlent cette arrivée."
         )
         hint.setObjectName("helperText")
         hint.setWordWrap(True)
@@ -405,6 +414,7 @@ class Studio3DPanel(QWidget):
             self.pitch_slider,
             self.distance_slider,
             self.orbit_slider,
+            self.camera_motion_slider,
             self.lamp_slider,
             self.lamp_motion_slider,
             self.ratio_combo,
@@ -451,20 +461,25 @@ class Studio3DPanel(QWidget):
 
     def _apply_selected_preset(self, *_args: object) -> None:
         key = str(self.camera_preset.currentData())
-        yaw, pitch, distance, pivot_y, orbit_turns = CAMERA_PRESETS[key]
-        self.yaw_slider.setValue(yaw)
-        self.pitch_slider.setValue(pitch)
-        self.distance_slider.setValue(distance)
-        self.orbit_slider.setValue(orbit_turns)
-        self._set_scene_property("cameraYaw", yaw)
-        self._set_scene_property("cameraPitch", -pitch)
-        self._set_scene_property("cameraDistance", distance)
-        self._set_scene_property("cameraPivotY", pivot_y)
-        self._set_scene_property("cameraOrbitTurns", orbit_turns)
-        logger.info("Cadrage 3D sélectionné : %s", key)
+        preset = camera_motion(key)
+        self._camera_motion = preset
+        self.yaw_slider.setValue(preset.yaw)
+        self.pitch_slider.setValue(preset.pitch)
+        self.distance_slider.setValue(preset.distance)
+        self.orbit_slider.setValue(preset.rotation_turns)
+        self.camera_motion_slider.setValue(preset.strength)
+        self.camera_preset.setToolTip(preset.description)
+        self._set_scene_property("cameraYaw", preset.yaw)
+        self._set_scene_property("cameraPitch", -preset.pitch)
+        self._set_scene_property("cameraDistance", preset.distance)
+        self._set_scene_property("cameraPivotY", preset.pivot_y)
+        self._set_scene_property("cameraOrbitTurns", preset.rotation_turns)
+        self._set_scene_property("cameraMotion", preset.motion)
+        self._set_scene_property("cameraMotionStrength", preset.strength)
+        logger.info("Mouvement caméra 3D sélectionné : %s", key)
 
     def reset_camera(self) -> None:
-        self.camera_preset.setCurrentIndex(1)
+        self.camera_preset.setCurrentIndex(0)
         self._apply_selected_preset()
 
     def _output_ratio_changed(self, *_args: object) -> None:
@@ -500,7 +515,7 @@ class Studio3DPanel(QWidget):
             aspect=float(self.ratio_combo.currentData()),
         )
 
-    def camera_state(self) -> dict[str, float]:
+    def camera_state(self) -> dict[str, float | str]:
         root = self.view.rootObject()
         if root is None:
             return {
@@ -508,6 +523,8 @@ class Studio3DPanel(QWidget):
                 "pitch": -float(self.pitch_slider.value()),
                 "distance": float(self.distance_slider.value()),
                 "orbit_turns": float(self.orbit_slider.value()),
+                "motion": self._camera_motion.motion,
+                "motion_strength": float(self.camera_motion_slider.value()),
                 "lamp": float(self.lamp_slider.value()),
                 "lamp_motion": float(self.lamp_motion_slider.value()),
             }
@@ -516,6 +533,8 @@ class Studio3DPanel(QWidget):
             "pitch": float(root.property("cameraPitch")),
             "distance": float(root.property("cameraDistance")),
             "orbit_turns": float(root.property("cameraOrbitTurns")),
+            "motion": str(root.property("cameraMotion")),
+            "motion_strength": float(root.property("cameraMotionStrength")),
             "lamp": float(root.property("lampBrightness")),
             "lamp_motion": float(root.property("lampMotion")),
         }
@@ -626,6 +645,10 @@ class Studio3DPanel(QWidget):
         self._set_scene_property("lampBrightness", self.lamp_slider.value())
         self._set_scene_property("lampMotion", self.lamp_motion_slider.value())
         self._set_scene_property("cameraOrbitTurns", self.orbit_slider.value())
+        self._set_scene_property("cameraMotion", self._camera_motion.motion)
+        self._set_scene_property(
+            "cameraMotionStrength", self.camera_motion_slider.value()
+        )
         self._set_scene_property("effectKind", self._current_effect)
         self._set_scene_property("rgbMode", self._rgb_mode)
         self._set_scene_property("effectDirection", self._effect_direction)

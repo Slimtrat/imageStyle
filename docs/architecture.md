@@ -55,9 +55,12 @@ le code et le JSON. L’interface fabrique automatiquement sliders, choix et inf
 par la scène Qt Quick 3D. Cette scène existe aujourd’hui : pièce vide, meuble en noyer,
 œuvre horizontale, ombre de contact, suspension oscillante et caméra orbitale.
 
-Le Studio propose quatre presets, dont un satellite animé sur 360°, plus les réglages
-d’azimut, élévation, distance, nombre de tours et lumière. Le cadre affiché correspond
-au ratio réellement capturé par l’encodeur MP4, MOV ou WebM.
+Le Studio propose trois mouvements centrés sur l’œuvre. Le rail Signature conserve une
+caméra basse pendant 58 % du temps, traverse la matière en courbe, puis interpole vers la
+plongée finale entre 58 % et 90 %. Une dérive elliptique lente et une plongée fixe offrent
+deux variantes plus sobres. Toutes reviennent à une pose finale stable avant le dernier
+hold. La distance de fin tient compte du ratio d’export : en 9:16, elle augmente
+automatiquement pour garder l’œuvre horizontale complète dans le cadre capturé.
 
 Pour Pigment Sweep, son module dédié prépare une banque déterministe de pigments ciblés
 derrière le contrat `targeted_particles`. Le contrat vérifie les dimensions, les temps,

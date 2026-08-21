@@ -5,11 +5,13 @@ Item {
     id: root
     property url artworkSource: ""
     property real artworkAspect: 1.6
-    property real cameraYaw: -18
-    property real cameraPitch: -22
-    property real cameraDistance: 950
-    property real cameraPivotY: 48
+    property real cameraYaw: 0
+    property real cameraPitch: -78
+    property real cameraDistance: 560
+    property real cameraPivotY: -8
     property real cameraOrbitTurns: 0
+    property string cameraMotion: "flyover"
+    property real cameraMotionStrength: 1.0
     property real lampBrightness: 2.4
     property real lampMotion: 0.65
     property string effectKind: "sand"
@@ -127,16 +129,61 @@ Item {
 
             Node {
                 id: cameraRig
+                readonly property bool flyover: root.cameraMotion === "flyover"
+                readonly property bool topDrift: root.cameraMotion === "top_drift"
+                readonly property real flightProgress: root.smootherstep(
+                    root.effectProgress / 0.62)
+                readonly property real settleProgress: root.smootherstep(
+                    (root.effectProgress - 0.58) / 0.32)
+                readonly property real flyoverWeight: flyover
+                    ? root.cameraMotionStrength * (1 - settleProgress) : 0
+                readonly property real driftEnvelope: topDrift
+                    ? root.cameraMotionStrength * Math.sin(root.effectProgress * Math.PI)
+                    : 0
+                readonly property real railX: root.artworkWidth
+                    * (-0.32 + 0.62 * flightProgress
+                        + Math.sin(flightProgress * Math.PI * 2) * 0.055)
+                readonly property real railZ: root.artworkCenterZ
+                    + root.artworkDepth * (0.30 - 0.52 * flightProgress)
+                readonly property real railPitch: -25
+                    - Math.sin(flightProgress * Math.PI) * 4
+                readonly property real railYaw: -8
+                    + Math.sin(flightProgress * Math.PI * 1.15) * 13
+                readonly property real railDistance: 330
+                    - Math.sin(flightProgress * Math.PI) * 15
+                readonly property real fitTangent: Math.tan(39 * Math.PI / 360)
+                readonly property real fitDistance: Math.max(
+                    root.cameraDistance,
+                    root.artworkWidth * 1.08
+                        / (2 * fitTangent * Math.max(0.2, root.outputAspect)),
+                    root.artworkDepth * 1.08 / (2 * fitTangent))
+                readonly property real animatedDistance: fitDistance
+                    + flyoverWeight * (railDistance - fitDistance)
+                    - driftEnvelope * 26
+                x: railX * flyoverWeight
+                    + root.artworkWidth * 0.075
+                        * Math.sin(root.effectProgress * Math.PI * 2) * driftEnvelope
                 y: root.cameraPivotY
+                    + flyoverWeight * (root.artworkSurfaceY + 3 - root.cameraPivotY)
+                z: railZ * flyoverWeight
+                    + root.artworkDepth * 0.055
+                        * Math.cos(root.effectProgress * Math.PI * 2) * driftEnvelope
                 eulerRotation.x: root.cameraPitch
+                    + flyoverWeight * (railPitch - root.cameraPitch)
+                    - driftEnvelope * 2.5
+                        * Math.sin(root.effectProgress * Math.PI * 2)
                 eulerRotation.y: root.cameraYaw
+                    + flyoverWeight * (railYaw - root.cameraYaw)
+                    + driftEnvelope * 4
+                        * Math.sin(root.effectProgress * Math.PI * 2)
                     + root.cameraOrbitTurns * 360 * root.effectProgress
                 PerspectiveCamera {
                     id: camera
-                    z: root.cameraDistance - Math.sin(root.effectProgress * Math.PI) * 12
-                    clipNear: 20
-                    clipFar: 2800
-                    fieldOfView: 39
+                    z: cameraRig.animatedDistance
+                    clipNear: 8
+                    clipFar: 3000
+                    fieldOfView: 39 + cameraRig.flyoverWeight * 7
+                        + cameraRig.driftEnvelope * 1.5
                 }
             }
 

@@ -36,6 +36,9 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "dark-walnut-v2.png" in scene
     assert "model: pigmentParticleModel" in scene
     assert "cameraOrbitTurns" in scene
+    assert "cameraMotion" in scene
+    assert "flyoverWeight" in scene
+    assert "fitDistance" in scene
     assert "effectToolIsOutline" in scene
     assert "id: effectToolDeck" in scene
     assert "eulerRotation.y: -3" in scene
@@ -101,9 +104,14 @@ def test_studio_panel_loads_scene_and_accepts_animated_frames(
         panel.set_effect("vertical_halo")
         assert panel.effect_combo.currentData() == "vertical_halo"
         assert selected == ["screenprint_laser"]
-        panel.camera_preset.setCurrentIndex(3)
-        assert root.property("cameraOrbitTurns") == pytest.approx(1.0)
-        assert root.property("cameraPitch") == pytest.approx(-58.0)
+        assert panel.camera_preset.count() == 3
+        assert panel.camera_preset.currentData() == "flyover"
+        assert root.property("cameraMotion") == "flyover"
+        drift_index = panel.camera_preset.findData("top_drift")
+        panel.camera_preset.setCurrentIndex(drift_index)
+        assert root.property("cameraMotion") == "top_drift"
+        assert root.property("cameraPitch") == pytest.approx(-78.0)
+        assert root.property("cameraMotionStrength") == pytest.approx(0.62)
         panel.set_effect("wave", direction="right")
         assert root.property("effectKind") == "wave"
         assert root.property("effectDirection") == "right"
