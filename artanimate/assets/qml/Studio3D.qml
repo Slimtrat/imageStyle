@@ -450,6 +450,119 @@ Item {
                         }
                     }
                 }
+                // Screenprint stays abstract and premium: one white boundary on
+                // the surface, separating deposited ink from the untouched area.
+                Node {
+                    id: screenprintBoundary
+                    readonly property bool active: root.effectKind === "screenprint"
+                        || (root.effectKind === "screenprint_laser"
+                            && !root.effectToolIsOutline)
+                    visible: active
+                        && root.effectToolProgress > 0.005
+                        && root.effectToolProgress < 0.995
+                    x: -root.artworkWidth / 2
+                        + root.artworkWidth * root.effectToolProgress
+
+                    Model {
+                        id: screenprintWhiteLine
+                        y: root.artworkSurfaceY + 0.9
+                        source: "#Cube"
+                        scale: Qt.vector3d(0.014, 0.005, root.artworkDepth / 100)
+                        castsShadows: false
+                        materials: PrincipledMaterial {
+                            baseColor: "#ffffff"
+                            emissiveFactor: Qt.vector3d(1.0, 1.0, 1.0)
+                            roughness: 0.08
+                        }
+                    }
+                }
+
+                // Halo remains a restrained luminous curtain on the same local plane.
+                Node {
+                    id: haloBoundary
+                    readonly property real travelProgress: root.effectDirection === "right"
+                        ? 1.0 - root.effectToolProgress : root.effectToolProgress
+                    visible: root.effectKind === "vertical_halo"
+                        && root.effectToolProgress > 0.005
+                        && root.effectToolProgress < 0.995
+                    x: -root.artworkWidth / 2
+                        + root.artworkWidth * travelProgress
+
+                    Model {
+                        y: root.artworkSurfaceY + 1.2
+                        source: "#Cube"
+                        scale: Qt.vector3d(0.045, 0.008, root.artworkDepth / 100)
+                        castsShadows: false
+                        materials: PrincipledMaterial {
+                            baseColor: "#fff7e9"
+                            emissiveFactor: Qt.vector3d(0.82, 0.58, 0.30)
+                            opacity: 0.72
+                            roughness: 0.12
+                        }
+                    }
+                }
+
+                // The sky ray follows normalized points sampled from the detected
+                // outline mask. Being a child of artworkDeck removes all parallax drift.
+                Node {
+                    id: skyLaserDeck
+                    readonly property bool active: root.effectKind === "contour_laser"
+                        || (root.effectKind === "screenprint_laser"
+                            && root.effectToolIsOutline)
+                    visible: active && root.laserBeamOn
+                        && root.effectToolProgress > 0.005
+                        && root.effectToolProgress < 0.995
+                    x: -root.artworkWidth / 2
+                        + root.artworkWidth * root.laserTargetU
+                    z: (root.laserTargetV - 0.5) * root.artworkDepth
+
+                    Model {
+                        id: skyLaserAura
+                        y: root.artworkSurfaceY + 311
+                        source: "#Cylinder"
+                        scale: Qt.vector3d(0.038, 6.4, 0.038)
+                        castsShadows: false
+                        materials: PrincipledMaterial {
+                            baseColor: "#ff5d24"
+                            emissiveFactor: Qt.vector3d(1.0, 0.13, 0.015)
+                            opacity: 0.17
+                            roughness: 0.05
+                        }
+                    }
+                    Model {
+                        id: skyLaserCore
+                        y: root.artworkSurfaceY + 311
+                        source: "#Cylinder"
+                        scale: Qt.vector3d(0.009, 6.4, 0.009)
+                        castsShadows: false
+                        materials: PrincipledMaterial {
+                            baseColor: "#fff8dc"
+                            emissiveFactor: Qt.vector3d(1.0, 0.31, 0.04)
+                            opacity: 0.96
+                            roughness: 0.03
+                        }
+                    }
+                    Model {
+                        id: skyLaserImpact
+                        y: root.artworkSurfaceY + 1.0
+                        source: "#Sphere"
+                        scale: Qt.vector3d(0.075, 0.014, 0.075)
+                        castsShadows: false
+                        materials: PrincipledMaterial {
+                            baseColor: "#fff1c4"
+                            emissiveFactor: Qt.vector3d(1.0, 0.22, 0.02)
+                            opacity: 0.82
+                            roughness: 0.08
+                        }
+                    }
+                    PointLight {
+                        y: root.artworkSurfaceY + 7
+                        color: "#ff6a24"
+                        brightness: 1.15
+                        castsShadow: false
+                        quadraticFade: 0.0012
+                    }
+                }
             }
 
             // Every grain comes from a real analyzed pixel and settles at its 2D time.
@@ -542,196 +655,6 @@ Item {
                     }
                 }
             }
-
-            // The tool shares the exact transform and quintic timing of the artwork deck.
-            Node {
-                id: effectToolDeck
-                readonly property bool isHalo: root.effectKind === "vertical_halo"
-                readonly property bool isScreen: root.effectKind === "screenprint"
-                    || (root.effectKind === "screenprint_laser"
-                        && !root.effectToolIsOutline)
-                readonly property bool isLaser: root.effectKind === "contour_laser"
-                    || (root.effectKind === "screenprint_laser"
-                        && root.effectToolIsOutline)
-                readonly property real halfWidth: isLaser ? 1.4 : (isScreen ? 8 : 5)
-                readonly property real travelProgress: isHalo
-                    && root.effectDirection === "right"
-                    ? 1.0 - root.effectToolProgress : root.effectToolProgress
-                visible: (isHalo || isScreen || isLaser)
-                    && root.effectToolProgress > 0.005
-                    && root.effectToolProgress < 0.995
-                z: isLaser
-                    ? root.artworkCenterZ
-                        + (root.laserTargetV - 0.5) * root.artworkDepth
-                    : root.artworkCenterZ
-                eulerRotation.y: -3
-                x: isLaser
-                    ? -root.artworkWidth / 2 + root.artworkWidth * root.laserTargetU
-                    : Math.max(
-                        -root.artworkWidth / 2 + halfWidth,
-                        Math.min(
-                            root.artworkWidth / 2 - halfWidth,
-                            -root.artworkWidth / 2
-                                + root.artworkWidth * effectToolDeck.travelProgress
-                        )
-                    )
-
-                Model {
-                    id: effectToolCore
-                    y: root.artworkSurfaceY + (effectToolDeck.isLaser ? 24 : 7.0)
-                    source: effectToolDeck.isLaser ? "#Cylinder" : "#Cube"
-                    scale: Qt.vector3d(
-                        effectToolDeck.isLaser ? 0.10
-                            : (effectToolDeck.isScreen ? 0.14 : 0.10),
-                        effectToolDeck.isLaser ? 0.12 : 0.028,
-                        effectToolDeck.isLaser ? 0.10 : root.artworkDepth / 100
-                    )
-                    materials: PrincipledMaterial {
-                        baseColor: effectToolDeck.isLaser ? "#3d434c"
-                            : (effectToolDeck.isScreen ? "#fff0d7" : "#fff7e9")
-                        emissiveFactor: effectToolDeck.isLaser
-                            ? Qt.vector3d(0.08, 0.06, 0.04)
-                            : Qt.vector3d(0.82, 0.58, 0.30)
-                        opacity: effectToolDeck.isLaser ? 0.96 : 0.88
-                        roughness: 0.10
-                    }
-                }
-                Model {
-                    id: effectLaserCollar
-                    visible: effectToolDeck.isLaser
-                    y: root.artworkSurfaceY + 15.5
-                    source: "#Cylinder"
-                    scale: Qt.vector3d(0.106, 0.018, 0.106)
-                    materials: PrincipledMaterial {
-                        baseColor: "#c13a22"
-                        emissiveFactor: Qt.vector3d(0.22, 0.025, 0.01)
-                        metalness: 0.66
-                        roughness: 0.17
-                    }
-                }
-                Model {
-                    id: effectToolAura
-                    visible: !effectToolDeck.isLaser || root.laserBeamOn
-                    y: root.artworkSurfaceY + 1.4
-                    source: "#Cube"
-                    scale: Qt.vector3d(
-                        effectToolDeck.isLaser ? 0.055
-                            : (effectToolDeck.isScreen ? 0.34 : 0.24),
-                        0.006,
-                        effectToolDeck.isLaser ? 0.055 : (root.artworkDepth + 12) / 100
-                    )
-                    materials: PrincipledMaterial {
-                        baseColor: effectToolDeck.isLaser ? "#ff5b24" : "#ffd9a8"
-                        emissiveFactor: effectToolDeck.isLaser
-                            ? Qt.vector3d(1.0, 0.18, 0.035)
-                            : Qt.vector3d(0.34, 0.22, 0.11)
-                        opacity: effectToolDeck.isLaser ? 0.24 : 0.16
-                        roughness: 0.22
-                    }
-                }
-                Repeater3D {
-                    model: 2
-                    delegate: Model {
-                        required property int index
-                        visible: effectToolDeck.isScreen
-                        y: root.artworkSurfaceY + 14
-                        z: (index === 0 ? -1 : 1) * (root.artworkDepth / 2 + 7)
-                        source: "#Cube"
-                        scale: Qt.vector3d(0.22, 0.09, 0.15)
-                        materials: PrincipledMaterial {
-                            baseColor: "#f2b66f"
-                            metalness: 0.58
-                            roughness: 0.20
-                            emissiveFactor: Qt.vector3d(0.48, 0.26, 0.08)
-                        }
-                    }
-                }
-                Model {
-                    id: effectLaserEmitter
-                    visible: effectToolDeck.isLaser && root.laserBeamOn
-                    y: root.artworkSurfaceY + 12
-                    z: 0
-                    source: "#Sphere"
-                    scale: Qt.vector3d(0.052, 0.052, 0.052)
-                    materials: PrincipledMaterial {
-                        baseColor: "#ffcf9b"
-                        emissiveFactor: Qt.vector3d(1.0, 0.24, 0.04)
-                        metalness: 0.18
-                        roughness: 0.12
-                    }
-                }
-                Model {
-                    visible: effectToolDeck.isLaser && root.laserBeamOn
-                    y: root.artworkSurfaceY + 6.5
-                    source: "#Cylinder"
-                    scale: Qt.vector3d(0.012, 0.105, 0.012)
-                    materials: PrincipledMaterial {
-                        baseColor: "#fff0c2"
-                        emissiveFactor: Qt.vector3d(1.0, 0.18, 0.025)
-                        opacity: 0.94
-                        roughness: 0.05
-                    }
-                }
-                Model {
-                    visible: effectToolDeck.isLaser && root.laserBeamOn
-                    y: root.artworkSurfaceY + 1.1
-                    source: "#Sphere"
-                    scale: Qt.vector3d(0.07, 0.012, 0.07)
-                    materials: PrincipledMaterial {
-                        baseColor: "#ff6a24"
-                        emissiveFactor: Qt.vector3d(1.0, 0.16, 0.02)
-                        opacity: 0.62
-                        roughness: 0.18
-                    }
-                }
-                SpotLight {
-                    visible: !effectToolDeck.isLaser || root.laserBeamOn
-                    y: root.artworkSurfaceY + 54
-                    eulerRotation.x: -90
-                    color: effectToolDeck.isLaser ? "#ff5a20" : "#ffd0a0"
-                    brightness: effectToolDeck.isLaser ? 1.5 : 0.82
-                    coneAngle: effectToolDeck.isLaser ? 30 : 42
-                    innerConeAngle: effectToolDeck.isLaser ? 14 : 25
-                    castsShadow: false
-                    quadraticFade: 0.00009
-                }
-            }
-
-            // XY cutter gantry: fixed rails, moving crossbar and path-following head.
-            Node {
-                id: laserGantry
-                visible: effectToolDeck.visible && effectToolDeck.isLaser
-                z: root.artworkCenterZ
-                eulerRotation.y: -3
-
-                Repeater3D {
-                    model: 2
-                    delegate: Model {
-                        required property int index
-                        x: (index === 0 ? -1 : 1) * (root.artworkWidth / 2 + 9)
-                        y: root.artworkSurfaceY + 38
-                        source: "#Cube"
-                        scale: Qt.vector3d(0.035, 0.035, root.artworkDepth / 100)
-                        materials: PrincipledMaterial {
-                            baseColor: "#343a43"
-                            metalness: 0.82
-                            roughness: 0.20
-                        }
-                    }
-                }
-                Model {
-                    y: root.artworkSurfaceY + 42
-                    z: (root.laserTargetV - 0.5) * root.artworkDepth
-                    source: "#Cube"
-                    scale: Qt.vector3d(root.artworkWidth / 100, 0.042, 0.042)
-                    materials: PrincipledMaterial {
-                        baseColor: "#555f6c"
-                        metalness: 0.88
-                        roughness: 0.16
-                    }
-                }
-            }
-
 
             // A large autonomous drop falls vertically onto the true analyzed zone.
             Node {
@@ -1028,14 +951,14 @@ Item {
                         ? "GOUTTE EN CHUTE" : "PEINTURE EN EXPANSION")
                 : root.effectKind === "screenprint_laser"
                 ? (root.effectToolIsOutline
-                    ? "ACTE 2 · LASER DES CONTOURS NOIRS"
-                    : "ACTE 1 · SÉRIGRAPHIE COULEUR "
+                    ? "ACTE 2 · RAYON DU CIEL · CONTOURS NOIRS"
+                    : "ACTE 1 · LIGNE BLANCHE · COULEUR "
                         + (root.effectToolStage + 1) + "/"
                         + Math.max(1, root.effectStageCount - 1))
                 : root.effectKind === "screenprint"
-                    ? "SÉRIGRAPHIE · COUCHE " + (root.effectToolStage + 1)
+                    ? "LIGNE DE SÉRIGRAPHIE · COUCHE " + (root.effectToolStage + 1)
                     : root.effectKind === "contour_laser"
-                        ? "DÉCOUPEUSE LASER · ÉCRITURE DES FORMES"
+                        ? "RAYON DU CIEL · TRACÉ DES CONTOURS"
                         : (root.effectDirection === "right"
                             ? "HALO VERTICAL · RÉVÉLATION DROITE → GAUCHE"
                             : "HALO VERTICAL · RÉVÉLATION GAUCHE → DROITE")

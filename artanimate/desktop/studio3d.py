@@ -131,6 +131,7 @@ class Studio3DPanel(QWidget):
         self._camera_motion = camera_motion("flyover")
         self._wave_settings = OrganicWaveSettings()
         self._wave_geometry = OrganicWaveGeometry()
+        self._wave_base_frame = QImage()
         self._output_auto = True
         self._particle_model = StudioParticleModel()
 
@@ -589,6 +590,7 @@ class Studio3DPanel(QWidget):
             logger.warning("Texture 3D illisible : %s", path)
             return False
         self._particle_model.replace(())
+        self._wave_base_frame = QImage()
         self._wave_geometry.set_source(image)
         self.set_frame(image)
         self.suggest_output(path)
@@ -604,7 +606,10 @@ class Studio3DPanel(QWidget):
         direction: str = "left",
         wave_settings: OrganicWaveSettings | None = None,
     ) -> None:
+        previous_effect = self._current_effect
         self._current_effect = effect
+        if effect == "wave" and previous_effect != effect:
+            self._wave_base_frame = QImage()
         if wave_settings is not None:
             self._wave_settings = wave_settings
         effect_index = self.effect_combo.findData(effect)
@@ -641,8 +646,6 @@ class Studio3DPanel(QWidget):
     ) -> None:
         if image.isNull():
             return
-        self._provider.update(image)
-        self._texture_revision += 1
         self._current_aspect = image.width() / max(1, image.height())
         self._wave_geometry.set_dimensions(
             *artwork_dimensions(self._current_aspect)
@@ -652,6 +655,17 @@ class Studio3DPanel(QWidget):
         elif frame_index is not None and frame_count and frame_count > 1:
             self._effect_progress = frame_index / (frame_count - 1)
         self._wave_geometry.set_progress(self._effect_progress)
+
+        texture = image
+        if self._current_effect == "wave":
+            if self._effect_progress <= 0.005:
+                self._wave_base_frame = QImage(image)
+            elif not self._wave_base_frame.isNull():
+                texture = self._wave_geometry.composite_deposit(
+                    self._wave_base_frame, image
+                )
+        self._provider.update(texture)
+        self._texture_revision += 1
         self._publish_texture()
         self._set_scene_property("effectProgress", self._effect_progress)
         if frame_index is not None and frame_count:

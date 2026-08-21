@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QVector3D
+from PySide6.QtGui import QImage, QPainter, QVector3D
 from PySide6.QtQuick3D import QQuick3DGeometry
 
 from ..core.config import DIRECTIONS, RenderConfig
@@ -66,6 +66,13 @@ def pigment_density(rgb: np.ndarray) -> np.ndarray:
 
 def _smoothstep(edge0: float, edge1: float, value: float) -> float:
     t = float(np.clip((value - edge0) / (edge1 - edge0), 0.0, 1.0))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _smoothstep_array(
+    edge0: float, edge1: float, value: np.ndarray
+) -> np.ndarray:
+    t = np.clip((value - edge0) / (edge1 - edge0), 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
 
 
@@ -204,6 +211,73 @@ class OrganicWaveGeometry(QQuick3DGeometry):
             )
         return self._u, self._v
 
+    def _wave_field(self) -> tuple[np.ndarray, np.ndarray, float]:
+        """Return the shared cross-axis, signed front distance and width.
+
+        A positive distance is behind the moving crest. Geometry and color
+        deposition intentionally consume this exact field so they cannot drift.
+        """
+        settings = self._settings
+        axis, across = self._direction_coordinates()
+        noise = (
+            np.sin(self._u * 31.7 + self._v * 19.3 + self._progress * 5.1) * 0.52
+            + np.sin(self._u * 73.1 - self._v * 41.9 - self._progress * 3.7) * 0.29
+            + np.cos(self._u * 17.3 + self._v * 67.7 + self._progress * 2.2) * 0.19
+        )
+        oscillation = np.sin(
+            across * settings.frequency * 2.0 * np.pi + axis * np.pi
+        ) * settings.amplitude
+        density_lag = (self._density - 0.5) * settings.density_contrast * 0.16
+        field = axis + oscillation + noise * settings.turbulence * 0.24 + density_lag
+        front_width = 0.045 + settings.soft_edge * 3.1 + settings.turbulence * 0.045
+        return across, self._progress - field, front_width
+
+    def deposit_mask(self) -> np.ndarray:
+        """Opacity of colors already deposited strictly behind the crest.
+
+        The deliberate clear gap prevents the texture from anticipating the
+        wave. Endpoints are exact so exports start blank and finish faithful.
+        """
+        if self._progress <= 0.005:
+            return np.zeros((self.rows, self.columns), dtype=np.uint8)
+        if self._progress >= 0.995:
+            return np.full((self.rows, self.columns), 255, dtype=np.uint8)
+        _, distance_to_front, front_width = self._wave_field()
+        clear_gap = min(0.075, front_width * 0.85)
+        feather = 0.028 + self._settings.soft_edge * 0.8
+        opacity = _smoothstep_array(
+            clear_gap, clear_gap + feather, distance_to_front
+        )
+        return np.rint(opacity * 255.0).astype(np.uint8)
+
+    def composite_deposit(self, base: QImage, current: QImage) -> QImage:
+        """Composite the rendered effect only where the wave has passed."""
+        if base.isNull() or current.isNull() or self._progress >= 0.995:
+            return QImage(current)
+        target = current.convertToFormat(QImage.Format.Format_ARGB32)
+        backdrop = base.scaled(
+            target.size(),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ).convertToFormat(QImage.Format.Format_ARGB32)
+        mask = np.ascontiguousarray(self.deposit_mask())
+        mask_image = QImage(
+            mask.data,
+            self.columns,
+            self.rows,
+            self.columns,
+            QImage.Format.Format_Grayscale8,
+        ).copy().scaled(
+            target.size(),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        target.setAlphaChannel(mask_image)
+        painter = QPainter(backdrop)
+        painter.drawImage(0, 0, target)
+        painter.end()
+        return backdrop
+
     def _flow_direction(self) -> tuple[np.ndarray, np.ndarray]:
         shape = self._u.shape
         if self._direction == "right":
@@ -224,19 +298,7 @@ class OrganicWaveGeometry(QQuick3DGeometry):
 
     def _rebuild(self) -> None:
         settings = self._settings
-        axis, across = self._direction_coordinates()
-        noise = (
-            np.sin(self._u * 31.7 + self._v * 19.3 + self._progress * 5.1) * 0.52
-            + np.sin(self._u * 73.1 - self._v * 41.9 - self._progress * 3.7) * 0.29
-            + np.cos(self._u * 17.3 + self._v * 67.7 + self._progress * 2.2) * 0.19
-        )
-        oscillation = np.sin(
-            across * settings.frequency * 2.0 * np.pi + axis * np.pi
-        ) * settings.amplitude
-        density_lag = (self._density - 0.5) * settings.density_contrast * 0.16
-        field = axis + oscillation + noise * settings.turbulence * 0.24 + density_lag
-        distance_to_front = self._progress - field
-        front_width = 0.045 + settings.soft_edge * 3.1 + settings.turbulence * 0.045
+        across, distance_to_front, front_width = self._wave_field()
         crest = np.exp(-np.square(distance_to_front / front_width))
         shoulder = np.exp(-np.square((distance_to_front - 0.10) / (front_width * 1.85)))
         filament = np.exp(-np.square((distance_to_front + 0.075) / (front_width * 0.72)))

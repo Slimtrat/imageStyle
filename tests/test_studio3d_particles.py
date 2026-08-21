@@ -65,6 +65,13 @@ def test_laser_studio_path_matches_the_detected_contour_stage(tmp_path: Path) ->
     assert any(point.laser_on for point in scene.laser_path)
     assert all(0.0 <= point.target_u <= 1.0 for point in scene.laser_path)
     assert all(0.0 <= point.target_v <= 1.0 for point in scene.laser_path)
+    outline = next(layer for layer in renderer.stages if layer.is_outline)
+    for point in scene.laser_path:
+        if not point.laser_on:
+            continue
+        x = min(renderer.width - 1, int(point.target_u * renderer.width))
+        y = min(renderer.height - 1, int(point.target_v * renderer.height))
+        assert outline.mask[y, x]
 
 
 def test_non_particle_effect_clears_the_studio_particle_bank(tmp_path: Path) -> None:

@@ -123,7 +123,7 @@
     },
     "wave": {
       "selector_label": "Vague — front fluide",
-      "description": "Une masse pigmentaire organique traverse l’œuvre : le plan se soulève, se tord et chaque couleur avance selon sa densité.",
+      "description": "Une masse pigmentaire organique traverse l’œuvre : le plan se soulève, se tord et dépose chaque couleur derrière son passage, selon sa densité.",
       "parameters": [
         {
           "key": "direction",
@@ -343,7 +343,7 @@
     },
     "screenprint": {
       "selector_label": "Sérigraphie — passages couleur",
-      "description": "Chaque couche colorée est déposée séparément de gauche à droite, comme un passage de racle sérigraphique.",
+      "description": "Chaque couche colorée est déposée séparément derrière une fine ligne blanche qui traverse l’œuvre, sans mécanisme suspendu.",
       "parameters": [
         {
           "key": "screenprint_width",
@@ -385,7 +385,7 @@
     },
     "contour_laser": {
       "selector_label": "Découpeuse laser — tracé des formes",
-      "description": "Les formes sont détectées, réduites en chemins continus puis écrites contour par contour par une vraie tête de découpe XY.",
+      "description": "Les formes sont détectées, réduites en chemins continus puis tracées contour par contour par un rayon vertical venu du ciel, exactement aligné sur l’œuvre.",
       "parameters": [
         {
           "key": "laser_width",
@@ -427,7 +427,7 @@
     },
     "screenprint_laser": {
       "selector_label": "WOW — sérigraphie + contours laser",
-      "description": "Les couleurs sont sérigraphiées une par une, puis une tête de découpe XY suit réellement les formes pour écrire les contours noirs.",
+      "description": "Une ligne blanche dépose les couleurs une par une, puis un rayon venu du ciel suit réellement les formes pour écrire les contours noirs.",
       "parameters": [
         {
           "key": "screenprint_width",
@@ -463,7 +463,7 @@
           "step": 0.002,
           "decimals": 3,
           "suffix": "",
-          "description": "Durée du sillage chaud autour de la tête pendant le parcours réel des formes. Faible reste précis ; élevé prolonge l’incandescence."
+          "description": "Durée du sillage chaud derrière le rayon pendant le parcours réel des formes. Faible reste précis ; élevé prolonge l’incandescence."
         },
         {
           "key": "laser_intensity",
@@ -475,7 +475,7 @@
           "step": 0.05,
           "decimals": 2,
           "suffix": "",
-          "description": "Puissance de la tête XY qui écrit les contours noirs. Autour de 1,35 donne un cœur chaud crédible ; plus haut accentue les étincelles."
+          "description": "Puissance du rayon vertical qui écrit les contours noirs. Autour de 1,35 donne un cœur chaud crédible ; plus haut accentue les étincelles."
         },
         {
           "key": "soft_edge",

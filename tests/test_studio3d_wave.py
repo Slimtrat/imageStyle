@@ -57,6 +57,32 @@ def test_native_wave_geometry_rises_then_returns_to_an_exact_plane() -> None:
     assert geometry.maximum_height == pytest.approx(0.0)
 
 
+def test_wave_deposits_color_only_after_its_physical_crest() -> None:
+    geometry = OrganicWaveGeometry()
+    source = QImage(192, 96, QImage.Format.Format_ARGB32)
+    source.fill(QColor("#e64232"))
+    base = QImage(192, 96, QImage.Format.Format_ARGB32)
+    base.fill(QColor("#101318"))
+    geometry.set_source(source)
+    geometry.configure(
+        OrganicWaveSettings(amplitude=0.0, turbulence=0.0, soft_edge=0.012),
+        "left",
+    )
+    geometry.set_progress(0.5)
+
+    mask = geometry.deposit_mask()
+    assert mask[:, :24].mean() > 245
+    assert mask[:, 46:50].max() == 0
+    assert mask[:, 66:].max() == 0
+
+    deposited = geometry.composite_deposit(base, source)
+    assert deposited.pixelColor(8, 48).red() > 200
+    assert deposited.pixelColor(104, 48) == QColor("#101318")
+    geometry.set_progress(1.0)
+    final = geometry.composite_deposit(base, source)
+    assert final.pixelColor(104, 48) == QColor("#e64232")
+
+
 @pytest.mark.parametrize("contrast", [-0.01, 1.01])
 def test_wave_density_contrast_rejects_values_outside_the_ui_contract(
     contrast: float,

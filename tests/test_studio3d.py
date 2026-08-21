@@ -46,16 +46,21 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "flyoverWeight" in scene
     assert "fitDistance" in scene
     assert "effectToolIsOutline" in scene
-    assert "id: effectToolDeck" in scene
     assert "eulerRotation.y: -3" in scene
     assert "smootherstep(effectToolLinearProgress)" in scene
-    assert "LASER DES CONTOURS NOIRS" in scene
-    assert "root.artworkDepth / 2 + 7" in scene
-    assert "id: effectLaserEmitter" in scene
-    assert "id: effectLaserCollar" in scene
-    assert "id: laserGantry" in scene
-    assert "laserTargetU" in scene
-    assert "DÉCOUPEUSE LASER · ÉCRITURE DES FORMES" in scene
+    assert "id: screenprintBoundary" in scene
+    assert "id: screenprintWhiteLine" in scene
+    assert "id: skyLaserDeck" in scene
+    assert "id: skyLaserCore" in scene
+    assert "id: skyLaserAura" in scene
+    assert "id: skyLaserImpact" in scene
+    assert "id: effectLaserEmitter" not in scene
+    assert "id: effectLaserCollar" not in scene
+    assert "id: laserGantry" not in scene
+    assert "root.artworkWidth * root.laserTargetU" in scene
+    assert "(root.laserTargetV - 0.5) * root.artworkDepth" in scene
+    assert "RAYON DU CIEL · TRACÉ DES CONTOURS" in scene
+    assert "LIGNE DE SÉRIGRAPHIE · COUCHE" in scene
     assert "id: paintDropDeck" in scene
     assert "id: paintBrushDeck" not in scene
     assert "GOUTTE EN CHUTE" in scene
