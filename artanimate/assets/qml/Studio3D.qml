@@ -388,6 +388,7 @@ Item {
                 }
                 Model {
                     id: horizontalArtwork
+                    visible: root.effectKind !== "wave"
                     y: root.artworkSurfaceY
                     eulerRotation.x: -90
                     source: "#Rectangle"
@@ -399,6 +400,43 @@ Item {
                     materials: PrincipledMaterial {
                         baseColor: "#ffffff"
                         roughness: 0.47
+                        baseColorMap: Texture {
+                            sourceItem: Image {
+                                source: root.artworkSource
+                                cache: false
+                                asynchronous: false
+                            }
+                            generateMipmaps: false
+                            minFilter: Texture.Linear
+                            magFilter: Texture.Linear
+                            mipFilter: Texture.None
+                        }
+                    }
+                }
+
+                // The Wave is the artwork: Python updates a dense native mesh from
+                // the source-color density while PrincipledMaterial keeps texture fidelity.
+                Model {
+                    id: organicWaveArtwork
+                    visible: root.effectKind === "wave"
+                    y: root.artworkSurfaceY + 0.15
+                    eulerRotation.x: -90
+                    castsShadows: true
+                    receivesShadows: true
+                    geometry: organicWaveGeometry
+                    materials: PrincipledMaterial {
+                        baseColor: "#ffffff"
+                        roughness: 0.47 - 0.25 * root.smootherstep(
+                            root.effectProgress / 0.08
+                        ) * (1 - root.smootherstep(
+                            (root.effectProgress - 0.86) / 0.13
+                        ))
+                        clearcoatAmount: 0.72 * root.smootherstep(
+                            root.effectProgress / 0.08
+                        ) * (1 - root.smootherstep(
+                            (root.effectProgress - 0.86) / 0.13
+                        ))
+                        clearcoatRoughnessAmount: 0.08
                         baseColorMap: Texture {
                             sourceItem: Image {
                                 source: root.artworkSource
@@ -836,68 +874,7 @@ Item {
             }
 
 
-            // Wave fronts skim a few millimetres above the horizontal artwork.
-            Model {
-                readonly property bool horizontalFront: root.effectDirection === "left"
-                    || root.effectDirection === "right"
-                visible: root.effectKind === "wave"
-                    && root.effectProgress > 0.01
-                    && root.effectProgress < 0.99
-                x: horizontalFront
-                    ? (root.effectDirection === "right" ? 1 : -1)
-                        * root.artworkWidth * (0.5 - root.effectProgress) : 0
-                y: root.artworkSurfaceY + 4
-                z: horizontalFront
-                    ? root.artworkCenterZ
-                    : root.artworkCenterZ - root.artworkDepth / 2
-                        + root.artworkDepth * (root.effectDirection === "top"
-                            ? 1 - root.effectProgress : root.effectProgress)
-                eulerRotation.y: root.effectDirection === "diagonal" ? -24 : 0
-                source: root.effectDirection === "radial" ? "#Cylinder" : "#Cube"
-                scale: root.effectDirection === "radial"
-                    ? Qt.vector3d(
-                        0.18 + root.effectProgress * 1.35,
-                        0.012,
-                        0.18 + root.effectProgress * 1.35
-                    )
-                    : horizontalFront
-                        ? Qt.vector3d(0.024, 0.024, root.artworkDepth / 100)
-                        : Qt.vector3d(root.artworkWidth / 100, 0.024, 0.024)
-                materials: PrincipledMaterial {
-                    baseColor: "#79c4ec"
-                    emissiveFactor: Qt.vector3d(0.11, 0.31, 0.5)
-                    opacity: root.effectDirection === "radial" ? 0.2 : 0.58
-                    roughness: 0.2
-                }
-            }
-            Model {
-                readonly property bool horizontalFront: root.effectDirection === "left"
-                    || root.effectDirection === "right"
-                visible: root.effectKind === "wave"
-                    && root.effectDirection !== "radial"
-                    && root.effectProgress > 0.01
-                    && root.effectProgress < 0.99
-                x: horizontalFront
-                    ? (root.effectDirection === "right" ? 1 : -1)
-                        * root.artworkWidth * (0.5 - root.effectProgress) : 0
-                y: root.artworkSurfaceY + 7
-                z: horizontalFront
-                    ? root.artworkCenterZ + Math.sin(root.effectProgress * 14) * 5
-                    : root.artworkCenterZ - root.artworkDepth / 2
-                        + root.artworkDepth * (root.effectDirection === "top"
-                            ? 1 - root.effectProgress : root.effectProgress)
-                eulerRotation.y: root.effectDirection === "diagonal" ? -24 : 0
-                source: "#Cube"
-                scale: horizontalFront
-                    ? Qt.vector3d(0.011, 0.018, root.artworkDepth / 105)
-                    : Qt.vector3d(root.artworkWidth / 105, 0.018, 0.011)
-                materials: PrincipledMaterial {
-                    baseColor: "#c5e9f8"
-                    emissiveFactor: Qt.vector3d(0.18, 0.34, 0.5)
-                    opacity: 0.34
-                    roughness: 0.18
-                }
-            }
+            // Wave geometry and wet pigment shading live on organicWaveArtwork.
 
             PointLight {
                 visible: root.effectKind === "rgb_fade"
@@ -1012,7 +989,8 @@ Item {
                 || root.effectKind === "contour_laser"
                 || root.effectKind === "screenprint_laser"
                 || root.effectKind === "paint_drop"
-                || root.effectKind === "pigment_sweep")
+                || root.effectKind === "pigment_sweep"
+                || root.effectKind === "wave")
             && root.effectProgress > 0.005
             && root.effectProgress < 0.995
         anchors.top: parent.top
@@ -1024,7 +1002,9 @@ Item {
             ? root.paintActiveColor
             : (root.effectKind === "pigment_sweep"
                 ? "#65d7c4"
-                : (root.effectToolIsOutline ? "#ff6a32" : "#c99a67"))
+                : (root.effectKind === "wave"
+                    ? "#59b7ef"
+                    : (root.effectToolIsOutline ? "#ff6a32" : "#c99a67")))
         border.width: 1
         width: effectActText.implicitWidth + 26
         height: 34
@@ -1033,7 +1013,9 @@ Item {
             id: effectActText
             anchors.centerIn: parent
             color: root.effectToolIsOutline ? "#ffd1b6" : "#ffe0b9"
-            text: root.effectKind === "pigment_sweep"
+            text: root.effectKind === "wave"
+                ? "VAGUE 3D · MASSE PIGMENTAIRE · DENSITÉS VARIABLES"
+                : root.effectKind === "pigment_sweep"
                 ? "PIGMENT SWEEP · CIBLAGE "
                     + (root.effectDirection === "right" ? "DROITE → GAUCHE"
                         : root.effectDirection === "top" ? "HAUT → BAS"

@@ -83,6 +83,12 @@ def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--wave-frequency", type=float, default=None, help="fréquence du front de vague")
     parser.add_argument("--turbulence", type=float, default=None, help="irrégularité du front")
     parser.add_argument("--soft-edge", type=float, default=None, help="largeur du bord progressif")
+    parser.add_argument(
+        "--wave-density-contrast",
+        type=float,
+        default=None,
+        help="écart de vitesse entre pigments légers et denses dans le Studio 3D",
+    )
     parser.add_argument("--grain-density", type=float, default=None, help="densité des grains volants")
     parser.add_argument("--grain-size", type=float, default=None, help="taille des grains")
     parser.add_argument(
@@ -110,7 +116,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="artanimate",
         description="Transforme une œuvre statique en animation chromatique sable ou vague.",
     )
-    parser.add_argument("--version", action="version", version="ArtAnimate 2.10.0")
+    parser.add_argument("--version", action="version", version="ArtAnimate 2.11.0")
     parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO")
     parser.add_argument("--log-file", type=Path, help="copie persistante des logs")
     subparsers = parser.add_subparsers(dest="command", required=True)

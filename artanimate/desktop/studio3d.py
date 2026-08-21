@@ -29,6 +29,11 @@ from ..core.effects import EffectDescriptor, effect_descriptors
 from .controls import ParameterSlider
 from .studio3d_camera import CAMERA_MOTIONS, camera_motion
 from .studio3d_particles import StudioParticleModel, StudioSceneData
+from .studio3d_wave import (
+    OrganicWaveGeometry,
+    OrganicWaveSettings,
+    artwork_dimensions,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -124,6 +129,8 @@ class Studio3DPanel(QWidget):
         self._effect_direction = "left"
         self._effect_progress = 0.0
         self._camera_motion = camera_motion("flyover")
+        self._wave_settings = OrganicWaveSettings()
+        self._wave_geometry = OrganicWaveGeometry()
         self._output_auto = True
         self._particle_model = StudioParticleModel()
 
@@ -148,6 +155,9 @@ class Studio3DPanel(QWidget):
         self.view.engine().addImageProvider("artanimate", self._provider)
         self.view.rootContext().setContextProperty(
             "pigmentParticleModel", self._particle_model
+        )
+        self.view.rootContext().setContextProperty(
+            "organicWaveGeometry", self._wave_geometry
         )
         self.view.statusChanged.connect(self._scene_status_changed)
         content.addWidget(self.view, 1)
@@ -579,6 +589,7 @@ class Studio3DPanel(QWidget):
             logger.warning("Texture 3D illisible : %s", path)
             return False
         self._particle_model.replace(())
+        self._wave_geometry.set_source(image)
         self.set_frame(image)
         self.suggest_output(path)
         self.artwork_status.setText(
@@ -591,8 +602,11 @@ class Studio3DPanel(QWidget):
         effect: str,
         rgb_mode: str = "channels",
         direction: str = "left",
+        wave_settings: OrganicWaveSettings | None = None,
     ) -> None:
         self._current_effect = effect
+        if wave_settings is not None:
+            self._wave_settings = wave_settings
         effect_index = self.effect_combo.findData(effect)
         if effect_index >= 0 and effect_index != self.effect_combo.currentIndex():
             blocker = QSignalBlocker(self.effect_combo)
@@ -604,6 +618,16 @@ class Studio3DPanel(QWidget):
         self._set_scene_property("effectKind", effect)
         self._set_scene_property("rgbMode", rgb_mode)
         self._set_scene_property("effectDirection", direction)
+        self._wave_geometry.configure(self._wave_settings, direction)
+        if effect == "wave":
+            logger.info(
+                "Matière Vague 3D : amplitude=%.3f, fréquence=%.2f, "
+                "turbulence=%.2f, densités=%.2f",
+                self._wave_settings.amplitude,
+                self._wave_settings.frequency,
+                self._wave_settings.turbulence,
+                self._wave_settings.density_contrast,
+            )
 
     def set_loading(self) -> None:
         self.artwork_status.setText("Calcul du mouvement basse définition…")
@@ -620,10 +644,14 @@ class Studio3DPanel(QWidget):
         self._provider.update(image)
         self._texture_revision += 1
         self._current_aspect = image.width() / max(1, image.height())
+        self._wave_geometry.set_dimensions(
+            *artwork_dimensions(self._current_aspect)
+        )
         if progress is not None:
             self._effect_progress = max(0.0, min(1.0, float(progress)))
         elif frame_index is not None and frame_count and frame_count > 1:
             self._effect_progress = frame_index / (frame_count - 1)
+        self._wave_geometry.set_progress(self._effect_progress)
         self._publish_texture()
         self._set_scene_property("effectProgress", self._effect_progress)
         if frame_index is not None and frame_count:

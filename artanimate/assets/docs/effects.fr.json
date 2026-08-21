@@ -123,7 +123,7 @@
     },
     "wave": {
       "selector_label": "Vague — front fluide",
-      "description": "Un front directionnel traverse l’œuvre et révèle les aplats comme une matière fluide.",
+      "description": "Une masse pigmentaire organique traverse l’œuvre : le plan se soulève, se tord et chaque couleur avance selon sa densité.",
       "parameters": [
         {
           "key": "direction",
@@ -167,7 +167,7 @@
           "step": 0.005,
           "decimals": 3,
           "suffix": "",
-          "description": "Écart latéral du front. Une grande amplitude produit une vague plus marquée."
+          "description": "Écart latéral du front. En 3D, une grande amplitude soulève aussi davantage la masse pigmentaire."
         },
         {
           "key": "wave_frequency",
@@ -203,7 +203,19 @@
           "step": 0.001,
           "decimals": 3,
           "suffix": "",
-          "description": "Largeur de la transition entre zone masquée et zone révélée."
+          "description": "Largeur de la transition. En 3D, elle étire la crête et sa traînée visqueuse."
+        },
+        {
+          "key": "wave_density_contrast",
+          "label": "Densités des couleurs",
+          "control": "slider",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.65,
+          "step": 0.05,
+          "decimals": 2,
+          "suffix": "",
+          "description": "Décale la vitesse, la hauteur et la traînée selon la couleur : les pigments sombres et froids paraissent plus lourds."
         }
       ]
     },

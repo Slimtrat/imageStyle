@@ -14,6 +14,7 @@ from PySide6.QtQuickWidgets import QQuickWidget
 from PySide6.QtWidgets import QApplication
 
 from artanimate.desktop.studio3d import QML_SCENE_PATH, Studio3DPanel
+from artanimate.desktop.studio3d_wave import OrganicWaveSettings
 
 
 @pytest.fixture(scope="module")
@@ -30,6 +31,11 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "SpotLight" in scene
     assert "sideboardBody" in scene
     assert "horizontalArtwork" in scene
+    assert "organicWaveArtwork" in scene
+    assert "geometry: organicWaveGeometry" in scene
+    assert "CustomMaterial" not in scene
+    assert "Wave fronts skim" not in scene
+    assert "VAGUE 3D · MASSE PIGMENTAIRE · DENSITÉS VARIABLES" in scene
     assert "artworkContactShadow" in scene
     assert "overheadLamp" in scene
     assert "lampMotion" in scene
@@ -92,6 +98,8 @@ def test_studio_panel_loads_scene_and_accepts_animated_frames(
             "image://artanimate/"
         )
         assert root.property("artworkAspect") == pytest.approx(1.5)
+        density_min, density_max = panel._wave_geometry.density_range
+        assert 0.0 <= density_min <= density_max <= 1.0
         assert root.property("lampMotion") == pytest.approx(0.65)
         assert panel.camera_state()["lamp_motion"] == pytest.approx(0.65)
         assert panel.camera_state()["orbit_turns"] == pytest.approx(0.0)
@@ -112,9 +120,23 @@ def test_studio_panel_loads_scene_and_accepts_animated_frames(
         assert root.property("cameraMotion") == "top_drift"
         assert root.property("cameraPitch") == pytest.approx(-78.0)
         assert root.property("cameraMotionStrength") == pytest.approx(0.62)
-        panel.set_effect("wave", direction="right")
+        panel.set_effect(
+            "wave",
+            direction="right",
+            wave_settings=OrganicWaveSettings(
+                amplitude=0.09,
+                frequency=3.8,
+                turbulence=0.17,
+                soft_edge=0.028,
+                density_contrast=0.84,
+            ),
+        )
         assert root.property("effectKind") == "wave"
         assert root.property("effectDirection") == "right"
+        panel.set_frame(frame, progress=0.5)
+        assert panel._wave_geometry.maximum_height > 12.0
+        panel.set_frame(frame, progress=1.0)
+        assert panel._wave_geometry.maximum_height == pytest.approx(0.0)
         assert "image 3/20" in panel.artwork_status.text()
     finally:
         panel.close()

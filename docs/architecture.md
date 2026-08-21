@@ -62,6 +62,8 @@ deux variantes plus sobres. Toutes reviennent à une pose finale stable avant le
 hold. La distance de fin tient compte du ratio d’export : en 9:16, elle augmente
 automatiquement pour garder l’œuvre horizontale complète dans le cadre capturé.
 
+Pour la Vague, `studio3d_wave.py` traduit le contrat validé de l’effet en une `QQuick3DGeometry` native de 96 × 64 sommets. À la sélection de l’œuvre, le module échantillonne une texture source immuable : luminance, saturation et dominante froide produisent une densité locale lissée. À chaque image, cette densité décale le front, amplifie la hauteur, tord les sommets et allonge la traînée ; les normales sont recalculées pour conserver un éclairage physique. Le `PrincipledMaterial` éprouvé continue d’afficher la texture animée exacte du renderer. La déformation est amortie à partir de 88 % et nulle à 99,5 % afin que la pose finale retrouve une œuvre plane et fidèle.
+
 Pour Pigment Sweep, son module dédié prépare une banque déterministe de pigments ciblés
 derrière le contrat `targeted_particles`. Le contrat vérifie les dimensions, les temps,
 les cibles dans le masque et l’identité entre chaque couleur transportée et son pixel source.

@@ -41,6 +41,7 @@ from .log_window import LogWindow, QtLogHandler
 from .preview import PREVIEW_INTERVAL_MS, PreviewWorker
 from .settings_windows import SettingsCard, SettingsDialog
 from .studio3d import Studio3DPanel
+from .studio3d_wave import OrganicWaveSettings
 from .studio3d_export import Studio3DFrameWorker, capture_requires_retry, qimage_to_rgb
 from .problems import (
     UserInputError,
@@ -807,6 +808,9 @@ class MainWindow(QMainWindow):
                     )
                 elif isinstance(control, ParameterSlider):
                     control.valueChanged.connect(lambda *_: self._schedule_preview())
+                    control.valueChanged.connect(
+                        lambda *_: self._sync_studio_effect()
+                    )
         self.chromatic_wheel.hueChanged.connect(lambda *_: self._schedule_preview())
 
         summary_combos = (
@@ -1025,7 +1029,14 @@ class MainWindow(QMainWindow):
             direction = str(halo_control.currentData())
         elif isinstance(direction_control, QComboBox):
             direction = str(direction_control.currentData())
-        self.studio_3d.set_effect(effect, rgb_mode, direction)
+        try:
+            wave_settings = OrganicWaveSettings.from_config(self.build_config())
+        except ValueError as exc:
+            logger.warning("Réglages Vague 3D invalides : %s", exc)
+            wave_settings = OrganicWaveSettings()
+        self.studio_3d.set_effect(
+            effect, rgb_mode, direction, wave_settings=wave_settings
+        )
 
     def _order_changed(self) -> None:
         order = str(self.order_combo.currentData())
@@ -1509,7 +1520,12 @@ class MainWindow(QMainWindow):
             if config.effect == "vertical_halo"
             else config.direction
         )
-        self.studio_3d.set_effect(config.effect, config.rgb_mode, studio_direction)
+        self.studio_3d.set_effect(
+            config.effect,
+            config.rgb_mode,
+            studio_direction,
+            wave_settings=OrganicWaveSettings.from_config(config),
+        )
         self.studio_3d.begin_export(total)
         self._set_studio_running(True)
         self.status_label.setText("Rendu du Studio 3D en cours…")

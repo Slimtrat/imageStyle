@@ -52,6 +52,7 @@ class WaveEffect(AnimationEffect):
         "wave_frequency",
         "turbulence",
         "soft_edge",
+        "wave_density_contrast",
     )
     capabilities = frozenset({EffectCapability.CHROMATIC_SEQUENCE})
 

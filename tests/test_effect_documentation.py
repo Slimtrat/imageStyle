@@ -16,3 +16,7 @@ def test_effect_documentation_json_is_packaged_and_valid() -> None:
     assert set(documentation) == set(EFFECTS)
     assert documentation_for("sand").parameters[0].description
     assert documentation_for("wave").parameters[0].choices
+    density = documentation_for("wave").parameters[-1]
+    assert density.key == "wave_density_contrast"
+    assert density.minimum == 0.0
+    assert density.maximum == 1.0

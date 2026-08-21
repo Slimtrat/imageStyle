@@ -48,6 +48,7 @@ class RenderConfig:
     wave_frequency: float = 2.7
     turbulence: float = 0.10
     soft_edge: float = 0.012
+    wave_density_contrast: float = 0.65
     grain_density: float = 0.004
     grain_size: float = 1.35
     sweep_density: float = 0.018
@@ -119,6 +120,16 @@ class RenderConfig:
             raise ValueError("background_tolerance ne peut pas être négatif")
         if not 0 <= self.outline_luma <= 100:
             raise ValueError("outline_luma doit être compris entre 0 et 100")
+        if not 0.0 <= self.wave_amplitude <= 0.2:
+            raise ValueError("wave_amplitude doit être compris entre 0 et 0.2")
+        if not 0.5 <= self.wave_frequency <= 10.0:
+            raise ValueError("wave_frequency doit être compris entre 0.5 et 10")
+        if not 0.0 <= self.turbulence <= 0.35:
+            raise ValueError("turbulence doit être compris entre 0 et 0.35")
+        if not 0.001 <= self.soft_edge <= 0.1:
+            raise ValueError("soft_edge doit être compris entre 0.001 et 0.1")
+        if not 0.0 <= self.wave_density_contrast <= 1.0:
+            raise ValueError("wave_density_contrast doit être compris entre 0 et 1")
         if self.grain_density < 0 or self.grain_size < 0:
             raise ValueError("les paramètres de grain ne peuvent pas être négatifs")
         if not 0.002 <= self.sweep_density <= 0.04:
