@@ -25,9 +25,11 @@ from ..studio.camera import (
     upsert_camera_keyframe,
 )
 from ..studio.clock import StudioClock
+from ..studio.camera_presets import CameraPreset, PresetApplyMode, apply_camera_preset
 from ..studio.model import CameraAnimation, CameraPose, ClipKind, Easing, StudioProject, TrackKind
 from ..studio.timeline import add_track, set_track_state
 from .studio_camera import StudioCameraInspector
+from .studio_camera_presets import StudioCameraPresetPanel
 from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
 from .studio_timeline import StudioTimeline
@@ -357,6 +359,10 @@ class StudioPanel(QWidget):
         self.camera_inspector.copyKeyframeRequested.connect(self._copy_current_camera_keyframe)
         self.camera_inspector.easingChanged.connect(self._camera_easing_changed)
         inspector_layout.addWidget(self.camera_inspector)
+        self.camera_presets = StudioCameraPresetPanel()
+        self.camera_presets.presetRequested.connect(self._apply_camera_preset)
+        inspector_layout.addWidget(self.camera_presets)
+
         inspector_layout.addStretch(1)
         body.addWidget(inspector)
         page.addLayout(body, 1)
@@ -448,11 +454,15 @@ class StudioPanel(QWidget):
                 clip_start=clip.start_frame,
                 clip_duration=clip.duration_frames,
             )
+            self.camera_presets.set_remaining_frames(
+                clip.duration_frames - local_frame, fps=fps
+            )
         else:
             self.camera_inspector.set_keyframe_state(False)
             self.keyframe_strip.set_animation(
                 CameraAnimation(), clip_start=0, clip_duration=1
             )
+            self.camera_presets.set_remaining_frames(1, fps=fps)
         self.keyframe_strip.set_playhead(frame)
         self.timeline.set_playhead(frame)
         self.frame_requested.emit(frame)
@@ -614,6 +624,55 @@ class StudioPanel(QWidget):
         self.timeline.set_project(self._project)
         self.project_changed.emit(self._project)
         self.transport.seek(frame, force_signal=True)
+    def _apply_camera_preset(
+        self,
+        preset: CameraPreset,
+        intensity: float,
+        duration_frames: int,
+        mode: PresetApplyMode,
+    ) -> None:
+        project = self._project
+        frame = self.transport.current_frame
+        active = self._active_camera_clip(frame)
+        if project is None or active is None:
+            return
+        _track_index, _clip_index, clip = active
+        local_frame = frame - clip.start_frame
+        remaining = clip.duration_frames - local_frame
+        duration = min(int(duration_frames), remaining)
+        if duration < 2:
+            self.project_status.setText(
+                "Preset caméra impossible · moins de deux frames disponibles"
+            )
+            return
+        artwork_width = project.artwork.width or self.canvas._artwork.width()
+        artwork_height = project.artwork.height or self.canvas._artwork.height()
+        artwork_ratio = (
+            artwork_width / artwork_height
+            if artwork_width > 0 and artwork_height > 0
+            else 1.0
+        )
+        try:
+            animation = apply_camera_preset(
+                clip.camera,
+                CameraPreset(preset),
+                start_frame=local_frame,
+                duration_frames=duration,
+                clip_duration_frames=clip.duration_frames,
+                artwork_ratio=artwork_ratio,
+                project_ratio=project.settings.width / project.settings.height,
+                intensity=float(intensity),
+                seed=project.project_id,
+                mode=PresetApplyMode(mode),
+            )
+        except (TypeError, ValueError) as exc:
+            self.project_status.setText(f"Preset caméra inchangé · {exc}")
+            return
+        self._replace_camera_animation(animation)
+        self.project_status.setText(
+            f"Mouvement {CameraPreset(preset).value} · {len(animation.keyframes)} keyframes éditables"
+        )
+
 
     def _add_timeline_track(self, kind: TrackKind) -> None:
         if self._project is None:
