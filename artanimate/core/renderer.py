@@ -457,14 +457,22 @@ class ArtworkRenderer:
             for offset in offsets
         )
 
-    def frames(self, presentation: str = "2d") -> Iterator[np.ndarray]:
+    def indexed_frame_at(self, frame_index: int, presentation: str = "2d") -> np.ndarray:
+        """Return exactly the frame emitted at this index by :meth:`frames`."""
+
+        if isinstance(frame_index, bool) or not isinstance(frame_index, int):
+            raise TypeError("L’index de frame du renderer doit être un entier")
         count = self.frame_count
-        for index in range(count):
-            seconds = self.config.duration * index / (count - 1)
-            if self.config.quality == "studio" and 0 < index < count - 1:
-                yield self._studio_frame_at(seconds, presentation=presentation)
-            else:
-                yield self.frame_at(seconds, presentation=presentation)
+        if not 0 <= frame_index < count:
+            raise IndexError(f"Frame {frame_index} hors plage 0 à {count - 1}")
+        seconds = self.config.duration * frame_index / (count - 1)
+        if self.config.quality == "studio" and 0 < frame_index < count - 1:
+            return self._studio_frame_at(seconds, presentation=presentation)
+        return self.frame_at(seconds, presentation=presentation)
+
+    def frames(self, presentation: str = "2d") -> Iterator[np.ndarray]:
+        for index in range(self.frame_count):
+            yield self.indexed_frame_at(index, presentation=presentation)
 
 
 def render_video(
