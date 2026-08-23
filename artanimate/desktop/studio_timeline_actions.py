@@ -99,7 +99,10 @@ class StudioTimelineActions(QObject):
                     original[clip_id].start_frame + delta,
                     target_track_id=destination,
                 )
-            self.panel._commit_timeline_project(updated)
+            self.panel._commit_timeline_project(
+                updated,
+                f"Déplacer {len(selected)} clip(s)",
+            )
             self.panel.timeline.scene.set_selection(selected)
             self.panel.project_status.setText(
                 f"{len(selected)} clip(s) déplacé(s) · collisions = {OVERLAP_POLICY}"
@@ -115,7 +118,11 @@ class StudioTimelineActions(QObject):
             snapped_start = self._snap(int(start), exclude_clip_ids=(clip_id,))
             snapped_end = self._snap(int(end), exclude_clip_ids=(clip_id,))
             updated = trim_clip(project, clip_id, snapped_start, snapped_end)
-            self.panel._commit_timeline_project(updated)
+            self.panel._commit_timeline_project(
+                updated,
+                "Retailler un clip",
+                merge_key=f"trim:{clip_id}",
+            )
             self.panel.timeline.scene.set_selection((clip_id,))
         except (KeyError, ValueError, PermissionError) as exc:
             self._error(exc)
@@ -136,7 +143,7 @@ class StudioTimelineActions(QObject):
                     right_ids.append(right.clip_id)
             if not right_ids:
                 raise ValueError("Le playhead doit être à l’intérieur d’un clip sélectionné")
-            self.panel._commit_timeline_project(updated)
+            self.panel._commit_timeline_project(updated, "Scinder les clips")
             self.panel.timeline.scene.set_selection(tuple(right_ids))
         except (KeyError, ValueError, PermissionError) as exc:
             self._error(exc)
@@ -154,7 +161,7 @@ class StudioTimelineActions(QObject):
                 copies.append(duplicate.clip_id)
             if not copies:
                 return
-            self.panel._commit_timeline_project(updated)
+            self.panel._commit_timeline_project(updated, "Dupliquer les clips")
             self.panel.timeline.scene.set_selection(tuple(copies))
         except (KeyError, ValueError, PermissionError) as exc:
             self._error(exc)
@@ -166,7 +173,7 @@ class StudioTimelineActions(QObject):
             return
         try:
             updated = delete_clips(project, selected)
-            self.panel._commit_timeline_project(updated)
+            self.panel._commit_timeline_project(updated, "Supprimer les clips")
             self.panel.timeline.scene.set_selection(())
         except (KeyError, ValueError, PermissionError) as exc:
             self._error(exc)
@@ -184,7 +191,8 @@ class StudioTimelineActions(QObject):
             if target == source_index:
                 return
             self.panel._commit_timeline_project(
-                reorder_track(project, track_id, target)
+                reorder_track(project, track_id, target),
+                "Réordonner une piste",
             )
         except (KeyError, IndexError, ValueError) as exc:
             self._error(exc)

@@ -215,6 +215,11 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(quit_action)
 
+        edit_menu = menu_bar.addMenu("&Édition")
+        edit_menu.addActions(
+            (self.studio_v3.undo_action, self.studio_v3.redo_action)
+        )
+
         generation_menu = menu_bar.addMenu("&Génération")
         self.preview_action = QAction("Actualiser le prérendu", self)
         self.preview_action.setShortcut("F5")

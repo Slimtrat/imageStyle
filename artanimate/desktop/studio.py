@@ -4,7 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PySide6.QtGui import (
+    QAction, QColor, QFont, QImage, QKeySequence, QPainter, QPen,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -27,7 +29,15 @@ from ..studio.camera import (
 )
 from ..studio.clock import StudioClock
 from ..studio.camera_presets import CameraPreset, PresetApplyMode, apply_camera_preset
-from ..studio.model import CameraAnimation, CameraPose, ClipKind, Easing, StudioProject, TrackKind
+from ..studio.history import StudioHistory
+from ..studio.model import (
+    CameraAnimation,
+    CameraPose,
+    ClipKind,
+    Easing,
+    StudioProject,
+    TrackKind,
+)
 from ..studio.timeline import add_track, set_track_state
 from .studio_camera import StudioCameraInspector
 from .studio_camera_presets import StudioCameraPresetPanel
@@ -339,11 +349,27 @@ class StudioPanel(QWidget):
     choose_artwork_requested = Signal()
     project_changed = Signal(object)
     frame_requested = Signal(int)
+    history_changed = Signal(bool, str, bool, str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("studioV3Panel")
         self._project: StudioProject | None = None
+        self._replaying_history = False
+        self.history = StudioHistory(max_entries=200)
+        self.undo_action = QAction("Annuler", self)
+        self.undo_action.setShortcuts(QKeySequence.StandardKey.Undo)
+        self.undo_action.triggered.connect(self.undo)
+        self.redo_action = QAction("Rétablir", self)
+        self.redo_action.setShortcuts(QKeySequence.StandardKey.Redo)
+        self.redo_action.triggered.connect(self.redo)
+        self.addActions((self.undo_action, self.redo_action))
+        self.undo_button = QPushButton("Annuler")
+        self.undo_button.setObjectName("studioUndoButton")
+        self.undo_button.clicked.connect(self.undo)
+        self.redo_button = QPushButton("Rétablir")
+        self.redo_button.setObjectName("studioRedoButton")
+        self.redo_button.clicked.connect(self.redo)
         self.preview_controller = StudioPreviewController(self)
         self.preview_controller.frameReady.connect(self._preview_ready)
         self.preview_controller.renderingChanged.connect(self._preview_rendering_changed)
@@ -384,6 +410,8 @@ class StudioPanel(QWidget):
         self.proxy_resolution.setCurrentIndex(1)
         self.proxy_resolution.currentIndexChanged.connect(self._proxy_resolution_changed)
         header.addWidget(self.proxy_resolution)
+        header.addWidget(self.undo_button)
+        header.addWidget(self.redo_button)
         self.import_button = QPushButton("Importer une œuvre…")
         self.import_button.setObjectName("studioImportArtworkButton")
         self.import_button.clicked.connect(self.choose_artwork_requested)
@@ -466,6 +494,7 @@ class StudioPanel(QWidget):
         self.editor_tabs.addTab(self.timeline, "Timeline")
         self.editor_tabs.addTab(self.asset_panel, "Médias locaux")
         page.addWidget(self.editor_tabs, 1)
+        self._refresh_history_actions()
 
     @property
     def project(self) -> StudioProject | None:
@@ -475,12 +504,31 @@ class StudioPanel(QWidget):
         if not self.canvas.set_artwork(path):
             return False
         project = StudioProject.new(path)
-        self.set_project(project)
+        self.set_project(project, reset_history=True)
         return True
 
-    def set_project(self, project: StudioProject | None) -> None:
+    def set_project(
+        self,
+        project: StudioProject | None,
+        *,
+        reset_history: bool = False,
+        label: str = "Modifier le projet",
+        merge_key: str | None = None,
+    ) -> None:
         self.preview_controller.cancel_pending()
-        self._project = project.validate() if project is not None else None
+        validated = project.validate() if project is not None else None
+        if not self._replaying_history:
+            current = self.history.current
+            if (
+                reset_history
+                or validated is None
+                or current is None
+                or current.project_id != validated.project_id
+            ):
+                self.history.reset(validated)
+            else:
+                self.history.commit(validated, label, merge_key=merge_key)
+        self._project = validated
         self.track_summary.set_project(self._project)
         self.timeline.set_project(self._project)
         if self._project is None:
@@ -501,7 +549,95 @@ class StudioPanel(QWidget):
                 f"Reel vertical · {settings.width} × {settings.height} · "
                 f"{settings.fps} FPS · {duration:g} s"
             )
+        self._refresh_history_actions()
         self.project_changed.emit(self._project)
+
+    def commit_project(
+        self,
+        project: StudioProject,
+        label: str,
+        *,
+        merge_key: str | None = None,
+    ) -> bool:
+        validated = project.validate()
+        current = self._project
+        if current is None or current.project_id != validated.project_id:
+            self.set_project(validated, reset_history=True)
+            return False
+        if not self.history.commit(validated, label, merge_key=merge_key):
+            return False
+        frame = min(self.transport.current_frame, validated.settings.duration_frames - 1)
+        timing_changed = (
+            current.settings.fps != validated.settings.fps
+            or current.settings.duration_frames != validated.settings.duration_frames
+        )
+        self._project = validated
+        self.track_summary.set_project(validated)
+        self.timeline.set_project(validated)
+        if timing_changed:
+            self.transport.set_project(
+                validated.settings.fps,
+                validated.settings.duration_frames,
+            )
+        duration = validated.settings.duration_frames / validated.settings.fps
+        self.format_status.setText(
+            f"Reel vertical · {validated.settings.width} × {validated.settings.height} · "
+            f"{validated.settings.fps} FPS · {duration:g} s"
+        )
+        self._refresh_history_actions()
+        self.project_changed.emit(validated)
+        self.transport.seek(frame, force_signal=True)
+        return True
+
+    def _refresh_history_actions(self) -> None:
+        undo_label = self.history.undo_label or ""
+        redo_label = self.history.redo_label or ""
+        undo_text = f"Annuler · {undo_label}" if undo_label else "Annuler"
+        redo_text = f"Rétablir · {redo_label}" if redo_label else "Rétablir"
+        self.undo_action.setText(undo_text)
+        self.redo_action.setText(redo_text)
+        self.undo_action.setEnabled(self.history.can_undo)
+        self.redo_action.setEnabled(self.history.can_redo)
+        self.undo_button.setEnabled(self.history.can_undo)
+        self.redo_button.setEnabled(self.history.can_redo)
+        self.undo_button.setToolTip(undo_text)
+        self.redo_button.setToolTip(redo_text)
+        self.history_changed.emit(
+            self.history.can_undo,
+            undo_label,
+            self.history.can_redo,
+            redo_label,
+        )
+
+    def _restore_history_project(self, project: StudioProject, message: str) -> None:
+        frame = self.transport.current_frame
+        self._replaying_history = True
+        try:
+            self.set_project(project)
+        finally:
+            self._replaying_history = False
+        self.transport.seek(
+            min(frame, project.settings.duration_frames - 1),
+            force_signal=True,
+        )
+        self.project_status.setText(message)
+
+    def undo(self) -> bool:
+        label = self.history.undo_label
+        if label is None:
+            return False
+        project = self.history.undo()
+        self._restore_history_project(project, f"Annulé · {label}")
+        return True
+
+    def redo(self) -> bool:
+        label = self.history.redo_label
+        if label is None:
+            return False
+        project = self.history.redo()
+        self._restore_history_project(project, f"Rétabli · {label}")
+        return True
+
 
     def _frame_changed(self, frame: int) -> None:
         fps = self._project.settings.fps if self._project is not None else 30
@@ -603,11 +739,16 @@ class StudioPanel(QWidget):
                     return track_index, clip_index, clip
         return None
 
-    def _replace_camera_animation(self, animation) -> None:
+    def _replace_camera_animation(
+        self,
+        animation,
+        *,
+        label: str = "Ajuster la caméra",
+        merge_key: str | None = None,
+    ) -> None:
         if self._project is None:
             return
-        frame = self.transport.current_frame
-        active = self._active_camera_clip(frame)
+        active = self._active_camera_clip(self.transport.current_frame)
         if active is None:
             return
         track_index, clip_index, clip = active
@@ -616,21 +757,16 @@ class StudioPanel(QWidget):
         clips[clip_index] = updated_clip
         tracks = list(self._project.tracks)
         tracks[track_index] = replace(tracks[track_index], clips=tuple(clips))
-        self._project = replace(self._project, tracks=tuple(tracks)).validate()
-        self.track_summary.set_project(self._project)
-        self.timeline.set_project(self._project)
-        updated = self._active_camera_clip(frame)
-        if updated is not None:
-            _track_index, _clip_index, updated_clip = updated
-            self.keyframe_strip.set_animation(
-                updated_clip.camera,
-                clip_start=updated_clip.start_frame,
-                clip_duration=updated_clip.duration_frames,
-            )
-        self.project_changed.emit(self._project)
-        self._frame_changed(frame)
+        project = replace(self._project, tracks=tuple(tracks)).validate()
+        self.commit_project(project, label, merge_key=merge_key)
 
-    def _camera_pose_edited(self, pose: CameraPose) -> None:
+    def _camera_pose_edited(
+        self,
+        pose: CameraPose,
+        *,
+        label: str = "Ajuster la caméra",
+        merge_key: str | None = None,
+    ) -> None:
         frame = self.transport.current_frame
         active = self._active_camera_clip(frame)
         if active is None:
@@ -640,10 +776,17 @@ class StudioPanel(QWidget):
         animation = upsert_camera_keyframe(clip.camera, local_frame, pose)
         self.canvas.set_camera_pose(pose)
         self.camera_inspector.set_pose(pose)
-        self._replace_camera_animation(animation)
+        self._replace_camera_animation(
+            animation,
+            label=label,
+            merge_key=merge_key or f"camera-pose:{clip.clip_id}:{local_frame}",
+        )
 
     def _add_camera_keyframe(self) -> None:
-        self._camera_pose_edited(self.camera_inspector.pose())
+        self._camera_pose_edited(
+            self.camera_inspector.pose(),
+            label="Ajouter un keyframe caméra",
+        )
 
     def _remove_camera_keyframe(self) -> None:
         active = self._active_camera_clip(self.transport.current_frame)
@@ -664,7 +807,10 @@ class StudioPanel(QWidget):
             animation = remove_camera_keyframe(clip.camera, local_frame)
         except KeyError:
             return
-        self._replace_camera_animation(animation)
+        self._replace_camera_animation(
+            animation,
+            label="Supprimer un keyframe caméra",
+        )
         current_local = frame - clip.start_frame
         pose = resolve_camera_pose(animation, current_local)
         self.canvas.set_camera_pose(pose)
@@ -687,7 +833,10 @@ class StudioPanel(QWidget):
             self.project_status.setText(f"Keyframe inchangé · {exc}")
             self._frame_changed(self.transport.current_frame)
             return
-        self._replace_camera_animation(animation)
+        self._replace_camera_animation(
+            animation,
+            label="Déplacer un keyframe caméra",
+        )
         self.transport.seek(clip.start_frame + target)
 
     def _copy_camera_keyframe(self, source: int, target: int) -> None:
@@ -706,7 +855,10 @@ class StudioPanel(QWidget):
             self.project_status.setText(f"Keyframe inchangé · {exc}")
             self._frame_changed(self.transport.current_frame)
             return
-        self._replace_camera_animation(animation)
+        self._replace_camera_animation(
+            animation,
+            label="Copier un keyframe caméra",
+        )
         self.transport.seek(clip.start_frame + target)
 
     def _copy_current_camera_keyframe(self) -> None:
@@ -736,14 +888,21 @@ class StudioPanel(QWidget):
             animation = set_camera_keyframe_easing(clip.camera, local_frame, easing)
         except KeyError:
             return
-        self._replace_camera_animation(animation)
-    def _commit_timeline_project(self, project: StudioProject) -> None:
-        frame = self.transport.current_frame
-        self._project = project.validate()
-        self.track_summary.set_project(self._project)
-        self.timeline.set_project(self._project)
-        self.project_changed.emit(self._project)
-        self.transport.seek(frame, force_signal=True)
+        self._replace_camera_animation(
+            animation,
+            label="Changer l’interpolation caméra",
+            merge_key=f"camera-easing:{clip.clip_id}:{local_frame}",
+        )
+
+    def _commit_timeline_project(
+        self,
+        project: StudioProject,
+        label: str = "Modifier la timeline",
+        *,
+        merge_key: str | None = None,
+    ) -> None:
+        self.commit_project(project, label, merge_key=merge_key)
+
     def _apply_camera_preset(
         self,
         preset: CameraPreset,
@@ -788,7 +947,10 @@ class StudioPanel(QWidget):
         except (TypeError, ValueError) as exc:
             self.project_status.setText(f"Preset caméra inchangé · {exc}")
             return
-        self._replace_camera_animation(animation)
+        self._replace_camera_animation(
+            animation,
+            label=f"Appliquer le mouvement {CameraPreset(preset).value}",
+        )
         self.project_status.setText(
             f"Mouvement {CameraPreset(preset).value} · {len(animation.keyframes)} keyframes éditables"
         )
@@ -798,7 +960,7 @@ class StudioPanel(QWidget):
         if self._project is None:
             return
         project, track = add_track(self._project, TrackKind(kind))
-        self._commit_timeline_project(project)
+        self._commit_timeline_project(project, f"Ajouter la piste {track.name}")
         self.project_status.setText(
             f"Piste ajoutée · {track.name} · couche Z{len(project.tracks) - 1}"
         )
@@ -816,8 +978,10 @@ class StudioPanel(QWidget):
         except KeyError:
             return
         project = set_track_state(self._project, track_id, **kwargs)
-        self._commit_timeline_project(project)
-
+        action = {"muted": "audio", "locked": "verrou", "hidden": "visibilité"}[
+            field
+        ]
+        self._commit_timeline_project(project, f"Changer {action} de la piste")
 
     def shutdown(self) -> None:
         self.preview_controller.shutdown()

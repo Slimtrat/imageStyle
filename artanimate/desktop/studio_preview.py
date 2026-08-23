@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor, TimeoutError
 import logging
 from pathlib import Path
 from threading import Event
+from time import monotonic
 
 import numpy as np
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, Qt, Signal, Slot
 from PySide6.QtGui import QImage
 
 from ..studio.model import StudioProject
@@ -19,6 +21,10 @@ from ..studio.preview import (
 
 
 logger = logging.getLogger(__name__)
+_PREVIEW_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="ArtAnimateProxy",
+)
 
 
 def preview_qimage(frame: np.ndarray) -> QImage:
@@ -60,7 +66,6 @@ class StudioPreviewWorker(QObject):
     def cancel(self) -> None:
         self._cancelled.set()
 
-    @Slot()
     def run(self) -> None:
         try:
             frame, cached = render_studio_preview_frame(
@@ -103,8 +108,7 @@ class StudioPreviewController(QObject):
         self.sources = ArtworkSourceRegistry()
         self.proxy_width = DEFAULT_PROXY_WIDTH
         self._revision = 0
-        self._jobs: dict[int, tuple[QThread, StudioPreviewWorker]] = {}
-        self._retired_threads: list[QThread] = []
+        self._jobs: dict[int, tuple[Future[None], StudioPreviewWorker]] = {}
         self._shutting_down = False
 
     @property
@@ -127,9 +131,9 @@ class StudioPreviewController(QObject):
             return self._revision
         self._revision += 1
         revision = self._revision
-        for _old_revision, (_thread, worker) in tuple(self._jobs.items()):
+        for future, worker in tuple(self._jobs.values()):
             worker.cancel()
-        thread = QThread(self)
+            future.cancel()
         worker = StudioPreviewWorker(
             revision,
             project,
@@ -139,18 +143,28 @@ class StudioPreviewController(QObject):
             self.cache,
             self.sources,
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.ready.connect(self._frame_ready)
-        worker.failed.connect(self._failed)
-        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(
-            lambda selected=revision: self._thread_finished(selected)
+        worker.ready.connect(
+            self._frame_ready,
+            Qt.ConnectionType.QueuedConnection,
         )
-        self._jobs[revision] = (thread, worker)
+        worker.failed.connect(
+            self._failed,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.finished.connect(
+            self._job_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        gate = Event()
+
+        def run_after_registration() -> None:
+            gate.wait()
+            worker.run()
+
+        future = _PREVIEW_EXECUTOR.submit(run_after_registration)
+        self._jobs[revision] = (future, worker)
+        gate.set()
         self.renderingChanged.emit(True)
-        thread.start()
         return revision
 
     @Slot(int, int, object, bool)
@@ -169,35 +183,37 @@ class StudioPreviewController(QObject):
         if not self._shutting_down and revision == self._revision:
             self.failed.emit(str(exc))
 
-    def _thread_finished(self, revision: int) -> None:
-        job = self._jobs.pop(revision, None)
-        if job is not None:
-            thread, _worker = job
-            thread.wait()
-            self._retired_threads.append(thread)
+    @Slot(int)
+    def _job_finished(self, revision: int) -> None:
+        self._jobs.pop(revision, None)
         if revision == self._revision and not self._shutting_down:
             self.renderingChanged.emit(False)
 
     def cancel_pending(self) -> None:
         self._revision += 1
-        for _thread, worker in tuple(self._jobs.values()):
+        for future, worker in tuple(self._jobs.values()):
             worker.cancel()
+            future.cancel()
         self.renderingChanged.emit(False)
 
     def shutdown(self, wait_ms: int = 3000) -> None:
         if self._shutting_down:
             return
         self._shutting_down = True
-        for _thread, worker in tuple(self._jobs.values()):
+        jobs = tuple(self._jobs.values())
+        for future, worker in jobs:
             worker.cancel()
-        active_threads = [thread for thread, _worker in tuple(self._jobs.values())]
-        all_threads = [*active_threads, *self._retired_threads]
-        for thread in all_threads:
-            thread.quit()
-            thread.wait(max(0, int(wait_ms)))
+            future.cancel()
+        deadline = monotonic() + max(0, int(wait_ms)) / 1000
+        for future, _worker in jobs:
+            remaining = max(0.0, deadline - monotonic())
+            try:
+                future.result(timeout=remaining)
+            except (CancelledError, TimeoutError):
+                pass
+            except Exception:
+                logger.exception("Arrêt du worker proxy Studio en erreur")
         self._jobs.clear()
-        self._retired_threads.clear()
         self.cache.clear()
         self.sources.clear()
         self.renderingChanged.emit(False)
-

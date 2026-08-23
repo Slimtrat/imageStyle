@@ -186,7 +186,7 @@ class StudioDocumentController(QObject):
     def _install_loaded_project(self, project: StudioProject, path: Path) -> None:
         self._suspend_panel_changes = True
         try:
-            self.panel.set_project(project)
+            self.panel.set_project(project, reset_history=True)
             artwork_path = resolve_asset_path(project.artwork.path, path)
             if artwork_path.exists() and self.panel.canvas.set_artwork(artwork_path):
                 self.artwork_loaded.emit(artwork_path)
@@ -248,7 +248,7 @@ class StudioDocumentController(QObject):
             save_project(project, destination)
             self._suspend_panel_changes = True
             try:
-                self.panel.set_project(project)
+                self.panel.set_project(project, reset_history=True)
             finally:
                 self._suspend_panel_changes = False
             self.session = ProjectSession.loaded(project, destination)
@@ -355,7 +355,10 @@ class StudioDocumentController(QObject):
                 self._asset_context_path(),
             )
             if created:
-                self.panel.set_project(updated)
+                self.panel.commit_project(
+                    updated,
+                    f"Importer le média {source.name}",
+                )
                 message = f"Référence ajoutée · {source.name} · aucun fichier copié"
             else:
                 message = f"Référence déjà partagée · {source.name} · {asset.asset_id}"
@@ -400,7 +403,10 @@ class StudioDocumentController(QObject):
                 updated = relink_media_asset(
                     project, asset_id, source, self._asset_context_path()
                 )
-            self.panel.set_project(updated)
+            self.panel.commit_project(
+                updated,
+                "Relink l’œuvre maîtresse" if is_artwork else "Relink un média",
+            )
             if is_artwork:
                 self.panel.canvas.set_artwork(source)
                 self.artwork_loaded.emit(source)
@@ -430,7 +436,10 @@ class StudioDocumentController(QObject):
                 self.session.project, (folder,), self._asset_context_path()
             )
             if result.relinked:
-                self.panel.set_project(updated)
+                self.panel.commit_project(
+                    updated,
+                    "Relink les médias depuis un dossier",
+                )
                 if updated.artwork.asset_id in result.relinked:
                     artwork_path = resolve_asset_path(
                         updated.artwork.path, self._asset_context_path()

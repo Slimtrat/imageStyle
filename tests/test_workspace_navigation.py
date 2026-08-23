@@ -34,7 +34,7 @@ def test_workspace_has_actionable_menus_history_and_interactive_3d_studio(
     window = MainWindow(history_root=tmp_path / "history")
     try:
         menu_names = [action.text().replace("&", "") for action in window.menuBar().actions()]
-        assert menu_names == ["Fichier", "Génération", "Réglages", "Affichage", "Historique"]
+        assert menu_names == ["Fichier", "Édition", "Génération", "Réglages", "Affichage", "Historique"]
         assert window.workspace_tabs.count() == 3
         assert set(window._settings_cards) == {"effect", "colors", "analysis", "video"}
         assert window.history_panel.scroll.height() == 86
