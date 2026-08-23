@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core.config import RenderConfig
 from ..studio.camera import (
     copy_camera_keyframe,
     move_camera_keyframe,
@@ -28,6 +30,11 @@ from ..studio.camera import (
     upsert_camera_keyframe,
 )
 from ..studio.clock import StudioClock
+from ..studio.effect_2d import (
+    add_effect_clip,
+    settings_for_effect_clip,
+    update_effect_clip,
+)
 from ..studio.camera_presets import CameraPreset, PresetApplyMode, apply_camera_preset
 from ..studio.history import StudioHistory
 from ..studio.model import (
@@ -43,6 +50,7 @@ from .studio_camera import StudioCameraInspector
 from .studio_camera_presets import StudioCameraPresetPanel
 from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
+from .studio_effects import StudioEffectInspector
 from .studio_preview import StudioPreviewController
 from .studio_timeline import StudioTimeline
 from .studio_timeline_actions import StudioTimelineActions
@@ -351,7 +359,12 @@ class StudioPanel(QWidget):
     frame_requested = Signal(int)
     history_changed = Signal(bool, str, bool, str)
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        effect_config_provider: Callable[[], RenderConfig] | None = None,
+    ):
         super().__init__(parent)
         self.setObjectName("studioV3Panel")
         self._project: StudioProject | None = None
@@ -450,6 +463,11 @@ class StudioPanel(QWidget):
         principle.setObjectName("studioArtworkFirstPrinciple")
         principle.setWordWrap(True)
         inspector_layout.addWidget(principle)
+        self.inspector_tabs = QTabWidget()
+        self.inspector_tabs.setObjectName("studioInspectorTabs")
+        camera_page = QWidget()
+        camera_layout = QVBoxLayout(camera_page)
+        camera_layout.setContentsMargins(0, 0, 0, 0)
         self.camera_inspector = StudioCameraInspector()
         self.camera_inspector.poseChanged.connect(self._camera_pose_edited)
         self.camera_inspector.addKeyframeRequested.connect(self._add_camera_keyframe)
@@ -458,12 +476,20 @@ class StudioPanel(QWidget):
         )
         self.camera_inspector.copyKeyframeRequested.connect(self._copy_current_camera_keyframe)
         self.camera_inspector.easingChanged.connect(self._camera_easing_changed)
-        inspector_layout.addWidget(self.camera_inspector)
+        camera_layout.addWidget(self.camera_inspector)
         self.camera_presets = StudioCameraPresetPanel()
         self.camera_presets.presetRequested.connect(self._apply_camera_preset)
-        inspector_layout.addWidget(self.camera_presets)
-
-        inspector_layout.addStretch(1)
+        camera_layout.addWidget(self.camera_presets)
+        camera_layout.addStretch(1)
+        self.effect_inspector = StudioEffectInspector(effect_config_provider)
+        self.effect_inspector.addRequested.connect(self._add_effect_layer)
+        self.effect_inspector.applyRequested.connect(self._apply_effect_layer)
+        self.effect_inspector.duplicateRequested.connect(
+            lambda clip_id: self.timeline_actions.duplicate_clips((clip_id,))
+        )
+        self.inspector_tabs.addTab(camera_page, "Caméra")
+        self.inspector_tabs.addTab(self.effect_inspector, "Effets 2D")
+        inspector_layout.addWidget(self.inspector_tabs, 1)
         body.addWidget(inspector)
         page.addLayout(body, 1)
 
@@ -485,6 +511,7 @@ class StudioPanel(QWidget):
         self.timeline.seekRequested.connect(self.transport.seek)
         self.timeline.addTrackRequested.connect(self._add_timeline_track)
         self.timeline.trackStateRequested.connect(self._timeline_track_state)
+        self.timeline.selectionChanged.connect(self._timeline_selection_changed)
         self.timeline_actions = StudioTimelineActions(self)
 
         self.track_summary = StudioTrackSummary()
@@ -531,6 +558,9 @@ class StudioPanel(QWidget):
         self._project = validated
         self.track_summary.set_project(self._project)
         self.timeline.set_project(self._project)
+        self.effect_inspector.set_selection(
+            self._project, self.timeline.selected_clip_ids
+        )
         if self._project is None:
             self.transport.set_project(30, 1)
             self.canvas.set_artwork(None)
@@ -574,6 +604,9 @@ class StudioPanel(QWidget):
         self._project = validated
         self.track_summary.set_project(validated)
         self.timeline.set_project(validated)
+        self.effect_inspector.set_selection(
+            validated, self.timeline.selected_clip_ids
+        )
         if timing_changed:
             self.transport.set_project(
                 validated.settings.fps,
@@ -955,6 +988,92 @@ class StudioPanel(QWidget):
             f"Mouvement {CameraPreset(preset).value} · {len(animation.keyframes)} keyframes éditables"
         )
 
+
+    def _timeline_selection_changed(self, value: object) -> None:
+        clip_ids = (
+            tuple(str(item) for item in value)
+            if isinstance(value, (tuple, list))
+            else ()
+        )
+        self.effect_inspector.set_selection(self._project, clip_ids)
+        if self.effect_inspector.selected_clip_id is not None:
+            self.inspector_tabs.setCurrentWidget(self.effect_inspector)
+
+    def _add_effect_layer(
+        self,
+        config: RenderConfig,
+        duration_seconds: float,
+        intensity: float,
+        opacity: float,
+    ) -> None:
+        project = self._project
+        if project is None:
+            return
+        active = self._active_camera_clip(self.transport.current_frame)
+        if active is None:
+            self.project_status.setText(
+                "Effet 2D impossible · aucun plan de l’œuvre sous la tête de lecture"
+            )
+            return
+        _track_index, _clip_index, target = active
+        try:
+            updated, clip = add_effect_clip(
+                project,
+                config,
+                start_frame=self.transport.current_frame,
+                duration_seconds=float(duration_seconds),
+                intensity=float(intensity),
+                opacity=float(opacity),
+                target_clip_id=target.clip_id,
+            )
+            self.commit_project(
+                updated,
+                f"Ajouter l’effet {settings_for_effect_clip(clip).effect}",
+            )
+            self.timeline.scene.set_selection((clip.clip_id,))
+            self.inspector_tabs.setCurrentWidget(self.effect_inspector)
+            self.project_status.setText(
+                f"Effet 2D ajouté · {duration_seconds:g} s · lié à l’œuvre"
+            )
+        except (TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Effet 2D inchangé · {exc}")
+
+    def _apply_effect_layer(
+        self,
+        clip_id: str,
+        config: RenderConfig,
+        duration_seconds: float,
+        intensity: float,
+        opacity: float,
+        enabled: bool,
+    ) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            updated, clip = update_effect_clip(
+                project,
+                clip_id,
+                config=config,
+                duration_seconds=float(duration_seconds),
+                intensity=float(intensity),
+                opacity=float(opacity),
+                enabled=bool(enabled),
+            )
+            settings = settings_for_effect_clip(clip)
+            self.commit_project(
+                updated,
+                f"Régler l’effet {settings.effect}",
+                merge_key=f"effect-settings:{clip_id}",
+            )
+            self.timeline.scene.set_selection((clip.clip_id,))
+            state = "actif" if clip.enabled else "désactivé"
+            self.project_status.setText(
+                f"Effet 2D {state} · intensité {settings.intensity:.0%} · "
+                f"opacité {clip.opacity:.0%}"
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Effet 2D inchangé · {exc}")
 
     def _add_timeline_track(self, kind: TrackKind) -> None:
         if self._project is None:

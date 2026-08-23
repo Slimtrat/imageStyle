@@ -6,12 +6,17 @@ import numpy as np
 from PIL import Image
 
 from .camera import render_camera_frame, resolve_camera_pose
-from .model import Clip, FitMode, StudioProject, TrackKind
+from .effect_2d import Effect2DClipSettings, settings_for_effect_clip
+from .model import Clip, ClipKind, FitMode, StudioProject, TrackKind
 from .sources import TimedFrameSource, validate_frame_index, validate_timed_frame
 
 
 class MissingClipSourceError(KeyError):
     """Raised when an active visual clip has no registered frame source."""
+
+
+class MissingEffectTargetError(KeyError):
+    """Raised when an artwork-relative effect has no active artwork target."""
 
 
 def _resize_rgb(frame: np.ndarray, width: int, height: int) -> np.ndarray:
@@ -87,6 +92,31 @@ def alpha_composite_rgb(
     return np.rint(np.clip(mixed, 0.0, 255.0)).astype(np.uint8)
 
 
+def composite_artwork_effect(
+    background: np.ndarray,
+    effected: np.ndarray,
+    reference: np.ndarray,
+    alpha: np.ndarray,
+    *,
+    intensity: float,
+    opacity: float,
+) -> np.ndarray:
+    """Apply an artwork-relative RGB delta while preserving an exact off state."""
+
+    if background.shape != effected.shape or effected.shape != reference.shape:
+        raise ValueError("Le calque d’effet et sa référence doivent partager le canvas")
+    if alpha.shape != background.shape[:2]:
+        raise ValueError("Le masque du calque d’effet doit correspondre au canvas")
+    strength = np.clip(
+        alpha.astype(np.float32) * float(intensity) * float(opacity),
+        0.0,
+        1.0,
+    )[..., None]
+    delta = effected.astype(np.float32) - reference.astype(np.float32)
+    composed = background.astype(np.float32) + delta * strength
+    return np.rint(np.clip(composed, 0.0, 255.0)).astype(np.uint8)
+
+
 class StudioCompositor:
     """Deterministic, UI-independent V3 Studio frame compositor."""
 
@@ -111,6 +141,12 @@ class StudioCompositor:
             != self.height * self.project.settings.width
         ):
             raise ValueError("Un proxy Studio doit conserver le ratio du projet")
+        self.effect_settings: dict[str, Effect2DClipSettings] = {
+            clip.clip_id: settings_for_effect_clip(clip)
+            for track in self.project.tracks
+            for clip in track.clips
+            if clip.kind == ClipKind.EFFECT_2D
+        }
 
     def _source_for(self, clip: Clip) -> TimedFrameSource:
         try:
@@ -125,11 +161,12 @@ class StudioCompositor:
             )
         return source
 
-    def _clip_frame(self, clip: Clip, project_frame: int) -> tuple[np.ndarray, np.ndarray]:
-        source = self._source_for(clip)
-        local_frame = clip.source_in_frame + project_frame - clip.start_frame
-        validate_frame_index(local_frame, source.frame_count)
-        raw = validate_timed_frame(source, source.frame_at(local_frame))
+    def _transform_frame(
+        self,
+        raw: np.ndarray,
+        clip: Clip,
+        project_frame: int,
+    ) -> tuple[np.ndarray, np.ndarray]:
         if clip.camera is not None:
             camera_frame = project_frame - clip.start_frame
             pose = resolve_camera_pose(clip.camera, camera_frame)
@@ -142,6 +179,64 @@ class StudioCompositor:
             )
             return rendered, np.ones((self.height, self.width), dtype=np.float32)
         return fit_frame(raw, self.width, self.height, clip.fit)
+
+    def _clip_frame(self, clip: Clip, project_frame: int) -> tuple[np.ndarray, np.ndarray]:
+        source = self._source_for(clip)
+        local_frame = clip.source_in_frame + project_frame - clip.start_frame
+        validate_frame_index(local_frame, source.frame_count)
+        raw = validate_timed_frame(source, source.frame_at(local_frame))
+        return self._transform_frame(raw, clip, project_frame)
+
+    def _effect_target(self, clip: Clip, project_frame: int) -> Clip:
+        settings = self.effect_settings[clip.clip_id]
+        target = next(
+            (
+                candidate
+                for track in self.project.tracks
+                for candidate in track.clips
+                if candidate.clip_id == settings.target_clip_id
+                and candidate.kind in {ClipKind.ARTWORK_2D, ClipKind.ARTWORK_3D}
+                and candidate.enabled
+                and candidate.start_frame <= project_frame < candidate.end_frame
+            ),
+            None,
+        )
+        if target is None:
+            raise MissingEffectTargetError(
+                f"Le calque {clip.clip_id} ne trouve pas son plan d’œuvre actif "
+                f"{settings.target_clip_id}"
+            )
+        return target
+
+    def _effect_frame(
+        self,
+        clip: Clip,
+        project_frame: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+        source = self._source_for(clip)
+        local_frame = clip.source_in_frame + project_frame - clip.start_frame
+        validate_frame_index(local_frame, source.frame_count)
+        effected = validate_timed_frame(source, source.frame_at(local_frame))
+        reference = np.asarray(getattr(source, "reference_frame", None))
+        if reference.shape != (source.height, source.width, 3) or reference.dtype != np.uint8:
+            raise TypeError(
+                f"La source du calque {clip.clip_id} doit exposer sa référence RGB uint8"
+            )
+        target = self._effect_target(clip, project_frame)
+        effected_canvas, alpha = self._transform_frame(effected, target, project_frame)
+        reference_canvas, reference_alpha = self._transform_frame(
+            reference,
+            target,
+            project_frame,
+        )
+        if not np.array_equal(alpha, reference_alpha):
+            raise ValueError("L’effet 2D et sa référence ne partagent pas le même masque")
+        return (
+            effected_canvas,
+            reference_canvas,
+            alpha,
+            self.effect_settings[clip.clip_id].intensity,
+        )
 
     def frame_at(self, frame_index: int) -> np.ndarray:
         validate_frame_index(frame_index, self.frame_count)
@@ -160,6 +255,20 @@ class StudioCompositor:
                     or frame_index >= clip.end_frame
                 ):
                     continue
+                if clip.kind == ClipKind.EFFECT_2D:
+                    effected, reference, alpha, intensity = self._effect_frame(
+                        clip,
+                        frame_index,
+                    )
+                    background = composite_artwork_effect(
+                        background,
+                        effected,
+                        reference,
+                        alpha,
+                        intensity=intensity,
+                        opacity=clip.opacity,
+                    )
+                    continue
                 foreground, alpha = self._clip_frame(clip, frame_index)
                 background = alpha_composite_rgb(
                     background,
@@ -168,4 +277,3 @@ class StudioCompositor:
                     opacity=clip.opacity,
                 )
         return background
-

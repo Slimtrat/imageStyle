@@ -7,11 +7,11 @@ from pathlib import Path
 from threading import Event, RLock
 
 import numpy as np
-from PIL import Image, ImageOps
 
-from .compositor import StudioCompositor
-from .model import ClipKind, StudioProject
+from .model import StudioProject
 from .persistence import project_digest
+from .render_session import StudioRenderSession
+from .source_registry import ArtworkSourceRegistry, StaticArtworkSource
 
 
 DEFAULT_PROXY_WIDTH = 360
@@ -82,7 +82,8 @@ class StudioProxyCache:
     def invalidate_frames(self, project_id: str, frames: set[int]) -> int:
         with self._lock:
             keys = [
-                key for key in self._frames
+                key
+                for key in self._frames
                 if key.project_id == project_id and key.frame in frames
             ]
             for key in keys:
@@ -93,60 +94,6 @@ class StudioProxyCache:
         with self._lock:
             self._frames.clear()
             self._bytes = 0
-
-
-class StaticArtworkSource:
-    def __init__(self, frame: np.ndarray, fps: int, frame_count: int):
-        array = np.ascontiguousarray(frame, dtype=np.uint8)
-        if array.ndim != 3 or array.shape[2] != 3:
-            raise ValueError("La source proxy de l’œuvre doit être RGB")
-        self._frame = array
-        self.width = int(array.shape[1])
-        self.height = int(array.shape[0])
-        self.fps = int(fps)
-        self.frame_count = int(frame_count)
-
-    def frame_at(self, frame_index: int) -> np.ndarray:
-        if not 0 <= int(frame_index) < self.frame_count:
-            raise IndexError("Frame hors de la source œuvre")
-        return self._frame
-
-
-class ArtworkSourceRegistry:
-    """Decoded artwork cache intentionally independent from camera parameters."""
-
-    def __init__(self):
-        self._sources: dict[str, np.ndarray] = {}
-        self.decode_count = 0
-        self._lock = RLock()
-
-    @staticmethod
-    def _key(path: Path, fingerprint: str | None) -> str:
-        resolved = path.resolve(strict=False)
-        stat = resolved.stat()
-        identity = fingerprint or f"{stat.st_size}:{stat.st_mtime_ns}"
-        return f"{resolved}|{identity}"
-
-    def artwork(self, path: str | Path, fingerprint: str | None) -> np.ndarray:
-        source = Path(path)
-        key = self._key(source, fingerprint)
-        with self._lock:
-            cached = self._sources.get(key)
-            if cached is not None:
-                return cached
-        with Image.open(source) as image:
-            rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"), dtype=np.uint8)
-        rgb = np.ascontiguousarray(rgb)
-        rgb.setflags(write=False)
-        with self._lock:
-            existing = self._sources.setdefault(key, rgb)
-            if existing is rgb:
-                self.decode_count += 1
-            return existing
-
-    def clear(self) -> None:
-        with self._lock:
-            self._sources.clear()
 
 
 def proxy_size(project: StudioProject, requested_width: int) -> tuple[int, int]:
@@ -198,26 +145,14 @@ def render_studio_preview_frame(
     if cancelled is not None and cancelled.is_set():
         return None, False
     registry = source_registry or ArtworkSourceRegistry()
-    artwork = registry.artwork(artwork_path, project.artwork.fingerprint)
-    source = StaticArtworkSource(
-        artwork,
-        project.settings.fps,
-        project.settings.duration_frames,
-    )
-    artwork_kinds = {ClipKind.ARTWORK_2D, ClipKind.ARTWORK_3D}
-    sources = {
-        clip.clip_id: source
-        for track in project.tracks
-        for clip in track.clips
-        if clip.kind in artwork_kinds
-    }
-    compositor = StudioCompositor(
+    session = StudioRenderSession(
         project,
-        sources,
+        artwork_path,
         output_width=width,
         output_height=height,
+        source_registry=registry,
     )
-    rendered = compositor.frame_at(int(frame))
+    rendered = session.frame_at(int(frame))
     if cancelled is not None and cancelled.is_set():
         return None, False
     if cache is not None:
@@ -226,4 +161,3 @@ def render_studio_preview_frame(
         if cached is not None:
             rendered = cached
     return rendered, False
-

@@ -4,9 +4,49 @@ from dataclasses import replace
 from uuid import uuid4
 
 from .camera import resolve_camera_pose
-from .model import CameraAnimation, CameraKeyframe, Clip, StudioProject, Track, TrackKind
+from .effect_2d import MIN_EFFECT_DURATION_SECONDS, settings_for_effect_clip
+from .model import (
+    CameraAnimation,
+    CameraKeyframe,
+    Clip,
+    ClipKind,
+    StudioProject,
+    Track,
+    TrackKind,
+)
 
 OVERLAP_POLICY = "layered"
+
+
+def _validate_effect_2d_edit(project: StudioProject, clip: Clip) -> None:
+    if clip.kind != ClipKind.EFFECT_2D:
+        return
+    settings = settings_for_effect_clip(clip)
+    config = settings.config
+    if config.fps != project.settings.fps:
+        raise ValueError("Le calque 2D et le projet doivent partager le même framerate")
+    minimum_frames = int(round(MIN_EFFECT_DURATION_SECONDS * project.settings.fps))
+    if clip.duration_frames < minimum_frames:
+        raise ValueError("Un calque d’effet 2D doit durer au moins 0,5 seconde")
+    source_frames = max(2, int(round(config.duration * config.fps)))
+    if clip.source_in_frame + clip.duration_frames > source_frames:
+        raise ValueError("Le trim dépasserait la source figée du calque d’effet 2D")
+    target = next(
+        (
+            candidate
+            for track in project.tracks
+            for candidate in track.clips
+            if candidate.clip_id == settings.target_clip_id
+            and candidate.kind in {ClipKind.ARTWORK_2D, ClipKind.ARTWORK_3D}
+        ),
+        None,
+    )
+    if target is None:
+        raise ValueError("Le plan de l’œuvre ciblé par le calque 2D est introuvable")
+    if clip.start_frame < target.start_frame or clip.end_frame > target.end_frame:
+        raise ValueError("Le calque d’effet 2D doit rester dans le plan de l’œuvre ciblé")
+
+
 
 
 def track_by_id(project: StudioProject, track_id: str) -> tuple[int, Track]:
@@ -147,6 +187,7 @@ def move_clip(
 
     source_clips = [item for item in source_track.clips if item.clip_id != clip_id]
     moved = replace(clip, start_frame=target_frame).validate()
+    _validate_effect_2d_edit(project, moved)
     if target_track_index == source_track_index:
         source_clips.append(moved)
         source_clips.sort(key=lambda item: (item.start_frame, item.clip_id))
@@ -210,6 +251,7 @@ def trim_clip(
         source_in_frame=source_in,
         camera=_trim_camera(clip.camera, delta, duration),
     ).validate()
+    _validate_effect_2d_edit(project, trimmed)
     clips = list(track.clips)
     clips[clip_index] = trimmed
     clips.sort(key=lambda item: (item.start_frame, item.clip_id))
@@ -271,6 +313,8 @@ def split_clip(
         source_in_frame=clip.source_in_frame + left_duration,
         camera=right_camera,
     ).validate()
+    _validate_effect_2d_edit(project, left)
+    _validate_effect_2d_edit(project, right)
     clips = list(track.clips)
     clips[clip_index : clip_index + 1] = (left, right)
     clips.sort(key=lambda item: (item.start_frame, item.clip_id))
@@ -298,6 +342,7 @@ def duplicate_clip(
         clip_id=f"{clip.clip_id}-copy-{uuid4().hex[:8]}",
         start_frame=int(target_frame),
     ).validate()
+    _validate_effect_2d_edit(project, duplicate)
     temporary_track = replace(track, clips=(*track.clips, duplicate))
     temporary = _replace_track(
         project,

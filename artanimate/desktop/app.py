@@ -294,7 +294,7 @@ class MainWindow(QMainWindow):
         return self.studio_3d
 
     def _build_studio_v3(self) -> QWidget:
-        self.studio_v3 = StudioPanel()
+        self.studio_v3 = StudioPanel(effect_config_provider=self.build_config)
         self.studio_document = StudioDocumentController(self.studio_v3, self.settings, self)
         self.studio_document.artwork_loaded.connect(self._studio_document_artwork_loaded)
         self.studio_document.dirty_changed.connect(self.setWindowModified)
