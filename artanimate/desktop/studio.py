@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -25,9 +26,11 @@ from ..studio.camera import (
 )
 from ..studio.clock import StudioClock
 from ..studio.model import CameraAnimation, CameraPose, ClipKind, Easing, StudioProject, TrackKind
+from ..studio.timeline import add_track, set_track_state
 from .studio_camera import StudioCameraInspector
 from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
+from .studio_timeline import StudioTimeline
 from .studio_transport import StudioTransport
 
 
@@ -371,11 +374,18 @@ class StudioPanel(QWidget):
         )
         page.addWidget(self.keyframe_strip)
 
-        self.track_summary = StudioTrackSummary()
-        page.addWidget(self.track_summary)
+        self.timeline = StudioTimeline()
+        self.timeline.seekRequested.connect(self.transport.seek)
+        self.timeline.addTrackRequested.connect(self._add_timeline_track)
+        self.timeline.trackStateRequested.connect(self._timeline_track_state)
 
+        self.track_summary = StudioTrackSummary()
         self.asset_panel = StudioAssetPanel()
-        page.addWidget(self.asset_panel)
+        self.editor_tabs = QTabWidget()
+        self.editor_tabs.setObjectName("studioEditorTabs")
+        self.editor_tabs.addTab(self.timeline, "Timeline")
+        self.editor_tabs.addTab(self.asset_panel, "Médias locaux")
+        page.addWidget(self.editor_tabs, 1)
 
     @property
     def project(self) -> StudioProject | None:
@@ -391,6 +401,7 @@ class StudioPanel(QWidget):
     def set_project(self, project: StudioProject | None) -> None:
         self._project = project.validate() if project is not None else None
         self.track_summary.set_project(self._project)
+        self.timeline.set_project(self._project)
         if self._project is None:
             self.transport.set_project(30, 1)
             self.canvas.set_artwork(None)
@@ -441,6 +452,7 @@ class StudioPanel(QWidget):
                 CameraAnimation(), clip_start=0, clip_duration=1
             )
         self.keyframe_strip.set_playhead(frame)
+        self.timeline.set_playhead(frame)
         self.frame_requested.emit(frame)
 
     def _active_camera_clip(self, frame: int):
@@ -474,6 +486,7 @@ class StudioPanel(QWidget):
         tracks[track_index] = replace(tracks[track_index], clips=tuple(clips))
         self._project = replace(self._project, tracks=tuple(tracks)).validate()
         self.track_summary.set_project(self._project)
+        self.timeline.set_project(self._project)
         updated = self._active_camera_clip(frame)
         if updated is not None:
             _track_index, _clip_index, updated_clip = updated
@@ -592,6 +605,38 @@ class StudioPanel(QWidget):
         except KeyError:
             return
         self._replace_camera_animation(animation)
+    def _commit_timeline_project(self, project: StudioProject) -> None:
+        frame = self.transport.current_frame
+        self._project = project.validate()
+        self.track_summary.set_project(self._project)
+        self.timeline.set_project(self._project)
+        self.project_changed.emit(self._project)
+        self.transport.seek(frame, force_signal=True)
+
+    def _add_timeline_track(self, kind: TrackKind) -> None:
+        if self._project is None:
+            return
+        project, track = add_track(self._project, TrackKind(kind))
+        self._commit_timeline_project(project)
+        self.project_status.setText(
+            f"Piste ajoutée · {track.name} · couche Z{len(project.tracks) - 1}"
+        )
+
+    def _timeline_track_state(self, track_id: str, field: str, value: bool) -> None:
+        if self._project is None:
+            return
+        changes = {
+            "muted": {"muted": value},
+            "locked": {"locked": value},
+            "hidden": {"hidden": value},
+        }
+        try:
+            kwargs = changes[field]
+        except KeyError:
+            return
+        project = set_track_state(self._project, track_id, **kwargs)
+        self._commit_timeline_project(project)
+
 
     def activate(self) -> None:
         self.canvas.update()

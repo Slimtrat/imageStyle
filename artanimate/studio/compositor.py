@@ -151,7 +151,7 @@ class StudioCompositor:
         # Track order is bottom-to-top. Multiple active clips on a track are
         # composited in tuple order, which keeps overlap behavior deterministic.
         for track in self.project.tracks:
-            if track.kind == TrackKind.AUDIO or track.hidden:
+            if track.kind == TrackKind.AUDIO or track.hidden or track.muted:
                 continue
             for clip in track.clips:
                 if (
