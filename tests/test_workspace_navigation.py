@@ -35,7 +35,7 @@ def test_workspace_has_actionable_menus_history_and_interactive_3d_studio(
     try:
         menu_names = [action.text().replace("&", "") for action in window.menuBar().actions()]
         assert menu_names == ["Fichier", "Génération", "Réglages", "Affichage", "Historique"]
-        assert window.workspace_tabs.count() == 2
+        assert window.workspace_tabs.count() == 3
         assert set(window._settings_cards) == {"effect", "colors", "analysis", "video"}
         assert window.history_panel.scroll.height() == 86
         window._open_settings("colors")
@@ -44,6 +44,7 @@ def test_workspace_has_actionable_menus_history_and_interactive_3d_studio(
         window._settings_dialogs["colors"].close()
         assert window.workspace_tabs.tabText(0) == "Atelier 2D"
         assert window.workspace_tabs.tabText(1) == "Studio 3D"
+        assert window.workspace_tabs.tabText(2) == "Studio"
         window.workspace_tabs.setCurrentIndex(1)
         app.processEvents()
         assert not window.studio_3d.scene_errors

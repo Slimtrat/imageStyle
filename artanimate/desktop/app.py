@@ -43,6 +43,9 @@ from .settings_windows import SettingsCard, SettingsDialog
 from .studio3d import Studio3DPanel
 from .studio3d_wave import OrganicWaveSettings
 from .studio3d_export import Studio3DFrameWorker, capture_requires_retry, qimage_to_rgb
+from .studio import StudioPanel
+from .studio_document import StudioDocumentController
+from .studio_recent import StudioRecentMenu
 from .problems import (
     UserInputError,
     UserProblem,
@@ -67,7 +70,7 @@ class MainWindow(QMainWindow):
         history_root: Path | None = None,
     ):
         super().__init__()
-        self.setWindowTitle(f"ArtAnimate {__version__} — Atelier d’animation")
+        self.setWindowTitle(f"ArtAnimate {__version__} — Atelier d’animation[*]")
         self.setWindowIcon(QIcon(str(LOGO_PATH)))
         self.setMinimumSize(1100, 760)
         self.resize(1420, 900)
@@ -153,6 +156,7 @@ class MainWindow(QMainWindow):
 
         self.workspace_tabs.addTab(self.two_d_page, "Atelier 2D")
         self.workspace_tabs.addTab(self._build_studio_3d(), "Studio 3D")
+        self.workspace_tabs.addTab(self._build_studio_v3(), "Studio")
         page.addWidget(self.workspace_tabs, 1)
         self._build_menus()
 
@@ -176,6 +180,26 @@ class MainWindow(QMainWindow):
         menu_bar.setNativeMenuBar(False)
 
         file_menu = menu_bar.addMenu("&Fichier")
+        new_studio = QAction("Nouveau projet Studio…", self)
+        new_studio.setShortcut("Ctrl+N")
+        new_studio.triggered.connect(lambda: self.studio_document.choose_artwork())
+        open_studio = QAction("Ouvrir un projet Studio…", self)
+        open_studio.setShortcut("Ctrl+Shift+P")
+        open_studio.triggered.connect(lambda: self.studio_document.open_project())
+        save_studio = QAction("Enregistrer le projet Studio", self)
+        save_studio.setShortcut("Ctrl+S")
+        save_studio.triggered.connect(lambda: self.studio_document.save())
+        save_studio_as = QAction("Enregistrer le projet Studio sous…", self)
+        save_studio_as.setShortcut("Ctrl+Shift+S")
+        save_studio_as.triggered.connect(
+            lambda: self.studio_document.save(save_as=True)
+        )
+        file_menu.addActions((new_studio, open_studio, save_studio, save_studio_as))
+        self.studio_recent_menu = file_menu.addMenu("Projets Studio récents")
+        self.studio_recent = StudioRecentMenu(
+            self.studio_document, self.studio_recent_menu, self
+        )
+        file_menu.addSeparator()
         choose_source = QAction("Choisir une œuvre…", self)
         choose_source.setShortcut("Ctrl+O")
         choose_source.triggered.connect(lambda: self.source_zone.browse())
@@ -228,10 +252,13 @@ class MainWindow(QMainWindow):
         show_2d.triggered.connect(lambda: self.workspace_tabs.setCurrentIndex(0))
         show_3d = QAction("Studio 3D", self)
         show_3d.triggered.connect(lambda: self.workspace_tabs.setCurrentIndex(1))
+        show_studio = QAction("Studio", self)
+        show_studio.setShortcut("Ctrl+5")
+        show_studio.triggered.connect(lambda: self.workspace_tabs.setCurrentIndex(2))
         show_logs = QAction("Logs", self)
         show_logs.setShortcut("Ctrl+L")
         show_logs.triggered.connect(self._show_logs)
-        view_menu.addActions((show_2d, show_3d, show_logs))
+        view_menu.addActions((show_2d, show_3d, show_studio, show_logs))
 
         history_menu = menu_bar.addMenu("&Historique")
         refresh = QAction("Actualiser la banque", self)
@@ -260,6 +287,18 @@ class MainWindow(QMainWindow):
         self.studio_3d.play_output_requested.connect(self._play_studio_output)
         self.studio_3d.reveal_output_requested.connect(self._reveal_studio_output)
         return self.studio_3d
+
+    def _build_studio_v3(self) -> QWidget:
+        self.studio_v3 = StudioPanel()
+        self.studio_document = StudioDocumentController(self.studio_v3, self.settings, self)
+        self.studio_document.artwork_loaded.connect(self._studio_document_artwork_loaded)
+        self.studio_document.dirty_changed.connect(self.setWindowModified)
+        self.studio_v3.choose_artwork_requested.connect(self.studio_document.choose_artwork)
+        return self.studio_v3
+
+    def _studio_document_artwork_loaded(self, path: Path) -> None:
+        if self.source_zone.set_path(path):
+            self._source_selected(str(path))
 
     def _build_header(self) -> QHBoxLayout:
         layout = QHBoxLayout()
@@ -968,6 +1007,7 @@ class MainWindow(QMainWindow):
             return
         self.source_preview.image.set_image(pixmap)
         self.studio_3d.set_source(path)
+        self.studio_document.adopt_artwork(path)
         logger.info("Image sélectionnée : %s", path)
         if self.destination_zone.path is None:
             self.destination_zone.set_path(path.parent)
@@ -1421,6 +1461,10 @@ class MainWindow(QMainWindow):
         self._refresh_history()
 
     def _workspace_tab_changed(self, index: int) -> None:
+        if index == 2:
+            self.studio_v3.activate()
+            logger.info("Studio V3 artwork-first ouvert")
+            return
         if index != 1:
             return
         self.studio_3d.activate()
@@ -1984,6 +2028,10 @@ class MainWindow(QMainWindow):
                 self._preview_worker.cancel()
             event.ignore()
             return
+        if not self.studio_document.close_allowed():
+            event.ignore()
+            return
+        self.studio_document.shutdown()
         self.settings.setValue("windowGeometry", self.saveGeometry())
         if self.destination_zone.path:
             self.settings.setValue("destination", str(self.destination_zone.path))
