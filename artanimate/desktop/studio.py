@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -32,6 +33,7 @@ from .studio_camera import StudioCameraInspector
 from .studio_camera_presets import StudioCameraPresetPanel
 from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
+from .studio_preview import StudioPreviewController
 from .studio_timeline import StudioTimeline
 from .studio_timeline_actions import StudioTimelineActions
 from .studio_transport import StudioTransport
@@ -41,6 +43,7 @@ class StudioCanvas(QWidget):
     """Artwork-first 9:16 canvas used by the V3 Studio workspace."""
 
     cameraPoseChanged = Signal(object)
+    artworkChanged = Signal(object)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -50,6 +53,10 @@ class StudioCanvas(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._artwork = QImage()
         self._artwork_name = ""
+        self._artwork_path: Path | None = None
+        self._preview_frame = QImage()
+        self._preview_frame_index = -1
+        self._preview_pending = False
         self._playhead_frame = 0
         self._playhead_fps = 30
         self._camera_pose = CameraPose()
@@ -63,6 +70,9 @@ class StudioCanvas(QWidget):
         if path is None:
             self._artwork = QImage()
             self._artwork_name = ""
+            self._artwork_path = None
+            self.clear_preview()
+            self.artworkChanged.emit(None)
             self.update()
             return True
         image = QImage(str(path))
@@ -70,8 +80,39 @@ class StudioCanvas(QWidget):
             return False
         self._artwork = image
         self._artwork_name = path.name
+        self._artwork_path = path.resolve(strict=False)
+        self.clear_preview()
+        self.artworkChanged.emit(self._artwork_path)
         self.update()
         return True
+
+    @property
+    def artwork_path(self) -> Path | None:
+        return self._artwork_path
+
+    @property
+    def preview_frame_index(self) -> int:
+        return self._preview_frame_index
+
+    @property
+    def preview_pending(self) -> bool:
+        return self._preview_pending
+
+    def set_preview_frame(self, frame: int, image: QImage) -> None:
+        self._preview_frame = QImage(image)
+        self._preview_frame_index = int(frame)
+        self._preview_pending = False
+        self.update()
+
+    def set_preview_pending(self, pending: bool) -> None:
+        self._preview_pending = bool(pending)
+        self.update()
+
+    def clear_preview(self) -> None:
+        self._preview_frame = QImage()
+        self._preview_frame_index = -1
+        self._preview_pending = False
+        self.update()
 
     @property
     def playhead_frame(self) -> int:
@@ -146,6 +187,18 @@ class StudioCanvas(QWidget):
                 frame.adjusted(24, 0, -24, 0),
                 Qt.AlignmentFlag.AlignCenter,
                 "Importez une œuvre\npour construire son récit",
+            )
+        elif (
+            not self._preview_frame.isNull()
+            and self._preview_frame_index == self._playhead_frame
+            and not self._preview_pending
+        ):
+            painter.drawImage(frame, self._preview_frame)
+            painter.setPen(QColor(255, 255, 255, 190))
+            painter.drawText(
+                frame.adjusted(12, 12, -12, -12),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                self._artwork_name,
             )
         else:
             base = self._artwork_rect(frame)
@@ -291,6 +344,10 @@ class StudioPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("studioV3Panel")
         self._project: StudioProject | None = None
+        self.preview_controller = StudioPreviewController(self)
+        self.preview_controller.frameReady.connect(self._preview_ready)
+        self.preview_controller.renderingChanged.connect(self._preview_rendering_changed)
+        self.preview_controller.failed.connect(self._preview_failed)
 
         page = QVBoxLayout(self)
         page.setContentsMargins(8, 10, 8, 4)
@@ -317,6 +374,16 @@ class StudioPanel(QWidget):
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setMinimumWidth(150)
         header.addWidget(badge)
+        proxy_label = QLabel("Aperçu")
+        proxy_label.setObjectName("studioProxyLabel")
+        header.addWidget(proxy_label)
+        self.proxy_resolution = QComboBox()
+        self.proxy_resolution.setObjectName("studioProxyResolution")
+        for label, width in (("270p", 270), ("360p", 360), ("540p", 540)):
+            self.proxy_resolution.addItem(label, width)
+        self.proxy_resolution.setCurrentIndex(1)
+        self.proxy_resolution.currentIndexChanged.connect(self._proxy_resolution_changed)
+        header.addWidget(self.proxy_resolution)
         self.import_button = QPushButton("Importer une œuvre…")
         self.import_button.setObjectName("studioImportArtworkButton")
         self.import_button.clicked.connect(self.choose_artwork_requested)
@@ -326,6 +393,7 @@ class StudioPanel(QWidget):
         body = QHBoxLayout()
         body.setSpacing(14)
         self.canvas = StudioCanvas()
+        self.canvas.artworkChanged.connect(self._artwork_changed)
         body.addWidget(self.canvas, 1)
 
         inspector = QFrame()
@@ -343,6 +411,10 @@ class StudioPanel(QWidget):
         self.format_status.setObjectName("studioFormatStatus")
         self.format_status.setWordWrap(True)
         inspector_layout.addWidget(self.format_status)
+        self.preview_status = QLabel("Proxy 360p · en attente d’une œuvre")
+        self.preview_status.setObjectName("studioPreviewStatus")
+        self.preview_status.setWordWrap(True)
+        inspector_layout.addWidget(self.preview_status)
         principle = QLabel(
             "L’œuvre reste la source maîtresse. Les médias réels servent sa révélation, "
             "ils ne la remplacent pas."
@@ -407,6 +479,7 @@ class StudioPanel(QWidget):
         return True
 
     def set_project(self, project: StudioProject | None) -> None:
+        self.preview_controller.cancel_pending()
         self._project = project.validate() if project is not None else None
         self.track_summary.set_project(self._project)
         self.timeline.set_project(self._project)
@@ -415,6 +488,8 @@ class StudioPanel(QWidget):
             self.canvas.set_artwork(None)
             self.project_status.setText("Aucune œuvre sélectionnée")
             self.format_status.setText("Reel vertical · 1080 × 1920 · 30 FPS · 12 s")
+            self.canvas.clear_preview()
+            self.preview_status.setText(f"Proxy {self.preview_controller.proxy_width}p · en attente d’une œuvre")
         else:
             settings = self._project.settings
             self.transport.set_project(settings.fps, settings.duration_frames)
@@ -465,7 +540,52 @@ class StudioPanel(QWidget):
             self.camera_presets.set_remaining_frames(1, fps=fps)
         self.keyframe_strip.set_playhead(frame)
         self.timeline.set_playhead(frame)
+        self._request_preview(frame)
         self.frame_requested.emit(frame)
+
+    def _artwork_changed(self, path: Path | None) -> None:
+        if path is None:
+            self.preview_controller.cancel_pending()
+            return
+        self._request_preview(self.transport.current_frame)
+
+    def _request_preview(self, frame: int) -> None:
+        if self._project is None or self.canvas.artwork_path is None:
+            return
+        self.canvas.set_preview_pending(True)
+        self.preview_controller.request(
+            self._project,
+            self.canvas.artwork_path,
+            frame,
+        )
+
+    def _preview_ready(self, frame: int, image: QImage, cached: bool) -> None:
+        if frame != self.transport.current_frame:
+            return
+        self.canvas.set_preview_frame(frame, image)
+        state = "cache" if cached else "calculé"
+        self.preview_status.setText(
+            f"Proxy {self.preview_controller.proxy_width}p · frame {frame + 1} · {state}"
+        )
+
+    def _preview_rendering_changed(self, rendering: bool) -> None:
+        if rendering:
+            self.canvas.set_preview_pending(True)
+            self.preview_status.setText(
+                f"Proxy {self.preview_controller.proxy_width}p · calcul en cours…"
+            )
+        elif self.canvas.preview_pending:
+            self.canvas.set_preview_pending(False)
+
+    def _preview_failed(self, message: str) -> None:
+        self.canvas.set_preview_pending(False)
+        self.preview_status.setText(f"Proxy indisponible · {message}")
+
+    def _proxy_resolution_changed(self, index: int) -> None:
+        width = int(self.proxy_resolution.itemData(index))
+        self.preview_controller.set_proxy_width(width)
+        self._request_preview(self.transport.current_frame)
+
 
     def _active_camera_clip(self, frame: int):
         if self._project is None:
@@ -698,6 +818,9 @@ class StudioPanel(QWidget):
         project = set_track_state(self._project, track_id, **kwargs)
         self._commit_timeline_project(project)
 
+
+    def shutdown(self) -> None:
+        self.preview_controller.shutdown()
 
     def activate(self) -> None:
         self.canvas.update()

@@ -460,4 +460,5 @@ class StudioDocumentController(QObject):
 
     def shutdown(self) -> None:
         self.autosave_timer.stop()
+        self.panel.shutdown()
 

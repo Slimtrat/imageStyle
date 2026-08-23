@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import Event
 
 import numpy as np
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QImage
 
 from ..studio.model import StudioProject
@@ -104,6 +104,7 @@ class StudioPreviewController(QObject):
         self.proxy_width = DEFAULT_PROXY_WIDTH
         self._revision = 0
         self._jobs: dict[int, tuple[QThread, StudioPreviewWorker]] = {}
+        self._retired_threads: list[QThread] = []
         self._shutting_down = False
 
     @property
@@ -142,12 +143,11 @@ class StudioPreviewController(QObject):
         thread.started.connect(worker.run)
         worker.ready.connect(self._frame_ready)
         worker.failed.connect(self._failed)
-        worker.finished.connect(thread.quit)
+        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(
             lambda selected=revision: self._thread_finished(selected)
         )
-        thread.finished.connect(thread.deleteLater)
         self._jobs[revision] = (thread, worker)
         self.renderingChanged.emit(True)
         thread.start()
@@ -170,7 +170,11 @@ class StudioPreviewController(QObject):
             self.failed.emit(str(exc))
 
     def _thread_finished(self, revision: int) -> None:
-        self._jobs.pop(revision, None)
+        job = self._jobs.pop(revision, None)
+        if job is not None:
+            thread, _worker = job
+            thread.wait()
+            self._retired_threads.append(thread)
         if revision == self._revision and not self._shutting_down:
             self.renderingChanged.emit(False)
 
@@ -186,10 +190,13 @@ class StudioPreviewController(QObject):
         self._shutting_down = True
         for _thread, worker in tuple(self._jobs.values()):
             worker.cancel()
-        for thread, _worker in tuple(self._jobs.values()):
+        active_threads = [thread for thread, _worker in tuple(self._jobs.values())]
+        all_threads = [*active_threads, *self._retired_threads]
+        for thread in all_threads:
             thread.quit()
             thread.wait(max(0, int(wait_ms)))
         self._jobs.clear()
+        self._retired_threads.clear()
         self.cache.clear()
         self.sources.clear()
         self.renderingChanged.emit(False)
