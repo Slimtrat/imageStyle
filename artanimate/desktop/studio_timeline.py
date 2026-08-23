@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -63,6 +63,9 @@ class StudioTimelineScene(QWidget):
     seekRequested = Signal(int)
     selectionChanged = Signal(object)
     trackStateRequested = Signal(str, str, bool)
+    trackSelected = Signal(str)
+    clipMoveRequested = Signal(object, str, int, str)
+    clipTrimRequested = Signal(str, int, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -76,6 +79,13 @@ class StudioTimelineScene(QWidget):
         self._selected: tuple[str, ...] = ()
         self._track_layouts: tuple[TimelineTrackLayout, ...] = ()
         self._clip_layouts: tuple[TimelineClipLayout, ...] = ()
+        self._selected_track_id: str | None = None
+        self._drag_clip: TimelineClipLayout | None = None
+        self._drag_mode: str | None = None
+        self._drag_press_frame = 0
+        self._drag_target_frame = 0
+        self._drag_target_track_id: str | None = None
+        self._drag_started = False
 
     @property
     def pixels_per_frame(self) -> float:
@@ -92,6 +102,10 @@ class StudioTimelineScene(QWidget):
     @property
     def clip_layouts(self) -> tuple[TimelineClipLayout, ...]:
         return self._clip_layouts
+    @property
+    def selected_track_id(self) -> str | None:
+        return self._selected_track_id
+
 
     def set_project(self, project: StudioProject | None) -> None:
         self._project = project
@@ -274,6 +288,26 @@ class StudioTimelineScene(QWidget):
                 layout.clip.clip_id,
             )
 
+        if self._drag_clip is not None and self._drag_started:
+            preview = QRectF(self._drag_clip.rect)
+            if self._drag_mode == "move":
+                preview.moveLeft(self.frame_x(self._drag_target_frame))
+                row = next(
+                    (
+                        item for item in self._track_layouts
+                        if item.track.track_id == self._drag_target_track_id
+                    ),
+                    None,
+                )
+                if row is not None:
+                    preview.moveTop(row.rect.top() + 28)
+            elif self._drag_mode == "trim-left":
+                preview.setLeft(self.frame_x(self._drag_target_frame))
+            elif self._drag_mode == "trim-right":
+                preview.setRight(self.frame_x(self._drag_target_frame))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor("#ffd166"), 2, Qt.PenStyle.DashLine))
+            painter.drawRect(preview)
         playhead_x = self.frame_x(self._playhead)
         painter.setPen(QPen(QColor("#f0b44d"), 2))
         painter.drawLine(QPointF(playhead_x, 0), QPointF(playhead_x, self.height()))
@@ -324,6 +358,10 @@ class StudioTimelineScene(QWidget):
                     )
                     event.accept()
                     return
+            self._selected_track_id = row.track.track_id
+            self.trackSelected.emit(row.track.track_id)
+            event.accept()
+            return
         if point.x() >= HEADER_WIDTH:
             clip = self._clip_at(point)
             ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
@@ -339,10 +377,77 @@ class StudioTimelineScene(QWidget):
                 self.set_selection(tuple(selected))
             else:
                 self.set_selection((clip.clip.clip_id,))
+            if clip is not None:
+                self._selected_track_id = clip.track_id
+                self.trackSelected.emit(clip.track_id)
+                self._drag_clip = clip
+                self._drag_press_frame = self.frame_at_x(point.x())
+                self._drag_target_frame = clip.clip.start_frame
+                self._drag_target_track_id = clip.track_id
+                edge = 7.0
+                if abs(point.x() - clip.rect.left()) <= edge:
+                    self._drag_mode = "trim-left"
+                elif abs(point.x() - clip.rect.right()) <= edge:
+                    self._drag_mode = "trim-right"
+                    self._drag_target_frame = clip.clip.end_frame
+                else:
+                    self._drag_mode = "move"
             self.seekRequested.emit(self.frame_at_x(point.x()))
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._drag_clip is None or self._drag_mode is None:
+            super().mouseMoveEvent(event)
+            return
+        frame = self.frame_at_x(event.position().x())
+        self._drag_started = self._drag_started or frame != self._drag_press_frame
+        clip = self._drag_clip.clip
+        if self._drag_mode == "move":
+            delta = frame - self._drag_press_frame
+            self._drag_target_frame = max(0, clip.start_frame + delta)
+            row = self._track_at(event.position())
+            if row is not None and row.track.kind == next(
+                item.track.kind for item in self._track_layouts
+                if item.track.track_id == self._drag_clip.track_id
+            ):
+                self._drag_target_track_id = row.track.track_id
+        elif self._drag_mode == "trim-left":
+            self._drag_target_frame = min(clip.end_frame - 1, max(0, frame))
+        else:
+            duration = self._project.settings.duration_frames if self._project else clip.end_frame
+            self._drag_target_frame = max(
+                clip.start_frame + 1,
+                min(duration, frame),
+            )
+        self.update()
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() != Qt.MouseButton.LeftButton or self._drag_clip is None:
+            super().mouseReleaseEvent(event)
+            return
+        layout = self._drag_clip
+        mode = self._drag_mode
+        target = self._drag_target_frame
+        target_track = self._drag_target_track_id or layout.track_id
+        started = self._drag_started
+        self._drag_clip = None
+        self._drag_mode = None
+        self._drag_target_track_id = None
+        self._drag_started = False
+        if started and mode == "move":
+            selection = self._selected or (layout.clip.clip_id,)
+            self.clipMoveRequested.emit(
+                selection, layout.clip.clip_id, target, target_track
+            )
+        elif started and mode == "trim-left":
+            self.clipTrimRequested.emit(layout.clip.clip_id, target, layout.clip.end_frame)
+        elif started and mode == "trim-right":
+            self.clipTrimRequested.emit(layout.clip.clip_id, layout.clip.start_frame, target)
+        self.update()
+        event.accept()
 
 
 class StudioTimeline(QWidget):
@@ -350,6 +455,12 @@ class StudioTimeline(QWidget):
     trackStateRequested = Signal(str, str, bool)
     selectionChanged = Signal(object)
     seekRequested = Signal(int)
+    clipMoveRequested = Signal(object, str, int, str)
+    clipTrimRequested = Signal(str, int, int)
+    splitRequested = Signal(object)
+    duplicateRequested = Signal(object)
+    deleteRequested = Signal(object)
+    trackReorderRequested = Signal(str, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -375,6 +486,34 @@ class StudioTimeline(QWidget):
                 lambda _checked=False, selected=kind: self.addTrackRequested.emit(selected)
             )
             toolbar.addWidget(button)
+        self.split_button = QPushButton("Scinder")
+        self.duplicate_button = QPushButton("Dupliquer")
+        self.delete_button = QPushButton("Supprimer")
+        self.track_down = QPushButton("Piste ↓")
+        self.track_up = QPushButton("Piste ↑")
+        self.snap_button = QPushButton("Aimant")
+        self.snap_button.setCheckable(True)
+        self.snap_button.setChecked(True)
+        for button in (
+            self.split_button,
+            self.duplicate_button,
+            self.delete_button,
+            self.track_down,
+            self.track_up,
+            self.snap_button,
+        ):
+            toolbar.addWidget(button)
+        self.split_button.clicked.connect(
+            lambda: self.splitRequested.emit(self.selected_clip_ids)
+        )
+        self.duplicate_button.clicked.connect(
+            lambda: self.duplicateRequested.emit(self.selected_clip_ids)
+        )
+        self.delete_button.clicked.connect(
+            lambda: self.deleteRequested.emit(self.selected_clip_ids)
+        )
+        self.track_down.clicked.connect(lambda: self._request_track_reorder(-1))
+        self.track_up.clicked.connect(lambda: self._request_track_reorder(1))
         toolbar.addWidget(QLabel("Zoom"))
         self.zoom = QSlider(Qt.Orientation.Horizontal)
         self.zoom.setObjectName("studioTimelineZoom")
@@ -400,10 +539,27 @@ class StudioTimeline(QWidget):
         self.scene.seekRequested.connect(self.seekRequested)
         self.scene.selectionChanged.connect(self.selectionChanged)
         self.scene.trackStateRequested.connect(self.trackStateRequested)
+        self.scene.clipMoveRequested.connect(self.clipMoveRequested)
+        self.scene.clipTrimRequested.connect(self.clipTrimRequested)
+        self._shortcuts = (
+            QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self.delete_button.click),
+            QShortcut(QKeySequence("Ctrl+D"), self, activated=self.duplicate_button.click),
+            QShortcut(QKeySequence("S"), self, activated=self.split_button.click),
+        )
+
 
     @property
     def selected_clip_ids(self) -> tuple[str, ...]:
         return self.scene.selected_clip_ids
+
+    @property
+    def snapping_enabled(self) -> bool:
+        return self.snap_button.isChecked()
+
+    def _request_track_reorder(self, direction: int) -> None:
+        track_id = self.scene.selected_track_id
+        if track_id is not None:
+            self.trackReorderRequested.emit(track_id, int(direction))
 
     def set_project(self, project: StudioProject | None) -> None:
         self.scene.set_project(project)

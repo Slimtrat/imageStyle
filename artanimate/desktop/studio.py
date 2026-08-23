@@ -31,6 +31,7 @@ from .studio_camera import StudioCameraInspector
 from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
 from .studio_timeline import StudioTimeline
+from .studio_timeline_actions import StudioTimelineActions
 from .studio_transport import StudioTransport
 
 
@@ -378,6 +379,7 @@ class StudioPanel(QWidget):
         self.timeline.seekRequested.connect(self.transport.seek)
         self.timeline.addTrackRequested.connect(self._add_timeline_track)
         self.timeline.trackStateRequested.connect(self._timeline_track_state)
+        self.timeline_actions = StudioTimelineActions(self)
 
         self.track_summary = StudioTrackSummary()
         self.asset_panel = StudioAssetPanel()
