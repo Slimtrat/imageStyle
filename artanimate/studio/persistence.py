@@ -118,12 +118,15 @@ def find_recovery(project_path: str | Path) -> RecoveryCandidate | None:
     if not recovery.exists():
         return None
     recovery_stat = recovery.stat()
+    project = load_project(recovery)
     if source.exists() and recovery_stat.st_mtime_ns <= source.stat().st_mtime_ns:
-        return None
+        saved = load_project(source)
+        if project_digest(project) == project_digest(saved):
+            return None
     return RecoveryCandidate(
         project_path=source,
         autosave_path=recovery,
-        project=load_project(recovery),
+        project=project,
         autosave_modified_ns=recovery_stat.st_mtime_ns,
     )
 
@@ -143,6 +146,13 @@ class ProjectSession:
     @classmethod
     def new(cls, project: StudioProject) -> ProjectSession:
         return cls(project=project)
+
+    @classmethod
+    def adopted(cls, project: StudioProject) -> ProjectSession:
+        """Create an untitled clean baseline for artwork shared from legacy workspaces."""
+
+        project = project.validate()
+        return cls(project=project, _saved_digest=project_digest(project))
 
     @classmethod
     def loaded(cls, project: StudioProject, path: str | Path) -> ProjectSession:

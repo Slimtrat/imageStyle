@@ -78,9 +78,17 @@ class StudioDocumentController(QObject):
 
         if self.session is not None:
             return False
-        if not self.panel.set_artwork(path):
-            raise ValueError(f"L’œuvre ne peut pas être affichée dans le Studio : {path}")
+        self._suspend_panel_changes = True
+        try:
+            if not self.panel.set_artwork(path):
+                raise ValueError(
+                    f"L’œuvre ne peut pas être affichée dans le Studio : {path}"
+                )
+        finally:
+            self._suspend_panel_changes = False
+        self.session = ProjectSession.adopted(self.panel.project)
         self.artwork_loaded.emit(path)
+        self.dirty_changed.emit(False)
         return True
 
     def choose_artwork(self) -> bool:

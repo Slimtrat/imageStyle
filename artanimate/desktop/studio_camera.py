@@ -71,7 +71,7 @@ class StudioCameraInspector(QWidget):
         for control in self.controls:
             control.valueChanged.connect(self._emit_pose)
         self.easing.currentIndexChanged.connect(
-            lambda: self.easingChanged.emit(self.easing.currentData())
+            lambda: self.easingChanged.emit(Easing(self.easing.currentData()))
         )
         self.reset_button.clicked.connect(lambda: self.set_pose(CameraPose(), emit=True))
         self.add_keyframe_button.clicked.connect(self.addKeyframeRequested)

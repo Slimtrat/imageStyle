@@ -16,13 +16,17 @@ from PySide6.QtWidgets import (
 )
 
 from ..studio.camera import (
+    copy_camera_keyframe,
+    move_camera_keyframe,
     remove_camera_keyframe,
     resolve_camera_pose,
+    set_camera_keyframe_easing,
     upsert_camera_keyframe,
 )
 from ..studio.clock import StudioClock
-from ..studio.model import CameraPose, ClipKind, StudioProject, TrackKind
+from ..studio.model import CameraAnimation, CameraPose, ClipKind, Easing, StudioProject, TrackKind
 from .studio_camera import StudioCameraInspector
+from .studio_keyframes import StudioKeyframeStrip
 from .studio_transport import StudioTransport
 
 
@@ -345,6 +349,8 @@ class StudioPanel(QWidget):
         self.camera_inspector.removeKeyframeRequested.connect(
             self._remove_camera_keyframe
         )
+        self.camera_inspector.copyKeyframeRequested.connect(self._copy_current_camera_keyframe)
+        self.camera_inspector.easingChanged.connect(self._camera_easing_changed)
         inspector_layout.addWidget(self.camera_inspector)
         inspector_layout.addStretch(1)
         body.addWidget(inspector)
@@ -354,6 +360,15 @@ class StudioPanel(QWidget):
         self.transport.frameChanged.connect(self._frame_changed)
         self.canvas.cameraPoseChanged.connect(self._camera_pose_edited)
         page.addWidget(self.transport)
+
+        self.keyframe_strip = StudioKeyframeStrip()
+        self.keyframe_strip.seekRequested.connect(self.transport.seek)
+        self.keyframe_strip.keyframeMoved.connect(self._move_camera_keyframe)
+        self.keyframe_strip.keyframeCopied.connect(self._copy_camera_keyframe)
+        self.keyframe_strip.keyframeDeleteRequested.connect(
+            self._remove_camera_keyframe_at
+        )
+        page.addWidget(self.keyframe_strip)
 
         self.track_summary = StudioTrackSummary()
         page.addWidget(self.track_summary)
@@ -400,6 +415,28 @@ class StudioPanel(QWidget):
             pose = resolve_camera_pose(clip.camera, local_frame)
             self.canvas.set_camera_pose(pose)
             self.camera_inspector.set_pose(pose)
+            exact = next(
+                (
+                    keyframe
+                    for keyframe in clip.camera.keyframes
+                    if keyframe.frame == local_frame
+                ),
+                None,
+            )
+            self.camera_inspector.set_keyframe_state(exact is not None)
+            if exact is not None:
+                self.camera_inspector.set_easing(exact.easing)
+            self.keyframe_strip.set_animation(
+                clip.camera,
+                clip_start=clip.start_frame,
+                clip_duration=clip.duration_frames,
+            )
+        else:
+            self.camera_inspector.set_keyframe_state(False)
+            self.keyframe_strip.set_animation(
+                CameraAnimation(), clip_start=0, clip_duration=1
+            )
+        self.keyframe_strip.set_playhead(frame)
         self.frame_requested.emit(frame)
 
     def _active_camera_clip(self, frame: int):
@@ -433,8 +470,16 @@ class StudioPanel(QWidget):
         tracks[track_index] = replace(tracks[track_index], clips=tuple(clips))
         self._project = replace(self._project, tracks=tuple(tracks)).validate()
         self.track_summary.set_project(self._project)
+        updated = self._active_camera_clip(frame)
+        if updated is not None:
+            _track_index, _clip_index, updated_clip = updated
+            self.keyframe_strip.set_animation(
+                updated_clip.camera,
+                clip_start=updated_clip.start_frame,
+                clip_duration=updated_clip.duration_frames,
+            )
         self.project_changed.emit(self._project)
-        self.frame_requested.emit(frame)
+        self._frame_changed(frame)
 
     def _camera_pose_edited(self, pose: CameraPose) -> None:
         frame = self.transport.current_frame
@@ -452,17 +497,97 @@ class StudioPanel(QWidget):
         self._camera_pose_edited(self.camera_inspector.pose())
 
     def _remove_camera_keyframe(self) -> None:
+        active = self._active_camera_clip(self.transport.current_frame)
+        if active is None:
+            return
+        _track_index, _clip_index, clip = active
+        self._remove_camera_keyframe_at(
+            self.transport.current_frame - clip.start_frame
+        )
+
+    def _remove_camera_keyframe_at(self, local_frame: int) -> None:
         frame = self.transport.current_frame
         active = self._active_camera_clip(frame)
         if active is None:
             return
         _track_index, _clip_index, clip = active
-        local_frame = frame - clip.start_frame
-        animation = remove_camera_keyframe(clip.camera, local_frame)
+        try:
+            animation = remove_camera_keyframe(clip.camera, local_frame)
+        except KeyError:
+            return
         self._replace_camera_animation(animation)
-        pose = resolve_camera_pose(animation, local_frame)
+        current_local = frame - clip.start_frame
+        pose = resolve_camera_pose(animation, current_local)
         self.canvas.set_camera_pose(pose)
         self.camera_inspector.set_pose(pose)
+        self._frame_changed(frame)
+
+    def _move_camera_keyframe(self, source: int, target: int) -> None:
+        active = self._active_camera_clip(self.transport.current_frame)
+        if active is None:
+            return
+        _track_index, _clip_index, clip = active
+        try:
+            animation = move_camera_keyframe(
+                clip.camera,
+                source,
+                target,
+                clip_duration_frames=clip.duration_frames,
+            )
+        except (KeyError, ValueError) as exc:
+            self.project_status.setText(f"Keyframe inchangé · {exc}")
+            self._frame_changed(self.transport.current_frame)
+            return
+        self._replace_camera_animation(animation)
+        self.transport.seek(clip.start_frame + target)
+
+    def _copy_camera_keyframe(self, source: int, target: int) -> None:
+        active = self._active_camera_clip(self.transport.current_frame)
+        if active is None:
+            return
+        _track_index, _clip_index, clip = active
+        try:
+            animation = copy_camera_keyframe(
+                clip.camera,
+                source,
+                target,
+                clip_duration_frames=clip.duration_frames,
+            )
+        except (KeyError, ValueError) as exc:
+            self.project_status.setText(f"Keyframe inchangé · {exc}")
+            self._frame_changed(self.transport.current_frame)
+            return
+        self._replace_camera_animation(animation)
+        self.transport.seek(clip.start_frame + target)
+
+    def _copy_current_camera_keyframe(self) -> None:
+        active = self._active_camera_clip(self.transport.current_frame)
+        if active is None:
+            return
+        _track_index, _clip_index, clip = active
+        source = self.transport.current_frame - clip.start_frame
+        occupied = {keyframe.frame for keyframe in clip.camera.keyframes}
+        target = next(
+            (frame for frame in range(source + 1, clip.duration_frames) if frame not in occupied),
+            None,
+        )
+        if target is None:
+            self.project_status.setText("Aucune image libre après ce keyframe")
+            return
+        self._copy_camera_keyframe(source, target)
+
+    def _camera_easing_changed(self, easing: Easing) -> None:
+        easing = Easing(easing)
+        active = self._active_camera_clip(self.transport.current_frame)
+        if active is None:
+            return
+        _track_index, _clip_index, clip = active
+        local_frame = self.transport.current_frame - clip.start_frame
+        try:
+            animation = set_camera_keyframe_easing(clip.camera, local_frame, easing)
+        except KeyError:
+            return
+        self._replace_camera_animation(animation)
 
     def activate(self) -> None:
         self.canvas.update()
