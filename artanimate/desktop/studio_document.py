@@ -7,7 +7,17 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSettings, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
-from ..studio.assets import resolve_asset_path, stored_asset_path
+from ..studio.assets import (
+    AUDIO_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    register_media_asset,
+    relink_artwork_asset,
+    relink_media_asset,
+    relink_project_from_folders,
+    resolve_asset_path,
+    stored_asset_path,
+)
 from ..studio.model import MediaAsset, StudioProject
 from ..studio.persistence import (
     PROJECT_SUFFIX,
@@ -49,6 +59,10 @@ class StudioDocumentController(QObject):
         self.session: ProjectSession | None = None
         self._suspend_panel_changes = False
         self.panel.project_changed.connect(self._panel_project_changed)
+        self.panel.asset_panel.importRequested.connect(self.import_media)
+        self.panel.asset_panel.relinkRequested.connect(self.relink_asset)
+        self.panel.asset_panel.folderRelinkRequested.connect(self.relink_folder)
+        self.panel.asset_panel.refreshRequested.connect(self.refresh_assets)
         self.autosave_timer = QTimer(self)
         self.autosave_timer.setInterval(AUTOSAVE_INTERVAL_MS)
         self.autosave_timer.timeout.connect(self.autosave)
@@ -72,6 +86,7 @@ class StudioDocumentController(QObject):
         else:
             self.session = ProjectSession.new(project)
         self.dirty_changed.emit(self.dirty)
+        self.refresh_assets()
 
     def adopt_artwork(self, path: Path) -> bool:
         """Initialize Studio from the shared V2 artwork without replacing a project."""
@@ -89,6 +104,7 @@ class StudioDocumentController(QObject):
         self.session = ProjectSession.adopted(self.panel.project)
         self.artwork_loaded.emit(path)
         self.dirty_changed.emit(False)
+        self.refresh_assets()
         return True
 
     def choose_artwork(self) -> bool:
@@ -183,6 +199,7 @@ class StudioDocumentController(QObject):
         finally:
             self._suspend_panel_changes = False
         self.dirty_changed.emit(False)
+        self.refresh_assets()
 
     def _choose_save_path(self) -> Path | None:
         initial = str(self.session.path) if self.session and self.session.path else ""
@@ -195,7 +212,7 @@ class StudioDocumentController(QObject):
         return normalize_project_path(selected) if selected else None
 
     def _rebase_paths(self, project: StudioProject, destination: Path) -> StudioProject:
-        previous_path = self.session.path if self.session is not None else None
+        previous_path = self._asset_context_path()
 
         def resolved(stored: str) -> Path:
             if previous_path is not None:
@@ -247,6 +264,7 @@ class StudioDocumentController(QObject):
         self.dirty_changed.emit(False)
         logger.info("Projet Studio enregistré : %s", destination)
         return True
+        self.refresh_assets()
 
     def autosave(self) -> bool:
         if self.session is None or self.session.path is None or not self.session.dirty:
@@ -288,6 +306,147 @@ class StudioDocumentController(QObject):
             if path.exists() and path not in paths:
                 paths.append(path)
         return tuple(paths[:MAX_RECENT_PROJECTS])
+    def _asset_context_path(self) -> Path:
+        if self.session is not None and self.session.path is not None:
+            return self.session.path
+        project = self.panel.project
+        if project is None:
+            return Path.cwd() / "untitled.artanimate"
+        artwork = Path(project.artwork.path)
+        parent = artwork.resolve(strict=False).parent if artwork.is_absolute() else Path.cwd()
+        return parent / f".{project.project_id}.artanimate"
+
+    def refresh_assets(self) -> None:
+        self.panel.asset_panel.set_context(
+            self.panel.project,
+            self._asset_context_path() if self.panel.project is not None else None,
+        )
+
+    @staticmethod
+    def _media_filter() -> str:
+        all_extensions = sorted(IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS)
+        images = " ".join(f"*{suffix}" for suffix in sorted(IMAGE_EXTENSIONS))
+        videos = " ".join(f"*{suffix}" for suffix in sorted(VIDEO_EXTENSIONS))
+        audio = " ".join(f"*{suffix}" for suffix in sorted(AUDIO_EXTENSIONS))
+        supported = " ".join(f"*{suffix}" for suffix in all_extensions)
+        return (
+            f"Médias pris en charge ({supported});;"
+            f"Images ({images});;Vidéos ({videos});;Audio ({audio})"
+        )
+
+    def import_media(self, path: str | Path | None = None) -> bool:
+        if self.session is None:
+            return False
+        source = Path(path) if path is not None else None
+        if source is None:
+            selected, _ = QFileDialog.getOpenFileName(
+                self.parent_widget,
+                "Importer une référence locale sans la copier",
+                "",
+                self._media_filter(),
+            )
+            if not selected:
+                return False
+            source = Path(selected)
+        try:
+            updated, asset, created = register_media_asset(
+                self.session.project,
+                source,
+                self._asset_context_path(),
+            )
+            if created:
+                self.panel.set_project(updated)
+                message = f"Référence ajoutée · {source.name} · aucun fichier copié"
+            else:
+                message = f"Référence déjà partagée · {source.name} · {asset.asset_id}"
+            self.panel.asset_panel.set_feedback(message)
+        except Exception as exc:
+            QMessageBox.critical(
+                self.parent_widget,
+                "Import du média impossible",
+                str(exc),
+            )
+            return False
+        return True
+
+    def relink_asset(self, asset_id: str, path: str | Path | None = None) -> bool:
+        if self.session is None:
+            return False
+        project = self.session.project
+        is_artwork = asset_id == project.artwork.asset_id
+        asset = next((item for item in project.assets if item.asset_id == asset_id), None)
+        if not is_artwork and asset is None:
+            return False
+        source = Path(path) if path is not None else None
+        if source is None:
+            image_filter = "Images (" + " ".join(
+                f"*{suffix}" for suffix in sorted(IMAGE_EXTENSIONS)
+            ) + ")"
+            selected, _ = QFileDialog.getOpenFileName(
+                self.parent_widget,
+                "Relink l’œuvre maîtresse" if is_artwork else "Relink le média local",
+                "",
+                image_filter if is_artwork else self._media_filter(),
+            )
+            if not selected:
+                return False
+            source = Path(selected)
+        try:
+            if is_artwork:
+                updated = relink_artwork_asset(
+                    project, source, self._asset_context_path()
+                )
+            else:
+                updated = relink_media_asset(
+                    project, asset_id, source, self._asset_context_path()
+                )
+            self.panel.set_project(updated)
+            if is_artwork:
+                self.panel.canvas.set_artwork(source)
+                self.artwork_loaded.emit(source)
+            self.panel.asset_panel.set_feedback(
+                f"Relink effectué · {source.name} · toutes les références partagées sont à jour"
+            )
+        except Exception as exc:
+            QMessageBox.critical(self.parent_widget, "Relink impossible", str(exc))
+            return False
+        return True
+
+    def relink_folder(self, root: str | Path | None = None) -> bool:
+        if self.session is None:
+            return False
+        folder = Path(root) if root is not None else None
+        if folder is None:
+            selected = QFileDialog.getExistingDirectory(
+                self.parent_widget,
+                "Rechercher les médias déplacés dans un dossier",
+                "",
+            )
+            if not selected:
+                return False
+            folder = Path(selected)
+        try:
+            updated, result = relink_project_from_folders(
+                self.session.project, (folder,), self._asset_context_path()
+            )
+            if result.relinked:
+                self.panel.set_project(updated)
+                if updated.artwork.asset_id in result.relinked:
+                    artwork_path = resolve_asset_path(
+                        updated.artwork.path, self._asset_context_path()
+                    )
+                    self.panel.canvas.set_artwork(artwork_path)
+                    self.artwork_loaded.emit(artwork_path)
+            self.refresh_assets()
+            self.panel.asset_panel.set_feedback(
+                f"Recherche terminée · {len(result.relinked)} relinké(s) · "
+                f"{len(result.unresolved)} introuvable(s) · {len(result.ambiguous)} ambigu(s)"
+            )
+        except Exception as exc:
+            QMessageBox.critical(self.parent_widget, "Recherche de médias impossible", str(exc))
+            return False
+        return bool(result.relinked)
+
 
     def _record_recent(self, path: Path) -> None:
         resolved = path.resolve(strict=False)

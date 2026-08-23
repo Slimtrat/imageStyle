@@ -41,6 +41,13 @@ class AssetCheck:
     message: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class FolderRelinkResult:
+    relinked: tuple[str, ...] = ()
+    unresolved: tuple[str, ...] = ()
+    ambiguous: tuple[str, ...] = ()
+
+
 def fingerprint_file(path: str | Path) -> FileIdentity:
     source = Path(path)
     stat = source.stat()
@@ -88,6 +95,18 @@ def _extensions(kind: AssetKind) -> set[str]:
         AssetKind.VIDEO: VIDEO_EXTENSIONS,
         AssetKind.AUDIO: AUDIO_EXTENSIONS,
     }[kind]
+
+
+def asset_kind_for_path(path: str | Path) -> AssetKind:
+    suffix = Path(path).suffix.casefold()
+    for kind in AssetKind:
+        if suffix in _extensions(kind):
+            return kind
+    supported = sorted(IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS)
+    raise ValueError(
+        f"Extension {suffix or 'absente'} non prise en charge. "
+        f"Formats acceptés : {', '.join(supported)}"
+    )
 
 
 def _validate_kind(path: Path, kind: AssetKind) -> tuple[int | None, int | None]:
@@ -148,6 +167,30 @@ def import_artwork_asset(
         width=width,
         height=height,
     ).validate()
+
+
+def register_media_asset(
+    project: StudioProject,
+    path: str | Path,
+    project_path: str | Path,
+) -> tuple[StudioProject, MediaAsset, bool]:
+    """Register a reference only; identical media reuse their existing asset id."""
+
+    kind = asset_kind_for_path(path)
+    imported = import_media_asset(path, kind, project_path)
+    existing = next(
+        (
+            asset
+            for asset in project.assets
+            if asset.kind == imported.kind
+            and asset.fingerprint == imported.fingerprint
+        ),
+        None,
+    )
+    if existing is not None:
+        return project, existing, False
+    updated = replace(project, assets=(*project.assets, imported)).validate()
+    return updated, imported, True
 
 
 def check_media_asset(asset: MediaAsset, project_path: str | Path) -> AssetCheck:
@@ -242,4 +285,64 @@ def find_relink_candidates(
             if asset.fingerprint is None or identity.fingerprint == asset.fingerprint:
                 matches.append(candidate.resolve())
     return tuple(sorted(set(matches), key=lambda path: str(path).casefold()))
+
+
+def relink_project_from_folders(
+    project: StudioProject,
+    roots: Iterable[str | Path],
+    project_path: str | Path,
+) -> tuple[StudioProject, FolderRelinkResult]:
+    """Relink unambiguous missing/replaced references without copying any media."""
+
+    roots = tuple(Path(root) for root in roots)
+    updated = project
+    relinked: list[str] = []
+    unresolved: list[str] = []
+    ambiguous: list[str] = []
+
+    artwork_check = check_artwork_asset(updated.artwork, project_path)
+    if artwork_check.state != AssetAvailability.AVAILABLE:
+        artwork_proxy = MediaAsset(
+            asset_id=updated.artwork.asset_id,
+            kind=AssetKind.IMAGE,
+            path=updated.artwork.path,
+            fingerprint=updated.artwork.fingerprint,
+            width=updated.artwork.width,
+            height=updated.artwork.height,
+        )
+        candidates = find_relink_candidates(artwork_proxy, roots)
+        if len(candidates) == 1:
+            updated = relink_artwork_asset(updated, candidates[0], project_path)
+            relinked.append(updated.artwork.asset_id)
+        elif len(candidates) > 1:
+            ambiguous.append(updated.artwork.asset_id)
+        else:
+            unresolved.append(updated.artwork.asset_id)
+
+    for original in project.assets:
+        current = next(
+            asset for asset in updated.assets if asset.asset_id == original.asset_id
+        )
+        check = check_media_asset(current, project_path)
+        if check.state == AssetAvailability.AVAILABLE:
+            continue
+        candidates = find_relink_candidates(current, roots)
+        if len(candidates) == 1:
+            updated = relink_media_asset(
+                updated,
+                current.asset_id,
+                candidates[0],
+                project_path,
+            )
+            relinked.append(current.asset_id)
+        elif len(candidates) > 1:
+            ambiguous.append(current.asset_id)
+        else:
+            unresolved.append(current.asset_id)
+
+    return updated, FolderRelinkResult(
+        relinked=tuple(relinked),
+        unresolved=tuple(unresolved),
+        ambiguous=tuple(ambiguous),
+    )
 

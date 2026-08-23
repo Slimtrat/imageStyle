@@ -26,6 +26,7 @@ from ..studio.camera import (
 from ..studio.clock import StudioClock
 from ..studio.model import CameraAnimation, CameraPose, ClipKind, Easing, StudioProject, TrackKind
 from .studio_camera import StudioCameraInspector
+from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
 from .studio_transport import StudioTransport
 
@@ -372,6 +373,9 @@ class StudioPanel(QWidget):
 
         self.track_summary = StudioTrackSummary()
         page.addWidget(self.track_summary)
+
+        self.asset_panel = StudioAssetPanel()
+        page.addWidget(self.asset_panel)
 
     @property
     def project(self) -> StudioProject | None:
