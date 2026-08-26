@@ -79,12 +79,12 @@ analyse enrichie ajoute des possibilités sans changer le format des capabilitie
 
 ## P5 — Premières capabilities sémantiques
 
-- [ ] **SEM-01** `object.move` déterministe avec masque manuel. `[PAR-D]`
-- [ ] **SEM-02** `object.exit_frame` avec événements `started/completed/object_exited`. `[PAR-D]`
-- [ ] **SEM-03** `scene.parallax` basé sur depth/layers. `[PAR-E]`
-- [ ] **SEM-04** `camera.inspect` et `camera.zoom_out` sur la même œuvre. `[PAR-E]`
-- [ ] **SEM-05** `environment.particles` ciblé sur scène ou objet. `[PAR-D]`
-- [ ] **SEM-06** Dégrader proprement quand masque/depth/renderer manque.
+- [x] **SEM-01** `object.move` déterministe avec masque manuel. `[PAR-D]`
+- [x] **SEM-02** `object.exit_frame` avec événements `started/completed/object-exited`. `[PAR-D]`
+- [x] **SEM-03** `scene.parallax` basé sur depth/layers. `[PAR-E]`
+- [x] **SEM-04** `camera.inspect` et `camera.zoom_out` sur la même œuvre. `[PAR-E]`
+- [x] **SEM-05** `environment.particles` ciblé sur scène ou objet. `[PAR-D]`
+- [x] **SEM-06** Dégrader proprement quand masque/depth/renderer manque.
 
 Critère de fin P5 : un objet sélectionné quitte réellement l'œuvre dans un clip
 contrôlable, combiné à une caméra et un reveal existant.

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..studio.adapters.classic_2d import build_legacy_capability_registry
+from ..studio.adapters.classic_2d import build_studio_capability_registry
 from ..studio.model import AssetKind, StudioProject
 from ..studio.semantic import (
     AvailabilityStatus,
@@ -71,7 +71,7 @@ class StudioSemanticPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("studioSemanticPanel")
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.registry = capabilities or build_legacy_capability_registry()
+        self.registry = capabilities or build_studio_capability_registry()
         self._project: StudioProject | None = None
         self._target_id: str | None = None
         self._capability_id: str | None = None
@@ -308,6 +308,8 @@ class StudioSemanticPanel(QFrame):
     def _effective_target(self, descriptor: CapabilityDescriptor) -> str | None:
         if self._project is None or self._project.scene is None:
             return None
+        if descriptor.capability_id == "camera.inspect":
+            return self._target_id
         if descriptor.category == "camera":
             return "camera" if self._project.scene.object_by_id("camera") else None
         if descriptor.category in {"media", "audio"}:

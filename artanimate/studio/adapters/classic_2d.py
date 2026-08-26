@@ -25,7 +25,9 @@ from ..semantic import (
     RenderPlanEntry,
     RenderRequest,
 )
+from ..semantic_actions import semantic_action_catalog
 from .catalog import effect_capability_id, legacy_capability_catalog
+from .semantic_actions import LocalSemanticActionRenderer
 
 
 class ClosedPreparedRenderError(RuntimeError):
@@ -253,6 +255,20 @@ def _create_legacy_capability_registry() -> CapabilityRegistry:
         registry.register(capability)
     return registry.freeze()
 
+def _create_studio_capability_registry() -> CapabilityRegistry:
+    registry = CapabilityRegistry()
+    for capability in (*legacy_capability_catalog(), *semantic_action_catalog()):
+        registry.register(capability)
+    return registry.freeze()
+
+
+_STUDIO_CAPABILITY_REGISTRY = _create_studio_capability_registry()
+
+
+def build_studio_capability_registry() -> CapabilityRegistry:
+    return _STUDIO_CAPABILITY_REGISTRY
+
+
 
 
 _LEGACY_CAPABILITY_REGISTRY = _create_legacy_capability_registry()
@@ -266,6 +282,7 @@ def build_classic_2d_renderer_registry(
     project: StudioProject,
     artwork_path: str | Path,
     *,
+    resource_base: str | Path | None = None,
     sources: ArtworkSourceRegistry | None = None,
     extra_renderers: tuple[CapabilityRenderer, ...] = (),
 ) -> RendererRegistry:
@@ -274,6 +291,13 @@ def build_classic_2d_renderer_registry(
     registry = RendererRegistry()
     registry.register(
         ClassicArtworkCapabilityRenderer(project, artwork_path, source_registry)
+    )
+    registry.register(
+        LocalSemanticActionRenderer(
+            project,
+            artwork_path,
+            resource_base=resource_base,
+        )
     )
     registry.register(ClassicCameraCapabilityRenderer())
     for capability in legacy_capability_catalog():

@@ -14,12 +14,13 @@ from .model import (
     Track,
     TrackKind,
 )
+from .semantic_actions import is_semantic_action_clip
 
 OVERLAP_POLICY = "layered"
 
 
 def _validate_effect_2d_edit(project: StudioProject, clip: Clip) -> None:
-    if clip.kind != ClipKind.EFFECT_2D:
+    if clip.kind != ClipKind.EFFECT_2D or is_semantic_action_clip(clip):
         return
     settings = settings_for_effect_clip(clip)
     config = settings.config
@@ -47,6 +48,40 @@ def _validate_effect_2d_edit(project: StudioProject, clip: Clip) -> None:
         raise ValueError("Le calque d’effet 2D doit rester dans le plan de l’œuvre ciblé")
 
 
+
+
+def _semantic_action_invocation(project: StudioProject, clip: Clip):
+    if not is_semantic_action_clip(clip) or clip.invocation_id is None:
+        return None
+    try:
+        return next(
+            item
+            for item in project.invocations
+            if item.invocation_id == clip.invocation_id
+        )
+    except StopIteration as exc:
+        raise ValueError("Le clip d’action ne référence aucune invocation") from exc
+
+
+def _sync_semantic_action_clip(
+    project: StudioProject,
+    clip: Clip,
+) -> StudioProject:
+    invocation = _semantic_action_invocation(project, clip)
+    if invocation is None:
+        return project
+    invocations = tuple(
+        replace(
+            item,
+            start_frame=clip.start_frame,
+            duration_frames=clip.duration_frames,
+            enabled=clip.enabled,
+        )
+        if item.invocation_id == invocation.invocation_id
+        else item
+        for item in project.invocations
+    )
+    return replace(project, invocations=invocations).validate()
 
 
 def track_by_id(project: StudioProject, track_id: str) -> tuple[int, Track]:
@@ -191,11 +226,12 @@ def move_clip(
     if target_track_index == source_track_index:
         source_clips.append(moved)
         source_clips.sort(key=lambda item: (item.start_frame, item.clip_id))
-        return _replace_track(
+        updated = _replace_track(
             project,
             source_track_index,
             replace(source_track, clips=tuple(source_clips)),
         )
+        return _sync_semantic_action_clip(updated, moved)
 
     target_clips = [*target_track.clips, moved]
     target_clips.sort(key=lambda item: (item.start_frame, item.clip_id))
@@ -204,7 +240,8 @@ def move_clip(
     tracks = list(project.tracks)
     tracks[source_track_index] = updated_source
     tracks[target_track_index] = updated_target
-    return replace(project, tracks=tuple(tracks)).validate()
+    updated = replace(project, tracks=tuple(tracks)).validate()
+    return _sync_semantic_action_clip(updated, moved)
 
 
 def _trim_camera(
@@ -255,7 +292,8 @@ def trim_clip(
     clips = list(track.clips)
     clips[clip_index] = trimmed
     clips.sort(key=lambda item: (item.start_frame, item.clip_id))
-    return _replace_track(project, track_index, replace(track, clips=tuple(clips)))
+    updated = _replace_track(project, track_index, replace(track, clips=tuple(clips)))
+    return _sync_semantic_action_clip(updated, trimmed)
 
 
 def _split_camera(
@@ -318,7 +356,41 @@ def split_clip(
     clips = list(track.clips)
     clips[clip_index : clip_index + 1] = (left, right)
     clips.sort(key=lambda item: (item.start_frame, item.clip_id))
-    updated = _replace_track(project, track_index, replace(track, clips=tuple(clips)))
+    invocation = _semantic_action_invocation(project, clip)
+    if invocation is None:
+        updated = _replace_track(
+            project,
+            track_index,
+            replace(track, clips=tuple(clips)),
+        )
+    else:
+        right_invocation_id = f"inv-{uuid4().hex}"
+        right = replace(right, invocation_id=right_invocation_id).validate()
+        clips = list(track.clips)
+        clips[clip_index : clip_index + 1] = (left, right)
+        clips.sort(key=lambda item: (item.start_frame, item.clip_id))
+        invocations = tuple(
+            replace(item, duration_frames=left_duration)
+            if item.invocation_id == invocation.invocation_id
+            else item
+            for item in project.invocations
+        )
+        invocations = (
+            *invocations,
+            replace(
+                invocation,
+                invocation_id=right_invocation_id,
+                start_frame=frame,
+                duration_frames=right_duration,
+            ),
+        )
+        tracks = list(project.tracks)
+        tracks[track_index] = replace(track, clips=tuple(clips))
+        updated = replace(
+            project,
+            tracks=tuple(tracks),
+            invocations=invocations,
+        ).validate()
     return updated, right
 
 
@@ -342,11 +414,30 @@ def duplicate_clip(
         clip_id=f"{clip.clip_id}-copy-{uuid4().hex[:8]}",
         start_frame=int(target_frame),
     ).validate()
+    invocation = _semantic_action_invocation(project, clip)
+    base_project = project
+    if invocation is not None:
+        duplicate_invocation_id = f"inv-{uuid4().hex}"
+        duplicate = replace(
+            duplicate,
+            invocation_id=duplicate_invocation_id,
+        ).validate()
+        base_project = replace(
+            project,
+            invocations=(
+                *project.invocations,
+                replace(
+                    invocation,
+                    invocation_id=duplicate_invocation_id,
+                    start_frame=int(target_frame),
+                ),
+            ),
+        ).validate()
     _validate_effect_2d_edit(project, duplicate)
     temporary_track = replace(track, clips=(*track.clips, duplicate))
     temporary = _replace_track(
-        project,
-        track_by_id(project, track.track_id)[0],
+        base_project,
+        track_by_id(base_project, track.track_id)[0],
         temporary_track,
     )
     if target_track_id is not None and target_track_id != track.track_id:
@@ -363,6 +454,13 @@ def delete_clips(project: StudioProject, clip_ids: tuple[str, ...]) -> StudioPro
     selected = set(clip_ids)
     if not selected:
         return project
+    action_invocation_ids = {
+        clip.invocation_id
+        for track in project.tracks
+        for clip in track.clips
+        if clip.clip_id in selected and is_semantic_action_clip(clip)
+        and clip.invocation_id is not None
+    }
     known = {clip.clip_id for track in project.tracks for clip in track.clips}
     missing = selected - known
     if missing:
@@ -383,7 +481,31 @@ def delete_clips(project: StudioProject, clip_ids: tuple[str, ...]) -> StudioPro
         if transition.from_clip_id not in selected
         and transition.to_clip_id not in selected
     )
-    return replace(project, tracks=tuple(tracks), transitions=transitions).validate()
+    remaining_action_ids = {
+        clip.invocation_id
+        for track in tracks
+        for clip in track.clips
+        if is_semantic_action_clip(clip) and clip.invocation_id is not None
+    }
+    removed_invocation_ids = action_invocation_ids - remaining_action_ids
+    invocations = tuple(
+        item
+        for item in project.invocations
+        if item.invocation_id not in removed_invocation_ids
+    )
+    triggers = tuple(
+        item
+        for item in project.triggers
+        if item.source_invocation_id not in removed_invocation_ids
+        and item.action_invocation_id not in removed_invocation_ids
+    )
+    return replace(
+        project,
+        tracks=tuple(tracks),
+        transitions=transitions,
+        invocations=invocations,
+        triggers=triggers,
+    ).validate()
 
 
 def reorder_track(

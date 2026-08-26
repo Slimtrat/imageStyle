@@ -16,6 +16,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDoubleSpinBox
 
 from artanimate.core.config import RenderConfig
+from artanimate.studio.analysis import add_manual_mask
 from artanimate.desktop.studio import StudioPanel
 from artanimate.desktop.studio_semantic import StudioSemanticPanel
 from artanimate.studio.effect_2d import settings_for_effect_clip
@@ -27,6 +28,7 @@ from artanimate.studio.semantic import (
     CapabilityRequirement,
     SceneObject,
 )
+from artanimate.studio.semantic_actions import is_semantic_action_clip
 
 
 @pytest.fixture(scope="module")
@@ -251,5 +253,77 @@ def test_scene_and_canvas_selection_are_bidirectional(app, tmp_path: Path) -> No
         )
         assert panel.semantic_panel.selected_target_id == "artwork"
         assert panel.canvas.semantic_target_id == "artwork"
+    finally:
+        panel.shutdown()
+
+
+def test_manual_mask_unlocks_a_timeline_backed_object_action(
+    app,
+    tmp_path: Path,
+) -> None:
+    panel = StudioPanel()
+    try:
+        artwork = _artwork(tmp_path, "semantic-action.png")
+        mask = tmp_path / "subject-mask.png"
+        Image.new("L", (160, 100), 0).save(mask)
+        with Image.open(mask) as source:
+            editable = source.copy()
+        for x in range(40, 90):
+            for y in range(20, 75):
+                editable.putpixel((x, y), 255)
+        editable.save(mask)
+
+        assert panel.set_artwork(artwork)
+        assert panel.project is not None
+        project, subject = add_manual_mask(
+            panel.project,
+            mask,
+            tmp_path / "semantic-action.artanimate",
+            bounds=Bounds(0.25, 0.2, 0.32, 0.55),
+            label="Sujet",
+        )
+        panel.set_project(project, reset_history=True)
+        semantic = panel.semantic_panel
+        assert semantic.select_target(subject.object_id)
+        move = semantic.capability_item("object.move")
+        assert move is not None
+        semantic.capability_tree.setCurrentItem(move)
+        assert move.text(1) == "Disponible"
+        assert semantic.add_button.isEnabled()
+
+        semantic.add_button.click()
+        app.processEvents()
+        assert panel.project is not None
+        action_clips = tuple(
+            clip
+            for track in panel.project.tracks
+            for clip in track.clips
+            if is_semantic_action_clip(clip)
+        )
+        assert len(action_clips) == 1
+        action_clip = action_clips[0]
+        assert action_clip.start_frame == panel.transport.current_frame
+        assert action_clip.duration_frames == panel.project.settings.fps * 2
+        invocation = next(
+            item
+            for item in panel.project.invocations
+            if item.invocation_id == action_clip.invocation_id
+        )
+        assert invocation.capability_id == "object.move"
+        assert panel.history.undo_label == "Ajouter l’action Déplacer cet élément"
+
+        semantic.delete_button.click()
+        app.processEvents()
+        assert not any(
+            is_semantic_action_clip(clip)
+            for track in panel.project.tracks
+            for clip in track.clips
+        )
+        assert panel.undo()
+        assert any(
+            is_semantic_action_clip(clip)
+            for track in panel.project.tracks
+            for clip in track.clips
+        )
     finally:
         panel.shutdown()

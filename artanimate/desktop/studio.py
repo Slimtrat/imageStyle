@@ -45,6 +45,11 @@ from ..studio.effect_2d import (
     settings_for_effect_clip,
     update_effect_clip,
 )
+from ..studio.semantic_actions import (
+    add_semantic_action_clip,
+    is_semantic_action_capability,
+    is_semantic_action_clip,
+)
 from ..studio.camera_presets import CameraPreset, PresetApplyMode, apply_camera_preset
 from ..studio.adapters.legacy_project import project_as_semantic
 from ..studio.semantic import Bounds, CapabilityInvocation, SemanticScene
@@ -1027,6 +1032,9 @@ class StudioPanel(QWidget):
             self._project,
             self.canvas.artwork_path,
             frame,
+            resource_base=(
+                self.asset_panel.project_path.parent if self.asset_panel.project_path else None
+            ),
         )
 
     def _preview_ready(self, frame: int, image: QImage, cached: bool) -> None:
@@ -1383,10 +1391,11 @@ class StudioPanel(QWidget):
                 self.commit_project(replace(project, tracks=tuple(tracks)), label)
                 return
 
+            semantic_action = is_semantic_action_capability(capability_id)
             parameters = descriptor.normalize_parameters(values)
             start = self.transport.current_frame
             duration = min(
-                project.settings.fps,
+                project.settings.fps * (2 if semantic_action else 1),
                 project.settings.duration_frames - start,
             )
             invocation = CapabilityInvocation.create(
@@ -1396,12 +1405,17 @@ class StudioPanel(QWidget):
                 target_id=target_id or None,
                 parameters=parameters,
             )
-            updated = replace(
-                project,
-                invocations=(*project.invocations, invocation),
-            )
+            if semantic_action:
+                updated, action_clip = add_semantic_action_clip(project, invocation)
+            else:
+                updated = replace(
+                    project,
+                    invocations=(*project.invocations, invocation),
+                )
             self.commit_project(updated, f"Ajouter l’action {descriptor.label}")
             self.semantic_panel.select_invocation(invocation.invocation_id)
+            if semantic_action:
+                self.timeline.scene.set_selection((action_clip.clip_id,))
         except (IndexError, KeyError, TypeError, ValueError, PermissionError) as exc:
             self.project_status.setText(f"Action inchangée · {exc}")
 
@@ -1437,6 +1451,22 @@ class StudioPanel(QWidget):
                 return
 
             binding, track_index, clip_index, clip = resolved
+            if is_semantic_action_clip(clip):
+                descriptor = self.semantic_panel.registry.get(
+                    invocation.capability_id
+                )
+                normalized = descriptor.normalize_parameters(values)
+                invocations = tuple(
+                    replace(item, parameters=normalized)
+                    if item.invocation_id == invocation_id else item
+                    for item in project.invocations
+                )
+                self.commit_project(
+                    replace(project, invocations=invocations),
+                    f"Régler l’action {descriptor.label}",
+                    merge_key=f"semantic-invocation:{invocation_id}",
+                )
+                return
             if binding.role == "effect":
                 settings = settings_for_effect_clip(clip)
                 config = RenderConfig.from_dict(values["render_config"])

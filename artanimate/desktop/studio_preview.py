@@ -54,6 +54,7 @@ class StudioPreviewWorker(QObject):
         proxy_width: int,
         cache: StudioProxyCache,
         sources: ArtworkSourceRegistry,
+        resource_base: Path | None,
         three_d_capture: Studio3DCaptureBridge,
     ):
         super().__init__()
@@ -66,6 +67,7 @@ class StudioPreviewWorker(QObject):
         self.sources = sources
         self._cancelled = Event()
         self.three_d_capture = three_d_capture
+        self.resource_base = resource_base
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -88,6 +90,7 @@ class StudioPreviewWorker(QObject):
                 source_registry=self.sources,
                 cancelled=self._cancelled,
                 extra_renderers=(three_d_renderer,),
+                resource_base=self.resource_base,
             )
             if frame is not None and not self._cancelled.is_set():
                 self.ready.emit(
@@ -139,6 +142,8 @@ class StudioPreviewController(QObject):
         project: StudioProject,
         artwork_path: str | Path,
         frame: int,
+        *,
+        resource_base: str | Path | None = None,
     ) -> int:
         if self._shutting_down:
             return self._revision
@@ -156,6 +161,7 @@ class StudioPreviewController(QObject):
             self.proxy_width,
             self.cache,
             self.sources,
+            Path(resource_base) if resource_base is not None else None,
             self.three_d_capture,
         )
         worker.ready.connect(

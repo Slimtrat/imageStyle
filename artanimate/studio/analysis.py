@@ -346,6 +346,7 @@ class LocalCompositionAnalyzer:
                 }
             ),
             affordances=(
+                Affordance("camera-inspectable", confidence, source=source),
                 Affordance("frame-exitable", confidence, source=source),
                 Affordance("movable", confidence, source=source),
             ),
@@ -586,6 +587,7 @@ def add_manual_selection(
         bounds=bounds,
         attributes=FrozenJsonObject({"editable": True, "manual": True}),
         affordances=(
+            Affordance("camera-inspectable", source="manual.selection"),
             Affordance("frame-exitable", source="manual.selection"),
             Affordance("movable", source="manual.selection"),
         ),
@@ -634,6 +636,7 @@ def add_manual_mask(
         ),
         attributes=FrozenJsonObject({"editable": True, "manual": True}),
         affordances=(
+            Affordance("camera-inspectable", source="manual.mask"),
             Affordance("frame-exitable", source="manual.mask"),
             Affordance("movable", source="manual.mask"),
         ),
@@ -710,6 +713,25 @@ def remove_scene_object(project: StudioProject, object_id: str) -> StudioProject
         if item.source_invocation_id not in removed_invocation_ids
         and item.action_invocation_id not in removed_invocation_ids
     )
+    removed_clip_ids = {
+        clip.clip_id
+        for track in project.tracks
+        for clip in track.clips
+        if clip.invocation_id in removed_invocation_ids
+    }
+    tracks = tuple(
+        replace(
+            track,
+            clips=tuple(
+                clip for clip in track.clips if clip.clip_id not in removed_clip_ids
+            ),
+        )
+        for track in project.tracks
+    )
+    transitions = tuple(
+        item for item in project.transitions
+        if item.from_clip_id not in removed_clip_ids and item.to_clip_id not in removed_clip_ids
+    )
     referenced_assets = {
         resource.asset_id
         for item in objects
@@ -723,6 +745,8 @@ def remove_scene_object(project: StudioProject, object_id: str) -> StudioProject
     scene = replace(project.scene, objects=objects, relations=relations)
     return replace(
         project,
+        tracks=tracks,
+        transitions=transitions,
         assets=assets,
         scene=scene,
         invocations=invocations,

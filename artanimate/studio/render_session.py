@@ -7,7 +7,7 @@ import numpy as np
 from .adapters.classic_2d import (
     PreparedRenderPlan,
     build_classic_2d_renderer_registry,
-    build_legacy_capability_registry,
+    build_studio_capability_registry,
     prepare_render_plan,
 )
 from .adapters.legacy_project import project_as_semantic
@@ -34,6 +34,7 @@ class StudioRenderSession:
         output_width: int | None = None,
         output_height: int | None = None,
         extra_renderers: tuple[CapabilityRenderer, ...] = (),
+        resource_base: str | Path | None = None,
         source_registry: ArtworkSourceRegistry | None = None,
     ):
         self.project = project.validate()
@@ -55,6 +56,7 @@ class StudioRenderSession:
         renderers = build_classic_2d_renderer_registry(
             self.project,
             self.artwork_path,
+            resource_base=resource_base,
             sources=self.source_registry,
             extra_renderers=extra_renderers,
         )
@@ -73,7 +75,7 @@ class StudioRenderSession:
 
         if all(renderer_available(item) for item in visual_invocations):
             plan = RenderPlanner(
-                build_legacy_capability_registry(),
+                build_studio_capability_registry(),
                 renderers,
             ).plan(
                 self.project.project_id,

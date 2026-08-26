@@ -20,6 +20,7 @@ from ..core.config import RenderConfig
 from ..core.effects import EffectDescriptor, effect_descriptors
 from ..studio.effect_2d import settings_for_effect_clip
 from ..studio.model import ClipKind, StudioProject
+from ..studio.semantic_actions import is_semantic_action_clip
 from .controls import ParameterSlider
 
 
@@ -229,7 +230,9 @@ class StudioEffectInspector(QFrame):
                 clip
                 for track in project.tracks
                 for clip in track.clips
-                if clip.clip_id in clip_ids and clip.kind == ClipKind.EFFECT_2D
+                if clip.clip_id in clip_ids
+                and clip.kind == ClipKind.EFFECT_2D
+                and not is_semantic_action_clip(clip)
             ),
             None,
         ) if project is not None else None
