@@ -348,6 +348,22 @@ La migration V1 → V2 est pure, déterministe et sans accès réseau. Les chemi
 restent référencés et relinkables. Les données inconnues ne sont jamais supprimées
 silencieusement.
 
+Le document V2 est désormais la source persistante de l’intention. Pendant la
+fenêtre de compatibilité, un clip portant `legacy_kind` reste piloté par les
+éditeurs historiques pour son timing et ses paramètres natifs ; son
+`invocation_id` est déterministe. La policy de renderer, les paramètres
+d’extension et les invocations sans `legacy_kind` appartiennent au document
+sémantique et ne sont jamais recalculés depuis `ClipKind`.
+
+La normalisation V1 → V2 est pure et locale. Elle conserve les snapshots
+`RenderConfig`, ajoute les liens clip → invocation, crée la scène minimale et
+préserve les clés racines inconnues dans les extensions du projet. Les champs
+sémantiques inconnus restent extensibles par chaînes ; une structure inconnue à
+un emplacement strict est refusée explicitement plutôt que supprimée. Un
+renderer épinglé absent est donc conservé avec ses paramètres, afin que le
+projet retrouve son comportement dès que cette implémentation redevient
+disponible.
+
 ## 13. Lots parallélisables
 
 | Lot | Propriétaire de fichiers | Peut démarrer après | Produit attendu |

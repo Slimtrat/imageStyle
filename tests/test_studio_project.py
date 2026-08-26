@@ -104,11 +104,11 @@ def test_complete_project_round_trips_without_losing_timeline_state() -> None:
     assert restored.transitions[0].kind == TransitionKind.DISSOLVE
 
 
-def test_project_rejects_unknown_keys_and_future_schemas() -> None:
+def test_project_preserves_unknown_keys_and_rejects_future_schemas() -> None:
     payload = complete_project().to_dict()
     payload["cloud_url"] = "https://invalid.example"
-    with pytest.raises(ValueError, match="Clé.*inconnue"):
-        StudioProject.from_dict(payload)
+    restored = StudioProject.from_dict(payload)
+    assert restored.to_dict()["cloud_url"] == "https://invalid.example"
 
     payload = complete_project().to_dict()
     payload["schema_version"] = 99

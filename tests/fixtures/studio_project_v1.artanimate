@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "project_id": "fixture-project-v1",
+  "artwork": {
+    "path": "assets/painting.png",
+    "asset_id": "artwork",
+    "fingerprint": "sha256:fixture-artwork-v1",
+    "width": 1200,
+    "height": 1800
+  },
+  "settings": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "duration_frames": 120,
+    "background": [18, 18, 22]
+  },
+  "assets": [],
+  "tracks": [
+    {
+      "track_id": "video-main",
+      "kind": "video",
+      "name": "Œuvre",
+      "clips": [
+        {
+          "clip_id": "artwork-main",
+          "kind": "artwork_2d",
+          "start_frame": 0,
+          "duration_frames": 120,
+          "source_in_frame": 0,
+          "asset_id": null,
+          "opacity": 1.0,
+          "enabled": true,
+          "fit": "contain",
+          "camera": {
+            "keyframes": [
+              {
+                "frame": 0,
+                "pose": {
+                  "x": 0.5,
+                  "y": 0.5,
+                  "zoom": 1.0,
+                  "rotation_degrees": 0.0,
+                  "perspective": 0.0,
+                  "focus": 1.0
+                },
+                "easing": "ease_in_out"
+              }
+            ]
+          },
+          "parameters": null
+        }
+      ],
+      "muted": false,
+      "locked": false,
+      "hidden": false
+    },
+    {
+      "track_id": "effects-main",
+      "kind": "effect",
+      "name": "Effets",
+      "clips": [
+        {
+          "clip_id": "effect-rgb",
+          "kind": "effect_2d",
+          "start_frame": 30,
+          "duration_frames": 30,
+          "source_in_frame": 0,
+          "asset_id": null,
+          "opacity": 0.64,
+          "enabled": true,
+          "fit": "contain",
+          "camera": null,
+          "parameters": {
+            "schema_version": 1,
+            "effect": "rgb_fade",
+            "intensity": 0.72,
+            "target_clip_id": "artwork-main",
+            "render_config": {
+              "background_tolerance": 11.0,
+              "colors": 17,
+              "crf": 16,
+              "direction": "left",
+              "duration": 1.0,
+              "effect": "rgb_fade",
+              "fps": 30,
+              "grain_density": 0.004,
+              "grain_size": 1.35,
+              "halo_direction": "left",
+              "halo_intensity": 0.9,
+              "halo_width": 0.075,
+              "hold_end": 0.06666666666666667,
+              "hold_start": 0.03333333333333333,
+              "laser_intensity": 1.35,
+              "laser_width": 0.018,
+              "neutral_position": "last",
+              "order": "chromatic",
+              "outline": "together",
+              "outline_chroma": 34.0,
+              "outline_luma": 36.0,
+              "overlap": 0.28,
+              "paint_drop_size": 0.12,
+              "paint_fall_ratio": 0.38,
+              "paint_flow": 0.14,
+              "quality": "studio",
+              "rgb_mode": "channels",
+              "screenprint_width": 0.12,
+              "seed": 93,
+              "shape_completion": 2,
+              "soft_edge": 0.012,
+              "start_hue": 0.0,
+              "sweep_density": 0.018,
+              "sweep_grain_size": 2.8,
+              "sweep_rebound": 0.12,
+              "sweep_turbulence": 0.16,
+              "turbulence": 0.1,
+              "wave_amplitude": 0.055,
+              "wave_density_contrast": 0.65,
+              "wave_frequency": 2.7,
+              "width": 1280
+            }
+          }
+        }
+      ],
+      "muted": false,
+      "locked": false,
+      "hidden": false
+    },
+    {
+      "track_id": "audio-main",
+      "kind": "audio",
+      "name": "Musique",
+      "clips": [],
+      "muted": false,
+      "locked": false,
+      "hidden": false
+    }
+  ],
+  "transitions": [],
+  "export": {
+    "container": "mp4",
+    "crf": 16,
+    "quality": "studio",
+    "audio_mode": "reference"
+  },
+  "vendor_metadata": {
+    "preserve_me": true,
+    "version": 7
+  }
+}

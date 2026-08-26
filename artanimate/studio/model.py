@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, fields, is_dataclass
 from enum import StrEnum
 import math
@@ -8,8 +9,15 @@ from pathlib import Path
 from typing import Any, TypeVar
 from uuid import uuid4
 
+from .semantic import (
+    CapabilityInvocation,
+    FrozenJsonObject,
+    SemanticScene,
+    TimelineTrigger,
+)
 
-STUDIO_SCHEMA_VERSION = 1
+
+STUDIO_SCHEMA_VERSION = 2
 
 
 class AssetKind(StrEnum):
@@ -242,6 +250,8 @@ class Clip:
     fit: FitMode = FitMode.CONTAIN
     camera: CameraAnimation | None = None
     parameters: dict[str, Any] | None = None
+    invocation_id: str | None = None
+    legacy_kind: str | None = None
 
     @property
     def end_frame(self) -> int:
@@ -280,6 +290,10 @@ class Clip:
             self.camera.validate(clip_duration_frames=self.duration_frames)
         if self.parameters is not None:
             _json_value(self.parameters, f"clip {self.clip_id}.parameters")
+        if self.invocation_id is not None:
+            _identifier(self.invocation_id, "clip.invocation_id")
+        if self.legacy_kind is not None:
+            _identifier(self.legacy_kind, "clip.legacy_kind")
         return self
 
 
@@ -412,6 +426,35 @@ class StudioProject:
     transitions: tuple[Transition, ...] = ()
     export: ExportSettings = ExportSettings()
     schema_version: int = STUDIO_SCHEMA_VERSION
+    scene: SemanticScene | None = None
+    invocations: tuple[CapabilityInvocation, ...] = ()
+    triggers: tuple[TimelineTrigger, ...] = ()
+    renderer_preferences: FrozenJsonObject = FrozenJsonObject()
+    extensions: FrozenJsonObject = FrozenJsonObject()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.renderer_preferences, FrozenJsonObject):
+            object.__setattr__(
+                self,
+                "renderer_preferences",
+                FrozenJsonObject(
+                    self.renderer_preferences,
+                    where="project.renderer_preferences",
+                ),
+            )
+        if not isinstance(self.extensions, FrozenJsonObject):
+            object.__setattr__(
+                self,
+                "extensions",
+                FrozenJsonObject(self.extensions, where="project.extensions"),
+            )
+        if self.schema_version == STUDIO_SCHEMA_VERSION:
+            from .legacy_semantics import synchronize_legacy_fields
+
+            scene, invocations, tracks = synchronize_legacy_fields(self)
+            object.__setattr__(self, "scene", scene)
+            object.__setattr__(self, "invocations", invocations)
+            object.__setattr__(self, "tracks", tracks)
 
     @classmethod
     def new(
@@ -464,6 +507,8 @@ class StudioProject:
         self.artwork.validate()
         self.settings.validate()
         self.export.validate()
+        if self.scene is None:
+            raise ValueError("Un projet V2 doit contenir une scène sémantique")
 
         asset_ids = {self.artwork.asset_id}
         asset_by_id: dict[str, MediaAsset] = {}
@@ -473,6 +518,22 @@ class StudioProject:
                 raise ValueError(f"Identifiant d’asset dupliqué : {asset.asset_id}")
             asset_ids.add(asset.asset_id)
             asset_by_id[asset.asset_id] = asset
+
+        if self.scene.artwork_asset_id != self.artwork.asset_id:
+            raise ValueError("La scène ne référence pas l’asset de l’œuvre du projet")
+        for scene_object in self.scene.objects:
+            for resource in scene_object.resource_refs:
+                if resource.asset_id not in asset_ids:
+                    raise ValueError(
+                        "Ressource de scène liée à un asset introuvable : "
+                        + resource.asset_id
+                    )
+
+        invocation_ids = tuple(item.invocation_id for item in self.invocations)
+        if len(invocation_ids) != len(set(invocation_ids)):
+            raise ValueError("Le projet contient une invocation sémantique dupliquée")
+        invocation_by_id = {item.invocation_id: item for item in self.invocations}
+        scene_object_ids = {item.object_id for item in self.scene.objects}
 
         track_ids: set[str] = set()
         clip_ids: set[str] = set()
@@ -505,6 +566,14 @@ class StudioProject:
                         raise ValueError(f"Asset introuvable pour le clip {clip.clip_id}")
                     if asset_by_id[clip.asset_id].kind != expected_asset_kind:
                         raise ValueError(f"Type d’asset incompatible pour le clip {clip.clip_id}")
+                if clip.invocation_id is None:
+                    raise ValueError(
+                        f"Le clip {clip.clip_id} ne référence aucune invocation"
+                    )
+                if clip.invocation_id not in invocation_by_id:
+                    raise ValueError(
+                        f"Invocation introuvable pour le clip {clip.clip_id}"
+                    )
 
         transition_ids: set[str] = set()
         for transition in self.transitions:
@@ -522,54 +591,136 @@ class StudioProject:
                 raise ValueError(
                     f"La transition {transition.transition_id} dépasse la durée du projet"
                 )
+
+        for invocation in self.invocations:
+            if invocation.end_frame > self.settings.duration_frames:
+                raise ValueError(
+                    f"L’invocation {invocation.invocation_id} dépasse la durée du projet"
+                )
+            if (
+                invocation.target_id is not None
+                and invocation.target_id not in scene_object_ids
+            ):
+                raise ValueError(
+                    f"L’invocation {invocation.invocation_id} cible un objet absent"
+                )
+
+        trigger_ids: set[str] = set()
+        for trigger in self.triggers:
+            if trigger.trigger_id in trigger_ids:
+                raise ValueError("Le projet contient un trigger dupliqué")
+            trigger_ids.add(trigger.trigger_id)
+            if trigger.source_invocation_id not in invocation_by_id:
+                raise ValueError(
+                    f"Le trigger {trigger.trigger_id} référence une source absente"
+                )
+            if trigger.action_invocation_id not in invocation_by_id:
+                raise ValueError(
+                    f"Le trigger {trigger.trigger_id} référence une action absente"
+                )
+
+        known_project_keys = {
+            "schema_version",
+            "project_id",
+            "artwork",
+            "settings",
+            "assets",
+            "tracks",
+            "transitions",
+            "export",
+            "scene",
+            "invocations",
+            "triggers",
+            "renderer_preferences",
+        }
+        if known_project_keys & set(self.extensions):
+            raise ValueError("Une extension de projet masque une clé V2 réservée")
         return self
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
-        return {
-            "schema_version": self.schema_version,
-            "project_id": self.project_id,
-            "artwork": _encode(self.artwork),
-            "settings": _encode(self.settings),
-            "assets": _encode(self.assets),
-            "tracks": _encode(self.tracks),
-            "transitions": _encode(self.transitions),
-            "export": _encode(self.export),
-        }
+        assert self.scene is not None
+        payload = self.extensions.to_dict()
+        payload.update(
+            {
+                "schema_version": self.schema_version,
+                "project_id": self.project_id,
+                "artwork": _encode(self.artwork),
+                "settings": _encode(self.settings),
+                "assets": _encode(self.assets),
+                "tracks": _encode(self.tracks),
+                "transitions": _encode(self.transitions),
+                "export": _encode(self.export),
+                "scene": self.scene.to_dict(),
+                "invocations": [item.to_dict() for item in self.invocations],
+                "triggers": [item.to_dict() for item in self.triggers],
+                "renderer_preferences": self.renderer_preferences.to_dict(),
+            }
+        )
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> StudioProject:
         values = migrate_project_payload(payload)
-        _known_keys(
-            values,
-            {
-                "schema_version",
-                "project_id",
-                "artwork",
-                "settings",
-                "assets",
-                "tracks",
-                "transitions",
-                "export",
-            },
-            "StudioProject",
-        )
-        project = cls(
-            schema_version=int(values["schema_version"]),
-            project_id=values["project_id"],
-            artwork=_artwork_from_dict(values["artwork"]),
-            settings=_settings_from_dict(values.get("settings", {})),
-            assets=tuple(_asset_from_dict(item) for item in values.get("assets", [])),
-            tracks=tuple(_track_from_dict(item) for item in values.get("tracks", [])),
-            transitions=tuple(
-                _transition_from_dict(item) for item in values.get("transitions", [])
-            ),
-            export=_export_from_dict(values.get("export", {})),
-        )
-        return project.validate()
+        return _project_from_values(values).validate()
+
+
+_PROJECT_KEYS = {
+    "schema_version",
+    "project_id",
+    "artwork",
+    "settings",
+    "assets",
+    "tracks",
+    "transitions",
+    "export",
+    "scene",
+    "invocations",
+    "triggers",
+    "renderer_preferences",
+}
+
+
+def _project_from_values(values: Mapping[str, Any]) -> StudioProject:
+    extensions = {
+        key: deepcopy(value)
+        for key, value in values.items()
+        if key not in _PROJECT_KEYS
+    }
+    return StudioProject(
+        schema_version=int(values["schema_version"]),
+        project_id=values["project_id"],
+        artwork=_artwork_from_dict(values["artwork"]),
+        settings=_settings_from_dict(values.get("settings", {})),
+        assets=tuple(_asset_from_dict(item) for item in values.get("assets", [])),
+        tracks=tuple(_track_from_dict(item) for item in values.get("tracks", [])),
+        transitions=tuple(
+            _transition_from_dict(item) for item in values.get("transitions", [])
+        ),
+        export=_export_from_dict(values.get("export", {})),
+        scene=(
+            SemanticScene.from_dict(values["scene"])
+            if values.get("scene") is not None
+            else None
+        ),
+        invocations=tuple(
+            CapabilityInvocation.from_dict(item)
+            for item in values.get("invocations", [])
+        ),
+        triggers=tuple(
+            TimelineTrigger.from_dict(item) for item in values.get("triggers", [])
+        ),
+        renderer_preferences=FrozenJsonObject(
+            values.get("renderer_preferences", {}),
+            where="project.renderer_preferences",
+        ),
+        extensions=FrozenJsonObject(extensions, where="project.extensions"),
+    )
 
 
 def _encode(value: Any) -> Any:
+    if isinstance(value, FrozenJsonObject):
+        return value.to_dict()
     if isinstance(value, StrEnum):
         return value.value
     if is_dataclass(value) and not isinstance(value, type):
@@ -582,7 +733,19 @@ def _encode(value: Any) -> Any:
 
 
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
-PROJECT_MIGRATIONS: dict[int, Migration] = {}
+
+
+def _migrate_v1_to_v2(values: dict[str, Any]) -> dict[str, Any]:
+    migrated = deepcopy(values)
+    migrated["schema_version"] = 2
+    migrated.setdefault("scene", None)
+    migrated.setdefault("invocations", [])
+    migrated.setdefault("triggers", [])
+    migrated.setdefault("renderer_preferences", {})
+    return _project_from_values(migrated).to_dict()
+
+
+PROJECT_MIGRATIONS: dict[int, Migration] = {1: _migrate_v1_to_v2}
 
 
 def migrate_project_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -685,6 +848,8 @@ def _clip_from_dict(value: Any) -> Clip:
             "fit",
             "camera",
             "parameters",
+            "invocation_id",
+            "legacy_kind",
         },
         "clip",
     )
@@ -700,6 +865,8 @@ def _clip_from_dict(value: Any) -> Clip:
         fit=_enum(FitMode, data.get("fit", FitMode.CONTAIN.value), "clip.fit"),
         camera=_camera_from_dict(data["camera"]) if data.get("camera") is not None else None,
         parameters=data.get("parameters"),
+        invocation_id=data.get("invocation_id"),
+        legacy_kind=data.get("legacy_kind"),
     )
 
 

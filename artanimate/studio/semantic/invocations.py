@@ -119,3 +119,37 @@ class TimelineTrigger:
             raise ValueError("Un trigger ne peut pas déclencher sa propre invocation")
         if isinstance(self.offset_frames, bool) or not isinstance(self.offset_frames, int):
             raise TypeError("trigger.offset_frames doit être un entier")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trigger_id": self.trigger_id,
+            "source_invocation_id": self.source_invocation_id,
+            "event_id": self.event_id,
+            "action_invocation_id": self.action_invocation_id,
+            "offset_frames": self.offset_frames,
+        }
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, Any]) -> "TimelineTrigger":
+        if not isinstance(values, Mapping):
+            raise TypeError("Un trigger doit être un objet JSON")
+        allowed = {
+            "trigger_id",
+            "source_invocation_id",
+            "event_id",
+            "action_invocation_id",
+            "offset_frames",
+        }
+        unknown = set(values) - allowed
+        if unknown:
+            raise ValueError(
+                "Clé(s) inconnue(s) dans TimelineTrigger : "
+                + ", ".join(sorted(unknown))
+            )
+        return cls(
+            values["trigger_id"],
+            values["source_invocation_id"],
+            values["event_id"],
+            values["action_invocation_id"],
+            values.get("offset_frames", 0),
+        )

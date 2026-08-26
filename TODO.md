@@ -42,12 +42,12 @@ legacy et par le RenderPlan sémantique, y compris après un seek arrière.
 
 ## P2 — Faire évoluer le document Studio
 
-- [ ] **DOC-01** Spécifier puis implémenter le schéma Studio V2.
-- [ ] **DOC-02** Ajouter SemanticScene, invocations, triggers et préférences renderer.
-- [ ] **DOC-03** Écrire la migration pure V1 → V2.
-- [ ] **DOC-04** Garantir le round-trip JSON et conserver les snapshots RenderConfig.
-- [ ] **DOC-05** Ouvrir, relinker et exporter un projet V1 depuis le code V2.
-- [ ] **DOC-06** Ajouter fixtures de projets réels V1/V2 et tests de non-régression.
+- [x] **DOC-01** Spécifier puis implémenter le schéma Studio V2.
+- [x] **DOC-02** Ajouter SemanticScene, invocations, triggers et préférences renderer.
+- [x] **DOC-03** Écrire la migration pure V1 → V2.
+- [x] **DOC-04** Garantir le round-trip JSON et conserver les snapshots RenderConfig.
+- [x] **DOC-05** Ouvrir, relinker et exporter un projet V1 depuis le code V2.
+- [x] **DOC-06** Ajouter fixtures de projets réels V1/V2 et tests de non-régression.
 
 Critère de fin P2 : aucun projet existant n'est perdu ou modifié silencieusement et
 un document V2 conserve l'intention même si le renderer préféré est absent.

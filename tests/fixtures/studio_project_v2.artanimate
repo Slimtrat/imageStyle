@@ -1,0 +1,254 @@
+{
+  "schema_version": 2,
+  "project_id": "fixture-project-v2",
+  "artwork": {
+    "path": "assets/painting-v2.png",
+    "asset_id": "artwork",
+    "fingerprint": "sha256:fixture-artwork-v2",
+    "width": 1600,
+    "height": 1200
+  },
+  "settings": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "duration_frames": 90,
+    "background": [12, 14, 20]
+  },
+  "assets": [],
+  "tracks": [
+    {
+      "track_id": "video-main",
+      "kind": "video",
+      "name": "Œuvre",
+      "clips": [
+        {
+          "clip_id": "artwork-main",
+          "kind": "artwork_2d",
+          "start_frame": 0,
+          "duration_frames": 90,
+          "source_in_frame": 0,
+          "asset_id": null,
+          "opacity": 1.0,
+          "enabled": true,
+          "fit": "contain",
+          "camera": {
+            "keyframes": [
+              {
+                "frame": 0,
+                "pose": {
+                  "x": 0.45,
+                  "y": 0.52,
+                  "zoom": 1.25,
+                  "rotation_degrees": 0.0,
+                  "perspective": 0.0,
+                  "focus": 1.0
+                },
+                "easing": "ease_in_out"
+              }
+            ]
+          },
+          "parameters": null,
+          "invocation_id": "legacy:content:b8de0ecc436bbc72633756a2",
+          "legacy_kind": "artwork_2d"
+        }
+      ],
+      "muted": false,
+      "locked": false,
+      "hidden": false
+    },
+    {
+      "track_id": "effects-main",
+      "kind": "effect",
+      "name": "Actions",
+      "clips": [],
+      "muted": false,
+      "locked": false,
+      "hidden": false
+    },
+    {
+      "track_id": "audio-main",
+      "kind": "audio",
+      "name": "Musique",
+      "clips": [],
+      "muted": false,
+      "locked": false,
+      "hidden": false
+    }
+  ],
+  "transitions": [],
+  "export": {
+    "container": "mp4",
+    "crf": 16,
+    "quality": "studio",
+    "audio_mode": "reference"
+  },
+  "scene": {
+    "scene_id": "scene:fixture-project-v2",
+    "artwork_asset_id": "artwork",
+    "objects": [
+      {
+        "object_id": "artwork",
+        "semantic_type": "artwork",
+        "label": "Œuvre",
+        "confidence": 1.0,
+        "bounds": {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0},
+        "resource_refs": [
+          {
+            "resource_id": "artwork-source",
+            "kind": "image",
+            "asset_id": "artwork",
+            "metadata": {}
+          }
+        ],
+        "attributes": {},
+        "affordances": [
+          {
+            "affordance_id": "presentable",
+            "confidence": 1.0,
+            "parameters": {},
+            "source": "adapter.legacy-project"
+          }
+        ]
+      },
+      {
+        "object_id": "background",
+        "semantic_type": "scene.background",
+        "label": "Arrière-plan",
+        "confidence": 1.0,
+        "bounds": {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0},
+        "resource_refs": [],
+        "attributes": {},
+        "affordances": []
+      },
+      {
+        "object_id": "camera",
+        "semantic_type": "scene.camera",
+        "label": "Caméra",
+        "confidence": 1.0,
+        "bounds": null,
+        "resource_refs": [],
+        "attributes": {},
+        "affordances": [
+          {
+            "affordance_id": "animatable",
+            "confidence": 1.0,
+            "parameters": {},
+            "source": "builtin.minimal"
+          }
+        ]
+      },
+      {
+        "object_id": "curatorial-zone",
+        "semantic_type": "museum.custom.zone",
+        "label": "Zone curatoriale",
+        "confidence": 0.82,
+        "bounds": {"x": 0.2, "y": 0.15, "width": 0.4, "height": 0.5},
+        "resource_refs": [],
+        "attributes": {"vendor_tag": "aura"},
+        "affordances": [
+          {
+            "affordance_id": "vendor.aura-reactive",
+            "confidence": 0.73,
+            "parameters": {"radius": 0.4},
+            "source": "vendor.fixture"
+          }
+        ]
+      }
+    ],
+    "relations": [
+      {
+        "relation_id": "camera-observes-artwork",
+        "relation_type": "observes",
+        "source_id": "camera",
+        "target_id": "artwork",
+        "confidence": 1.0,
+        "attributes": {}
+      }
+    ],
+    "analyzer_provenance": []
+  },
+  "invocations": [
+    {
+      "invocation_id": "legacy:content:b8de0ecc436bbc72633756a2",
+      "capability_id": "artwork.present",
+      "target_id": "artwork",
+      "start_frame": 0,
+      "duration_frames": 90,
+      "parameters": {
+        "source_in_frame": 0,
+        "opacity": 1.0,
+        "fit": "contain"
+      },
+      "renderer_policy": {
+        "mode": "pinned",
+        "renderer_ids": ["classic.artwork.static"]
+      },
+      "enabled": true
+    },
+    {
+      "invocation_id": "legacy:camera:4303865d5a209ff2883fcc69",
+      "capability_id": "camera.animate",
+      "target_id": "camera",
+      "start_frame": 0,
+      "duration_frames": 90,
+      "parameters": {
+        "target_invocation_id": "legacy:content:b8de0ecc436bbc72633756a2",
+        "keyframes": [
+          {
+            "frame": 0,
+            "easing": "ease_in_out",
+            "pose": {
+              "x": 0.45,
+              "y": 0.52,
+              "zoom": 1.25,
+              "rotation_degrees": 0.0,
+              "perspective": 0.0,
+              "focus": 1.0
+            }
+          }
+        ]
+      },
+      "renderer_policy": {
+        "mode": "pinned",
+        "renderer_ids": ["classic.camera-2d"]
+      },
+      "enabled": true
+    },
+    {
+      "invocation_id": "vendor:aura:01",
+      "capability_id": "vendor.animate-aura",
+      "target_id": "curatorial-zone",
+      "start_frame": 12,
+      "duration_frames": 40,
+      "parameters": {
+        "intensity": 0.66,
+        "vendor_payload": {"mode": "halo"}
+      },
+      "renderer_policy": {
+        "mode": "pinned",
+        "renderer_ids": ["vendor.renderer.not-installed"]
+      },
+      "enabled": true
+    }
+  ],
+  "triggers": [
+    {
+      "trigger_id": "vendor-trigger-01",
+      "source_invocation_id": "legacy:content:b8de0ecc436bbc72633756a2",
+      "event_id": "completed",
+      "action_invocation_id": "vendor:aura:01",
+      "offset_frames": 2
+    }
+  ],
+  "renderer_preferences": {
+    "vendor.animate-aura": {
+      "mode": "pinned",
+      "renderer_ids": ["vendor.renderer.not-installed"]
+    }
+  },
+  "vendor_document": {
+    "schema": "museum.fixture.v1",
+    "preserve_me": true
+  }
+}
