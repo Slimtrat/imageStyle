@@ -31,6 +31,11 @@ from ..studio.analysis import (
     remove_scene_object,
     update_scene_object_bounds,
 )
+from ..studio.audio import (
+    AudioClipSettings,
+    set_audio_track_gain,
+    update_audio_clip,
+)
 from ..studio.assets import fingerprint_file
 from ..studio.camera import (
     copy_camera_keyframe,
@@ -68,6 +73,7 @@ from ..studio.model import (
     TrackKind,
 )
 from .studio_audio import StudioAudioMonitor
+from .studio_audio_inspector import AudioInspectorEdit, StudioAudioInspector
 from .studio_waveform import StudioWaveformController
 from ..studio.timeline import add_track, delete_clips, set_track_state
 from .studio_camera import StudioCameraInspector
@@ -650,11 +656,14 @@ class StudioPanel(QWidget):
         self.effect_inspector.duplicateRequested.connect(
             lambda clip_id: self.timeline_actions.duplicate_clips((clip_id,))
         )
+        self.audio_inspector = StudioAudioInspector()
+        self.audio_inspector.applyRequested.connect(self._apply_audio_edit)
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
         self.inspector_tabs.addTab(self.analysis_panel, "Analyse locale")
         self.inspector_tabs.addTab(self.trigger_panel, "Déclencheurs")
         self.inspector_tabs.addTab(camera_page, "Caméra")
         self.inspector_tabs.addTab(self.effect_inspector, "Réglages 2D")
+        self.inspector_tabs.addTab(self.audio_inspector, "Audio")
         inspector_layout.addWidget(self.inspector_tabs, 1)
         body.addWidget(inspector)
         page.addLayout(body, 1)
@@ -752,6 +761,9 @@ class StudioPanel(QWidget):
         self.effect_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
         )
+        self.audio_inspector.set_selection(
+            self._project, self.timeline.selected_clip_ids
+        )
         if self._project is None:
             self.transport.set_project(30, 1)
             self.canvas.set_artwork(None)
@@ -813,6 +825,9 @@ class StudioPanel(QWidget):
         }
         self.timeline.set_waveforms(self._waveforms)
         self.effect_inspector.set_selection(
+            validated, self.timeline.selected_clip_ids
+        )
+        self.audio_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
         )
         if timing_changed:
@@ -1750,6 +1765,7 @@ class StudioPanel(QWidget):
             else ()
         )
         self.effect_inspector.set_selection(self._project, clip_ids)
+        self.audio_inspector.set_selection(self._project, clip_ids)
         if self._project is not None and clip_ids:
             selected = next(
                 (
@@ -1770,7 +1786,9 @@ class StudioPanel(QWidget):
             )
             if selected is not None and selected.invocation_id is not None and not already_represents_clip:
                 self.semantic_panel.select_invocation(selected.invocation_id)
-        if self.effect_inspector.selected_clip_id is not None:
+        if self.audio_inspector.selected_clip_id is not None:
+            self.inspector_tabs.setCurrentWidget(self.audio_inspector)
+        elif self.effect_inspector.selected_clip_id is not None:
             self.inspector_tabs.setCurrentWidget(self.effect_inspector)
 
     def _add_effect_layer(
@@ -1848,6 +1866,51 @@ class StudioPanel(QWidget):
             )
         except (KeyError, TypeError, ValueError, PermissionError) as exc:
             self.project_status.setText(f"Effet 2D inchangé · {exc}")
+
+    def _apply_audio_edit(self, value: object) -> None:
+        project = self._project
+        if project is None or not isinstance(value, AudioInspectorEdit):
+            return
+        try:
+            settings = AudioClipSettings(
+                gain_db=value.gain_db,
+                fade_in_frames=value.fade_in_frames,
+                fade_out_frames=value.fade_out_frames,
+                fade_in_curve=value.fade_in_curve,
+                fade_out_curve=value.fade_out_curve,
+            )
+            updated, clip = update_audio_clip(
+                project,
+                value.clip_id,
+                source_in_frame=value.source_in_frame,
+                duration_frames=value.duration_frames,
+                settings=settings,
+                enabled=value.enabled,
+            )
+            updated = set_audio_track_gain(
+                updated,
+                value.track_id,
+                value.track_gain_db,
+            )
+            updated = set_track_state(
+                updated,
+                value.track_id,
+                muted=value.track_muted,
+            )
+            self.commit_project(
+                updated,
+                "Régler le mix audio",
+                merge_key=f"audio-settings:{value.clip_id}",
+            )
+            self.timeline.scene.set_selection((clip.clip_id,))
+            self.inspector_tabs.setCurrentWidget(self.audio_inspector)
+            state = "muette" if value.track_muted else "audible"
+            self.project_status.setText(
+                f"Audio réglé · clip {value.gain_db:+.1f} dB · "
+                f"piste {value.track_gain_db:+.1f} dB · {state}"
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Audio inchangé · {exc}")
 
     def _add_timeline_track(self, kind: TrackKind) -> None:
         if self._project is None:

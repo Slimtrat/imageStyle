@@ -16,7 +16,7 @@ from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 
 from artanimate.desktop.studio_audio import StudioAudioMonitor
-from artanimate.studio.audio import add_audio_clip
+from artanimate.studio.audio import add_audio_clip, db_to_linear
 from artanimate.studio.assets import import_media_asset
 from artanimate.studio.model import AssetKind, StudioProject
 
@@ -131,7 +131,7 @@ def test_monitor_is_slaved_to_seek_play_pause_and_releases_channels(
     player, output = channels[0]
     assert player.position_ms == 333
     assert player.source.isLocalFile()
-    assert output.volume == 1.0
+    assert output.volume == pytest.approx(db_to_linear(-1.0))
     assert monitor.channel_count == 1
 
     monitor.sync_frame(15, playing=True)

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QKeySequence,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -15,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..studio.audio import AudioClipSettings, AudioMixSettings, audio_envelope_gain
 from ..studio.clock import StudioClock
 from ..studio.model import Clip, ClipKind, StudioProject, Track, TrackKind
 from ..studio.waveform import WaveformEnvelope, waveform_peaks_for_clip
@@ -82,6 +91,7 @@ class StudioTimelineScene(QWidget):
     trackSelected = Signal(str)
     clipMoveRequested = Signal(object, str, int, str)
     clipTrimRequested = Signal(str, int, int)
+    audioFadeRequested = Signal(str, int, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -235,6 +245,35 @@ class StudioTimelineScene(QWidget):
             None,
         )
 
+    def _display_audio_settings(
+        self,
+        layout: TimelineClipLayout,
+    ) -> AudioClipSettings:
+        settings = AudioClipSettings.from_clip(layout.clip)
+        if self._drag_clip is layout and self._drag_started:
+            if self._drag_mode == "fade-in":
+                settings = replace(
+                    settings,
+                    fade_in_frames=self._drag_target_frame,
+                )
+            elif self._drag_mode == "fade-out":
+                settings = replace(
+                    settings,
+                    fade_out_frames=self._drag_target_frame,
+                )
+        return settings
+
+    def _fade_handle_positions(
+        self,
+        layout: TimelineClipLayout,
+        settings: AudioClipSettings,
+    ) -> tuple[QPointF, QPointF]:
+        top = layout.rect.top() + 3.0
+        return (
+            QPointF(layout.rect.left() + settings.fade_in_frames * self._pixels_per_frame, top),
+            QPointF(layout.rect.right() - settings.fade_out_frames * self._pixels_per_frame, top),
+        )
+
     def paintEvent(self, event) -> None:  # type: ignore[override]
         del event
         painter = QPainter(self)
@@ -278,9 +317,15 @@ class StudioTimelineScene(QWidget):
             painter.setFont(font)
             painter.setPen(QColor("#8f9bb1"))
             z_index = len(self._project.tracks) - index - 1
+            detail = f"{kind_label[row.track.kind]} · Z{z_index}"
+            if row.track.kind == TrackKind.AUDIO:
+                gain = AudioMixSettings.from_project(self._project).track(
+                    row.track.track_id
+                ).gain_db
+                detail = f"AUDIO · {gain:+.1f} dB"
             painter.drawText(
                 QRectF(8, row.rect.top() + 23, 98, 16),
-                f"{kind_label[row.track.kind]} · Z{z_index}",
+                detail,
             )
             for field, rect in self._state_rects(row).items():
                 enabled = bool(getattr(row.track, field))
@@ -326,6 +371,43 @@ class StudioTimelineScene(QWidget):
                             QPointF(x, middle - maximum * amplitude),
                             QPointF(x, middle - minimum * amplitude),
                         )
+                settings = self._display_audio_settings(layout)
+                envelope_path = QPainterPath()
+                bottom = layout.rect.bottom() - 3.0
+                amplitude = max(1.0, layout.rect.height() - 6.0)
+                samples = max(2, min(96, int(layout.rect.width()) + 1))
+                for index in range(samples):
+                    ratio = index / (samples - 1)
+                    local_frame = min(
+                        layout.clip.duration_frames,
+                        int(round(ratio * layout.clip.duration_frames)),
+                    )
+                    gain = (
+                        1.0
+                        if local_frame == layout.clip.duration_frames
+                        and settings.fade_out_frames == 0
+                        else audio_envelope_gain(
+                            settings,
+                            local_frame,
+                            layout.clip.duration_frames,
+                        )
+                    )
+                    point = QPointF(
+                        layout.rect.left() + ratio * layout.rect.width(),
+                        bottom - gain * amplitude,
+                    )
+                    if index == 0:
+                        envelope_path.moveTo(point)
+                    else:
+                        envelope_path.lineTo(point)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor("#ffd166"), 1.5))
+                painter.drawPath(envelope_path)
+                if selected:
+                    painter.setBrush(QColor("#ffd166"))
+                    painter.setPen(QPen(QColor("#1b1010"), 1))
+                    for handle in self._fade_handle_positions(layout, settings):
+                        painter.drawEllipse(handle, 3.5, 3.5)
             painter.setPen(QColor("#ffffff"))
             painter.drawText(
                 layout.rect.adjusted(6, 0, -4, 0),
@@ -430,7 +512,25 @@ class StudioTimelineScene(QWidget):
                 self._drag_target_frame = clip.clip.start_frame
                 self._drag_target_track_id = clip.track_id
                 edge = 7.0
-                if abs(point.x() - clip.rect.left()) <= edge:
+                fade_mode = None
+                if clip.clip.kind == ClipKind.AUDIO:
+                    settings = AudioClipSettings.from_clip(clip.clip)
+                    fade_in_handle, fade_out_handle = self._fade_handle_positions(
+                        clip,
+                        settings,
+                    )
+                    near_top = abs(point.y() - fade_in_handle.y()) <= 8.0
+                    if near_top and abs(point.x() - fade_in_handle.x()) <= edge:
+                        fade_mode = "fade-in"
+                        self._drag_press_frame = settings.fade_in_frames
+                        self._drag_target_frame = settings.fade_in_frames
+                    elif near_top and abs(point.x() - fade_out_handle.x()) <= edge:
+                        fade_mode = "fade-out"
+                        self._drag_press_frame = settings.fade_out_frames
+                        self._drag_target_frame = settings.fade_out_frames
+                if fade_mode is not None:
+                    self._drag_mode = fade_mode
+                elif abs(point.x() - clip.rect.left()) <= edge:
                     self._drag_mode = "trim-left"
                 elif abs(point.x() - clip.rect.right()) <= edge:
                     self._drag_mode = "trim-right"
@@ -446,9 +546,34 @@ class StudioTimelineScene(QWidget):
         if self._drag_clip is None or self._drag_mode is None:
             super().mouseMoveEvent(event)
             return
+        clip = self._drag_clip.clip
+        if self._drag_mode in {"fade-in", "fade-out"}:
+            settings = AudioClipSettings.from_clip(clip)
+            if self._drag_mode == "fade-in":
+                proposed = int(round(
+                    (event.position().x() - self._drag_clip.rect.left())
+                    / self._pixels_per_frame
+                ))
+                target = min(
+                    clip.duration_frames - settings.fade_out_frames,
+                    max(0, proposed),
+                )
+            else:
+                proposed = int(round(
+                    (self._drag_clip.rect.right() - event.position().x())
+                    / self._pixels_per_frame
+                ))
+                target = min(
+                    clip.duration_frames - settings.fade_in_frames,
+                    max(0, proposed),
+                )
+            self._drag_started = self._drag_started or target != self._drag_press_frame
+            self._drag_target_frame = target
+            self.update()
+            event.accept()
+            return
         frame = self.frame_at_x(event.position().x())
         self._drag_started = self._drag_started or frame != self._drag_press_frame
-        clip = self._drag_clip.clip
         if self._drag_mode == "move":
             delta = frame - self._drag_press_frame
             self._drag_target_frame = max(0, clip.start_frame + delta)
@@ -491,6 +616,15 @@ class StudioTimelineScene(QWidget):
             self.clipTrimRequested.emit(layout.clip.clip_id, target, layout.clip.end_frame)
         elif started and mode == "trim-right":
             self.clipTrimRequested.emit(layout.clip.clip_id, layout.clip.start_frame, target)
+        elif started and mode in {"fade-in", "fade-out"}:
+            settings = AudioClipSettings.from_clip(layout.clip)
+            fade_in = target if mode == "fade-in" else settings.fade_in_frames
+            fade_out = target if mode == "fade-out" else settings.fade_out_frames
+            self.audioFadeRequested.emit(
+                layout.clip.clip_id,
+                fade_in,
+                fade_out,
+            )
         self.update()
         event.accept()
 
@@ -498,6 +632,7 @@ class StudioTimelineScene(QWidget):
 class StudioTimeline(QWidget):
     addTrackRequested = Signal(object)
     trackStateRequested = Signal(str, str, bool)
+    audioFadeRequested = Signal(str, int, int)
     selectionChanged = Signal(object)
     seekRequested = Signal(int)
     clipMoveRequested = Signal(object, str, int, str)
@@ -586,6 +721,7 @@ class StudioTimeline(QWidget):
         self.scene.trackStateRequested.connect(self.trackStateRequested)
         self.scene.clipMoveRequested.connect(self.clipMoveRequested)
         self.scene.clipTrimRequested.connect(self.clipTrimRequested)
+        self.scene.audioFadeRequested.connect(self.audioFadeRequested)
         self._shortcuts = (
             QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self.delete_button.click),
             QShortcut(QKeySequence("Ctrl+D"), self, activated=self.duplicate_button.click),

@@ -116,8 +116,7 @@ class StudioAudioMonitor(QObject):
             player.setSource(QUrl.fromLocalFile(str(target.path)))
         channel.desired_position_ms = target.position_ms
         channel.desired_playing = playing
-        volume = min(1.0, max(0.0, pow(10.0, target.gain_db / 20.0)))
-        channel.output.setVolume(volume)
+        channel.output.setVolume(min(1.0, max(0.0, target.linear_gain)))
         tolerance_ms = max(20, 1500 // self._project.settings.fps)
         current_position = int(channel.player.position())
         current_state = channel.player.playbackState()

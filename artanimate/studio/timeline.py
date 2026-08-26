@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from uuid import uuid4
 
+from .audio import AudioClipSettings, validate_audio_source_range
 from .camera import resolve_camera_pose
 from .effect_2d import MIN_EFFECT_DURATION_SECONDS, settings_for_effect_clip
 from .legacy_semantics import invocation_bindings
@@ -282,12 +283,19 @@ def trim_clip(
     if source_in < 0:
         raise ValueError("Le trim étendrait le clip avant le début de sa source")
     duration = end - start
+    parameters = clip.parameters
+    if clip.kind == ClipKind.AUDIO:
+        if clip.asset_id is None:
+            raise ValueError("Le clip audio doit référencer un asset")
+        validate_audio_source_range(project, clip.asset_id, source_in, duration)
+        parameters = AudioClipSettings.from_clip(clip).clamped(duration).to_dict()
     trimmed = replace(
         clip,
         start_frame=start,
         duration_frames=duration,
         source_in_frame=source_in,
         camera=_trim_camera(clip.camera, delta, duration),
+        parameters=parameters,
     ).validate()
     _validate_effect_2d_edit(project, trimmed)
     clips = list(track.clips)
@@ -339,10 +347,21 @@ def split_clip(
     left_camera, right_camera = _split_camera(
         clip.camera, left_duration, right_duration
     )
+    left_parameters = clip.parameters
+    right_parameters = clip.parameters
+    if clip.kind == ClipKind.AUDIO:
+        settings = AudioClipSettings.from_clip(clip)
+        left_parameters = replace(
+            settings, fade_out_frames=0
+        ).clamped(left_duration).to_dict()
+        right_parameters = replace(
+            settings, fade_in_frames=0
+        ).clamped(right_duration).to_dict()
     left = replace(
         clip,
         duration_frames=left_duration,
         camera=left_camera,
+        parameters=left_parameters,
     ).validate()
     right = replace(
         clip,
@@ -351,6 +370,7 @@ def split_clip(
         duration_frames=right_duration,
         source_in_frame=clip.source_in_frame + left_duration,
         camera=right_camera,
+        parameters=right_parameters,
     ).validate()
     _validate_effect_2d_edit(project, left)
     _validate_effect_2d_edit(project, right)

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject
 
+from ..studio.audio import set_audio_clip_fades
 from ..studio.timeline import (
     OVERLAP_POLICY,
     clip_location,
@@ -32,6 +33,7 @@ class StudioTimelineActions(QObject):
         timeline = panel.timeline
         timeline.clipMoveRequested.connect(self.move_clips)
         timeline.clipTrimRequested.connect(self.trim_clip)
+        timeline.audioFadeRequested.connect(self.set_audio_fades)
         timeline.splitRequested.connect(self.split_clips)
         timeline.duplicateRequested.connect(self.duplicate_clips)
         timeline.deleteRequested.connect(self.delete_clips)
@@ -125,6 +127,31 @@ class StudioTimelineActions(QObject):
             )
             self.panel.timeline.scene.set_selection((clip_id,))
         except (KeyError, ValueError, PermissionError) as exc:
+            self._error(exc)
+
+    def set_audio_fades(
+        self,
+        clip_id: str,
+        fade_in_frames: int,
+        fade_out_frames: int,
+    ) -> None:
+        project = self.panel.project
+        if project is None:
+            return
+        try:
+            updated = set_audio_clip_fades(
+                project,
+                clip_id,
+                fade_in_frames,
+                fade_out_frames,
+            )
+            self.panel._commit_timeline_project(
+                updated,
+                "Régler les fondus audio",
+                merge_key=f"audio-fades:{clip_id}",
+            )
+            self.panel.timeline.scene.set_selection((clip_id,))
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
             self._error(exc)
 
     def split_clips(self, clip_ids: object) -> None:
