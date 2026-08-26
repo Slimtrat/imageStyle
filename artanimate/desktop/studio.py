@@ -4,13 +4,14 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QStandardPaths, Qt, Signal
 from PySide6.QtGui import (
     QAction, QColor, QCloseEvent, QFont, QImage, QKeySequence, QPainter, QPen,
 )
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -21,6 +22,15 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.config import RenderConfig
+from ..studio.analysis import (
+    SceneAnalysisResult,
+    add_manual_mask,
+    add_manual_selection,
+    apply_scene_analysis,
+    remove_scene_object,
+    update_scene_object_bounds,
+)
+from ..studio.assets import fingerprint_file
 from ..studio.camera import (
     copy_camera_keyframe,
     move_camera_keyframe,
@@ -37,7 +47,7 @@ from ..studio.effect_2d import (
 )
 from ..studio.camera_presets import CameraPreset, PresetApplyMode, apply_camera_preset
 from ..studio.adapters.legacy_project import project_as_semantic
-from ..studio.semantic import CapabilityInvocation, SemanticScene
+from ..studio.semantic import Bounds, CapabilityInvocation, SemanticScene
 from ..studio.history import StudioHistory
 from ..studio.model import (
     CameraAnimation,
@@ -51,6 +61,7 @@ from ..studio.model import (
 )
 from ..studio.timeline import add_track, delete_clips, set_track_state
 from .studio_camera import StudioCameraInspector
+from .studio_analysis import StudioAnalysisController, StudioAnalysisPanel
 from .studio_camera_presets import StudioCameraPresetPanel
 from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
@@ -449,6 +460,7 @@ class StudioPanel(QWidget):
         parent: QWidget | None = None,
         *,
         effect_config_provider: Callable[[], RenderConfig] | None = None,
+        analysis_cache_dir: str | Path | None = None,
     ):
         super().__init__(parent)
         self.setObjectName("studioV3Panel")
@@ -473,6 +485,24 @@ class StudioPanel(QWidget):
         self.preview_controller.renderingChanged.connect(self._preview_rendering_changed)
         self.preview_controller.failed.connect(self._preview_failed)
 
+        cache_root = (
+            Path(analysis_cache_dir)
+            if analysis_cache_dir is not None
+            else Path(
+                QStandardPaths.writableLocation(
+                    QStandardPaths.StandardLocation.CacheLocation
+                )
+            ) / "ArtAnimate" / "scene-analysis"
+        )
+        self.analysis_controller = StudioAnalysisController(
+            self,
+            cache_dir=cache_root,
+        )
+        self.analysis_controller.analysisReady.connect(self._analysis_ready)
+        self.analysis_controller.runningChanged.connect(self._analysis_running_changed)
+        self.analysis_controller.failed.connect(self._analysis_failed)
+        self.analysis_controller.cancelled.connect(self._analysis_cancelled)
+        self._analysis_project_id: str | None = None
         page = QVBoxLayout(self)
         page.setContentsMargins(8, 10, 8, 4)
         page.setSpacing(12)
@@ -561,6 +591,17 @@ class StudioPanel(QWidget):
         self.semantic_panel.invocationDeleteRequested.connect(self._semantic_delete_invocation)
 
         camera_page = QWidget()
+        self.analysis_panel = StudioAnalysisPanel()
+        self.analysis_panel.analysisRequested.connect(self._request_scene_analysis)
+        self.analysis_panel.cancelRequested.connect(self.analysis_controller.cancel_pending)
+        self.analysis_panel.selectionRequested.connect(self._add_manual_selection)
+        self.analysis_panel.correctionRequested.connect(self._correct_scene_object)
+        self.analysis_panel.maskRequested.connect(self._choose_manual_mask)
+        self.analysis_panel.ignoreRequested.connect(self._ignore_scene_object)
+        self.semantic_panel.targetSelected.connect(
+            self.analysis_panel.set_selected_target
+        )
+
         camera_layout = QVBoxLayout(camera_page)
         camera_layout.setContentsMargins(0, 0, 0, 0)
         self.camera_inspector = StudioCameraInspector()
@@ -583,6 +624,7 @@ class StudioPanel(QWidget):
             lambda clip_id: self.timeline_actions.duplicate_clips((clip_id,))
         )
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
+        self.inspector_tabs.addTab(self.analysis_panel, "Analyse locale")
         self.inspector_tabs.addTab(camera_page, "Caméra")
         self.inspector_tabs.addTab(self.effect_inspector, "Réglages 2D")
         inspector_layout.addWidget(self.inspector_tabs, 1)
@@ -639,6 +681,7 @@ class StudioPanel(QWidget):
         merge_key: str | None = None,
     ) -> None:
         self.preview_controller.cancel_pending()
+        self.analysis_controller.cancel_pending(notify=False)
         validated = project.validate() if project is not None else None
         if not self._replaying_history:
             current = self.history.current
@@ -656,6 +699,7 @@ class StudioPanel(QWidget):
         scene = self._project.scene if self._project is not None else None
         self.canvas.set_semantic_scene(scene)
         self.semantic_panel.set_project(self._project)
+        self.analysis_panel.set_project(self._project)
         self.timeline.set_project(self._project)
         self.effect_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
@@ -704,6 +748,7 @@ class StudioPanel(QWidget):
         self.track_summary.set_project(validated)
         self.canvas.set_semantic_scene(validated.scene)
         self.semantic_panel.set_project(validated)
+        self.analysis_panel.set_project(validated)
         self.timeline.set_project(validated)
         self.effect_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
@@ -819,6 +864,160 @@ class StudioPanel(QWidget):
             self.preview_controller.cancel_pending()
             return
         self._request_preview(self.transport.current_frame)
+
+    def _request_scene_analysis(self) -> None:
+        project = self._project
+        artwork_path = self.canvas.artwork_path
+        if project is None or artwork_path is None:
+            self.analysis_panel.set_feedback(
+                "Analyse impossible · aucune œuvre locale n’est ouverte."
+            )
+            return
+        self._analysis_project_id = project.project_id
+        self.analysis_controller.request(project, artwork_path)
+
+    def _analysis_running_changed(self, running: bool) -> None:
+        self.analysis_panel.set_busy(running)
+
+    def _analysis_ready(self, result: SceneAnalysisResult) -> None:
+        project = self._project
+        artwork_path = self.canvas.artwork_path
+        if (
+            project is None
+            or artwork_path is None
+            or project.project_id != self._analysis_project_id
+        ):
+            return
+        try:
+            current = fingerprint_file(artwork_path)
+            if current.fingerprint != result.source_fingerprint:
+                self.analysis_panel.set_feedback(
+                    "Analyse ignorée · le fichier de l’œuvre a changé pendant le calcul."
+                )
+                return
+            updated = apply_scene_analysis(project, result)
+            self.commit_project(updated, "Analyser l’œuvre localement")
+            source = "cache local" if result.cache_hit else "calcul local"
+            self.analysis_panel.set_feedback(
+                f"Scène enrichie · masque + profondeur · {source}."
+            )
+            self.semantic_panel.select_target("auto-foreground")
+        except (OSError, TypeError, ValueError) as exc:
+            self.analysis_panel.set_feedback(f"Analyse non appliquée · {exc}")
+
+    def _analysis_failed(self, message: str) -> None:
+        self.analysis_panel.set_feedback(f"Analyse locale impossible · {message}")
+
+    def _analysis_cancelled(self) -> None:
+        self.analysis_panel.set_feedback(
+            "Analyse annulée · la scène précédente est conservée."
+        )
+
+    def _project_reference_path(self) -> Path:
+        project = self._project
+        if project is None:
+            return Path.cwd() / "untitled.artanimate"
+        artwork = Path(project.artwork.path)
+        parent = (
+            artwork.resolve(strict=False).parent
+            if artwork.is_absolute()
+            else Path.cwd()
+        )
+        return parent / f".{project.project_id}.artanimate"
+
+    def _add_manual_selection(self, bounds: Bounds, label: str) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            updated, scene_object = add_manual_selection(
+                project,
+                bounds,
+                label=label,
+            )
+            self.commit_project(updated, "Ajouter une zone manuelle")
+            self.semantic_panel.select_target(scene_object.object_id)
+            self.analysis_panel.set_feedback(
+                f"Zone ajoutée · {scene_object.label}."
+            )
+        except (TypeError, ValueError) as exc:
+            self.analysis_panel.set_feedback(f"Zone non ajoutée · {exc}")
+
+    def _choose_manual_mask(
+        self,
+        bounds: Bounds,
+        label: str,
+        path: str | Path | None = None,
+    ) -> None:
+        project = self._project
+        if project is None:
+            return
+        source = Path(path) if path is not None else None
+        if source is None:
+            selected, _filter = QFileDialog.getOpenFileName(
+                self,
+                "Choisir un masque local",
+                "",
+                "Images de masque (*.png *.jpg *.jpeg *.tif *.tiff *.webp)",
+            )
+            if not selected:
+                return
+            source = Path(selected)
+        try:
+            updated, scene_object = add_manual_mask(
+                project,
+                source,
+                self._project_reference_path(),
+                bounds,
+                label=label,
+            )
+            self.commit_project(updated, "Ajouter un masque manuel")
+            self.semantic_panel.select_target(scene_object.object_id)
+            self.analysis_panel.set_feedback(
+                f"Masque référencé · {source.name} · aucun pixel dans le projet."
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            self.analysis_panel.set_feedback(f"Masque non ajouté · {exc}")
+
+    def _correct_scene_object(
+        self,
+        object_id: str,
+        bounds: Bounds,
+        label: str,
+    ) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            updated = update_scene_object_bounds(
+                project,
+                object_id,
+                bounds,
+                label=label,
+            )
+            self.commit_project(
+                updated,
+                "Corriger une détection",
+                merge_key=f"scene-object-bounds:{object_id}",
+            )
+            self.semantic_panel.select_target(object_id)
+            self.analysis_panel.set_feedback("Détection corrigée manuellement.")
+        except (KeyError, TypeError, ValueError) as exc:
+            self.analysis_panel.set_feedback(f"Correction impossible · {exc}")
+
+    def _ignore_scene_object(self, object_id: str) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            updated = remove_scene_object(project, object_id)
+            self.commit_project(updated, "Ignorer une détection")
+            self.semantic_panel.select_target("artwork")
+            self.analysis_panel.set_feedback(
+                "Détection ignorée · les actions qui la ciblaient ont été retirées."
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            self.analysis_panel.set_feedback(f"Détection conservée · {exc}")
 
     def _request_preview(self, frame: int) -> None:
         if self._project is None or self.canvas.artwork_path is None:
@@ -1479,6 +1678,7 @@ class StudioPanel(QWidget):
 
     def shutdown(self) -> None:
         self.preview_controller.shutdown()
+        self.analysis_controller.shutdown()
 
     def activate(self) -> None:
         self.canvas.update()

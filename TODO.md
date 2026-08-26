@@ -67,12 +67,12 @@ bouger, ajoute l'action à la timeline et la modifie sans choisir un « effet 2D
 
 ## P4 — Analyse locale et premières affordances
 
-- [ ] **SCAN-01** Créer le port SceneAnalyzer et la provenance des résultats. `[PAR-A]`
-- [ ] **SCAN-02** Implémenter l'analyse minimale sans modèle. `[PAR-A]`
-- [ ] **SCAN-03** Ajouter sélection/masque manuel comme ressource de scène. `[PAR-A]`
-- [ ] **SCAN-04** Ajouter foreground/background/depth localement. `[PAR-A]`
-- [ ] **SCAN-05** Déduire movable, frame-exitable et depth-aware avec confiance.
-- [ ] **SCAN-06** Mettre en cache et invalider les analyses selon le fingerprint de l'œuvre.
+- [x] **SCAN-01** Créer le port SceneAnalyzer et la provenance des résultats. `[PAR-A]`
+- [x] **SCAN-02** Implémenter l'analyse minimale sans modèle. `[PAR-A]`
+- [x] **SCAN-03** Ajouter sélection/masque manuel comme ressource de scène. `[PAR-A]`
+- [x] **SCAN-04** Ajouter foreground/background/depth localement. `[PAR-A]`
+- [x] **SCAN-05** Déduire movable, frame-exitable et depth-aware avec confiance.
+- [x] **SCAN-06** Mettre en cache et invalider les analyses selon le fingerprint de l'œuvre.
 
 Critère de fin P4 : une œuvre arbitraire reste utilisable sans scan avancé et une
 analyse enrichie ajoute des possibilités sans changer le format des capabilities.

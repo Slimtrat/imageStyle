@@ -338,7 +338,14 @@ class StudioSemanticPanel(QFrame):
             "media": {AssetKind.IMAGE, AssetKind.VIDEO},
             "audio": {AssetKind.AUDIO},
         }.get(descriptor.category)
-        if required_kinds and not any(asset.kind in required_kinds for asset in project.assets):
+        usable_assets = tuple(
+            asset for asset in project.assets
+            if (asset.metadata or {}).get("resource_kind")
+            not in {"mask", "depth"}
+        )
+        if required_kinds and not any(
+            asset.kind in required_kinds for asset in usable_assets
+        ):
             noun = "audio local" if descriptor.category == "audio" else "média local"
             return CapabilityDecision(
                 descriptor.capability_id,

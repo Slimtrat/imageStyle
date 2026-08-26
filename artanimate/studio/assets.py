@@ -261,7 +261,10 @@ def relink_artwork_asset(
         project_path,
         asset_id=project.artwork.asset_id,
     )
-    return replace(project, artwork=artwork).validate()
+    updated = replace(project, artwork=artwork).validate()
+    from .analysis import invalidate_stale_scene_analysis
+
+    return invalidate_stale_scene_analysis(updated)
 
 
 def find_relink_candidates(
