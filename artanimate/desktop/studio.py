@@ -66,6 +66,7 @@ from ..studio.model import (
     StudioProject,
     TrackKind,
 )
+from .studio_audio import StudioAudioMonitor
 from ..studio.timeline import add_track, delete_clips, set_track_state
 from .studio_camera import StudioCameraInspector
 from .studio_analysis import StudioAnalysisController, StudioAnalysisPanel
@@ -648,6 +649,10 @@ class StudioPanel(QWidget):
         page.addLayout(body, 1)
 
         self.transport = StudioTransport()
+        self.audio_monitor = StudioAudioMonitor(self)
+        self.audio_monitor.failed.connect(self._audio_monitor_failed)
+        self.transport.playbackChanged.connect(self._audio_playback_changed)
+
         self.transport.frameChanged.connect(self._frame_changed)
         self.canvas.cameraPoseChanged.connect(self._camera_pose_edited)
         page.addWidget(self.transport)
@@ -670,6 +675,7 @@ class StudioPanel(QWidget):
 
         self.track_summary = StudioTrackSummary()
         self.asset_panel = StudioAssetPanel()
+        self.asset_panel.contextChanged.connect(self._asset_context_changed)
         self.editor_tabs = QTabWidget()
         self.editor_tabs.setObjectName("studioEditorTabs")
         self.editor_tabs.addTab(self.timeline, "Timeline")
@@ -717,6 +723,10 @@ class StudioPanel(QWidget):
         self.semantic_panel.set_project(self._project)
         self.analysis_panel.set_project(self._project)
         self.trigger_panel.set_project(self._project)
+        self.audio_monitor.set_project(
+            self._project,
+            self.asset_panel.project_path,
+        )
         self.timeline.set_project(self._project)
         self.effect_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
@@ -767,6 +777,10 @@ class StudioPanel(QWidget):
         self.semantic_panel.set_project(validated)
         self.analysis_panel.set_project(validated)
         self.trigger_panel.set_project(validated)
+        self.audio_monitor.set_project(
+            validated,
+            self.asset_panel.project_path,
+        )
         self.timeline.set_project(validated)
         self.effect_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
@@ -875,7 +889,31 @@ class StudioPanel(QWidget):
         self.keyframe_strip.set_playhead(frame)
         self.timeline.set_playhead(frame)
         self._request_preview(frame)
+        self.audio_monitor.sync_frame(frame, playing=self.transport.is_playing)
         self.frame_requested.emit(frame)
+
+    def _audio_playback_changed(self, playing: bool) -> None:
+        self.audio_monitor.sync_frame(
+            self.transport.current_frame,
+            playing=playing,
+        )
+
+    def _asset_context_changed(
+        self,
+        project: StudioProject | None,
+        project_path: Path | None,
+    ) -> None:
+        self.audio_monitor.set_project(project, project_path)
+        if project is not None:
+            self.audio_monitor.sync_frame(
+                self.transport.current_frame,
+                playing=self.transport.is_playing,
+            )
+
+    def _audio_monitor_failed(self, message: str) -> None:
+        self.asset_panel.set_feedback(message)
+        self.project_status.setText(message)
+
 
     def _artwork_changed(self, path: Path | None) -> None:
         if path is None:
@@ -1795,6 +1833,7 @@ class StudioPanel(QWidget):
     def shutdown(self) -> None:
         self.preview_controller.shutdown()
         self.analysis_controller.shutdown()
+        self.audio_monitor.shutdown()
 
     def activate(self) -> None:
         self.canvas.update()

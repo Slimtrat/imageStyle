@@ -203,6 +203,7 @@ def _content_spec(
             "audio.play",
             None,
             {
+                **(clip.parameters or {}),
                 "asset_id": clip.asset_id,
                 "source_in_frame": clip.source_in_frame,
             },

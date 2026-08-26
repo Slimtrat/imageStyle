@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSettings, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
+from ..studio.audio import add_audio_clip
 from ..studio.assets import (
     AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
@@ -18,7 +19,7 @@ from ..studio.assets import (
     resolve_asset_path,
     stored_asset_path,
 )
-from ..studio.model import MediaAsset, StudioProject
+from ..studio.model import AssetKind, MediaAsset, StudioProject
 from ..studio.persistence import (
     PROJECT_SUFFIX,
     ProjectSession,
@@ -354,12 +355,32 @@ class StudioDocumentController(QObject):
                 source,
                 self._asset_context_path(),
             )
-            if created:
+            audio_clip = None
+            if asset.kind == AssetKind.AUDIO:
+                updated, audio_clip = add_audio_clip(
+                    updated,
+                    asset.asset_id,
+                    start_frame=self.panel.transport.current_frame,
+                )
+            if created or audio_clip is not None:
+                label = (
+                    f"Importer et placer l’audio {source.name}"
+                    if audio_clip is not None
+                    else f"Importer le média {source.name}"
+                )
                 self.panel.commit_project(
                     updated,
-                    f"Importer le média {source.name}",
+                    label,
                 )
-                message = f"Référence ajoutée · {source.name} · aucun fichier copié"
+                if audio_clip is not None:
+                    self.panel.timeline.scene.set_selection((audio_clip.clip_id,))
+                    self.panel.editor_tabs.setCurrentWidget(self.panel.timeline)
+                    message = (
+                        f"Audio local placé · {source.name} · "
+                        f"frame {audio_clip.start_frame} · aucun fichier copié"
+                    )
+                else:
+                    message = f"Référence ajoutée · {source.name} · aucun fichier copié"
             else:
                 message = f"Référence déjà partagée · {source.name} · {asset.asset_id}"
             self.panel.asset_panel.set_feedback(message)

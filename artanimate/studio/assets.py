@@ -6,6 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Iterable
 from uuid import uuid4
+import wave
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -114,6 +115,13 @@ def _validate_kind(path: Path, kind: AssetKind) -> tuple[int | None, int | None]
         raise ValueError(
             f"Extension {path.suffix or 'absente'} incompatible avec un média {kind.value}"
         )
+    if kind == AssetKind.AUDIO and path.suffix.lower() == ".wav":
+        try:
+            with wave.open(str(path), "rb") as source:
+                if source.getframerate() <= 0 or source.getnchannels() <= 0:
+                    raise ValueError("WAV local sans format audio exploitable")
+        except (EOFError, OSError, wave.Error) as exc:
+            raise ValueError(f"Audio WAV local illisible : {path}") from exc
     if kind != AssetKind.IMAGE:
         return None, None
     try:
@@ -123,6 +131,20 @@ def _validate_kind(path: Path, kind: AssetKind) -> tuple[int | None, int | None]
             return oriented.size
     except (OSError, UnidentifiedImageError) as exc:
         raise ValueError(f"Image locale illisible : {path}") from exc
+
+
+def _audio_metadata(path: Path) -> dict[str, int | float]:
+    if path.suffix.lower() != ".wav":
+        return {}
+    with wave.open(str(path), "rb") as source:
+        sample_rate = source.getframerate()
+        frame_count = source.getnframes()
+        return {
+            "duration_seconds": frame_count / sample_rate,
+            "sample_rate": sample_rate,
+            "channels": source.getnchannels(),
+            "sample_width_bytes": source.getsampwidth(),
+        }
 
 
 def import_media_asset(
@@ -147,6 +169,7 @@ def import_media_asset(
         metadata={
             "file_size": identity.size,
             "modified_ns": identity.modified_ns,
+            **(_audio_metadata(source) if kind == AssetKind.AUDIO else {}),
         },
     ).validate()
 

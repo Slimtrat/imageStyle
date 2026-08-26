@@ -45,6 +45,7 @@ _KIND_LABELS = {
 
 
 class StudioAssetPanel(QFrame):
+    contextChanged = Signal(object, object)
     """Local-reference registry; all operations remain explicit and non-copying."""
 
     importRequested = Signal()
@@ -124,6 +125,7 @@ class StudioAssetPanel(QFrame):
             self.import_button.setEnabled(False)
             self.folder_button.setEnabled(False)
             self._selection_changed()
+            self.contextChanged.emit(project, self._project_path)
             return
 
         reference_counts: dict[str, int] = {}
@@ -154,6 +156,7 @@ class StudioAssetPanel(QFrame):
         self.import_button.setEnabled(True)
         self.folder_button.setEnabled(True)
         self._selection_changed()
+        self.contextChanged.emit(project, self._project_path)
 
     def _add_item(
         self,
