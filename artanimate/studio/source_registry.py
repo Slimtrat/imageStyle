@@ -13,7 +13,8 @@ from .effect_2d import (
     Effect2DTimedFrameSource,
     settings_for_effect_clip,
 )
-from .model import ClipKind, StudioProject
+from .media import StillClipSettings, StillImageSource
+from .model import ClipKind, MediaAsset, StudioProject
 from .sources import TimedFrameSource
 
 
@@ -37,13 +38,16 @@ class StaticArtworkSource:
 class ArtworkSourceRegistry:
     """Shared, bounded artwork source registry for preview and final render."""
 
-    def __init__(self, max_effect_sources: int = 8):
-        if max_effect_sources < 1:
-            raise ValueError("Le registre doit conserver au moins une source d’effet")
+    def __init__(self, max_effect_sources: int = 8, max_media_sources: int = 8):
+        if max_effect_sources < 1 or max_media_sources < 1:
+            raise ValueError("Le registre doit conserver au moins une source par famille")
         self.max_effect_sources = int(max_effect_sources)
+        self.max_media_sources = int(max_media_sources)
         self._sources: dict[str, np.ndarray] = {}
         self._effect_sources: OrderedDict[str, Effect2DTimedFrameSource] = OrderedDict()
+        self._media_sources: OrderedDict[str, StillImageSource] = OrderedDict()
         self.decode_count = 0
+        self.media_decode_count = 0
         self.effect_factory = Effect2DSourceFactory()
         self._lock = RLock()
 
@@ -51,6 +55,11 @@ class ArtworkSourceRegistry:
     def effect_source_count(self) -> int:
         with self._lock:
             return len(self._effect_sources)
+
+    @property
+    def media_source_count(self) -> int:
+        with self._lock:
+            return len(self._media_sources)
 
     @staticmethod
     def _key(path: Path, fingerprint: str | None) -> str:
@@ -98,6 +107,32 @@ class ArtworkSourceRegistry:
                 self._effect_sources.popitem(last=False)
             return source
 
+    def still_image(
+        self,
+        asset: MediaAsset,
+        path: str | Path,
+        settings: StillClipSettings,
+        fps: int,
+    ) -> StillImageSource:
+        settings.validate()
+        key = (
+            f"{self._key(Path(path), asset.fingerprint)}|fps={int(fps)}|"
+            f"{settings.crop_x}:{settings.crop_y}:{settings.crop_width}:"
+            f"{settings.crop_height}:{settings.rotation_degrees}"
+        )
+        with self._lock:
+            cached = self._media_sources.get(key)
+            if cached is not None:
+                self._media_sources.move_to_end(key)
+                return cached
+        source = StillImageSource.open(asset, path, fps, settings)
+        with self._lock:
+            self._media_sources[key] = source
+            self.media_decode_count += 1
+            while len(self._media_sources) > self.max_media_sources:
+                self._media_sources.popitem(last=False)
+        return source
+
     def sources_for(
         self,
         project: StudioProject,
@@ -133,4 +168,5 @@ class ArtworkSourceRegistry:
         with self._lock:
             self._sources.clear()
             self._effect_sources.clear()
+            self._media_sources.clear()
         self.effect_factory.clear()

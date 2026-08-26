@@ -28,6 +28,7 @@ from ..semantic import (
 from ..semantic_actions import semantic_action_catalog
 from .catalog import effect_capability_id, legacy_capability_catalog
 from .semantic_actions import LocalSemanticActionRenderer
+from .local_media import LocalMediaCapabilityRenderer
 
 
 class ClosedPreparedRenderError(RuntimeError):
@@ -296,6 +297,14 @@ def build_classic_2d_renderer_registry(
         LocalSemanticActionRenderer(
             project,
             artwork_path,
+            resource_base=resource_base,
+        )
+    )
+    registry.register(
+        LocalMediaCapabilityRenderer(
+            project,
+            artwork_path,
+            source_registry,
             resource_base=resource_base,
         )
     )

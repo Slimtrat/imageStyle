@@ -67,6 +67,9 @@ def _build_legacy_capability_catalog() -> tuple[CapabilityDescriptor, ...]:
             parameters=(
                 CapabilityParameter("asset_id", "Média", "resource", required=True),
                 source_in, opacity, fit,
+                CapabilityParameter(
+                    "settings", "Réglages média", "any", default={}, has_default=True
+                ),
             ),
             renderer_candidates=("local.media",),
         ),

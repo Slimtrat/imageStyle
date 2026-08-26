@@ -194,7 +194,7 @@ def _content_spec(
             "content",
             "media.present",
             None,
-            {**visual, "asset_id": clip.asset_id},
+            {**visual, "asset_id": clip.asset_id, "settings": clip.parameters or {}},
             "local.media",
         )
     if clip.kind == ClipKind.AUDIO:

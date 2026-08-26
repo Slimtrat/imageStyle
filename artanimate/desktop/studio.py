@@ -52,6 +52,7 @@ from ..studio.effect_2d import (
     settings_for_effect_clip,
     update_effect_clip,
 )
+from ..studio.media import update_still_clip
 from ..studio.semantic_actions import (
     add_semantic_action_clip,
     is_semantic_action_capability,
@@ -74,6 +75,7 @@ from ..studio.model import (
 )
 from .studio_audio import StudioAudioMonitor
 from .studio_audio_inspector import AudioInspectorEdit, StudioAudioInspector
+from .studio_media_inspector import StillInspectorEdit, StudioMediaInspector
 from .studio_waveform import StudioWaveformController
 from ..studio.timeline import add_track, delete_clips, set_track_state
 from .studio_camera import StudioCameraInspector
@@ -656,6 +658,8 @@ class StudioPanel(QWidget):
         self.effect_inspector.duplicateRequested.connect(
             lambda clip_id: self.timeline_actions.duplicate_clips((clip_id,))
         )
+        self.media_inspector = StudioMediaInspector()
+        self.media_inspector.applyRequested.connect(self._apply_still_edit)
         self.audio_inspector = StudioAudioInspector()
         self.audio_inspector.applyRequested.connect(self._apply_audio_edit)
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
@@ -663,6 +667,7 @@ class StudioPanel(QWidget):
         self.inspector_tabs.addTab(self.trigger_panel, "Déclencheurs")
         self.inspector_tabs.addTab(camera_page, "Caméra")
         self.inspector_tabs.addTab(self.effect_inspector, "Réglages 2D")
+        self.inspector_tabs.addTab(self.media_inspector, "Plan réel")
         self.inspector_tabs.addTab(self.audio_inspector, "Audio")
         inspector_layout.addWidget(self.inspector_tabs, 1)
         body.addWidget(inspector)
@@ -761,6 +766,9 @@ class StudioPanel(QWidget):
         self.effect_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
         )
+        self.media_inspector.set_selection(
+            self._project, self.timeline.selected_clip_ids
+        )
         self.audio_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
         )
@@ -825,6 +833,9 @@ class StudioPanel(QWidget):
         }
         self.timeline.set_waveforms(self._waveforms)
         self.effect_inspector.set_selection(
+            validated, self.timeline.selected_clip_ids
+        )
+        self.media_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
         )
         self.audio_inspector.set_selection(
@@ -1765,6 +1776,7 @@ class StudioPanel(QWidget):
             else ()
         )
         self.effect_inspector.set_selection(self._project, clip_ids)
+        self.media_inspector.set_selection(self._project, clip_ids)
         self.audio_inspector.set_selection(self._project, clip_ids)
         if self._project is not None and clip_ids:
             selected = next(
@@ -1788,6 +1800,8 @@ class StudioPanel(QWidget):
                 self.semantic_panel.select_invocation(selected.invocation_id)
         if self.audio_inspector.selected_clip_id is not None:
             self.inspector_tabs.setCurrentWidget(self.audio_inspector)
+        elif self.media_inspector.selected_clip_id is not None:
+            self.inspector_tabs.setCurrentWidget(self.media_inspector)
         elif self.effect_inspector.selected_clip_id is not None:
             self.inspector_tabs.setCurrentWidget(self.effect_inspector)
 
@@ -1911,6 +1925,34 @@ class StudioPanel(QWidget):
             )
         except (KeyError, TypeError, ValueError, PermissionError) as exc:
             self.project_status.setText(f"Audio inchangé · {exc}")
+
+    def _apply_still_edit(self, value: object) -> None:
+        project = self._project
+        if project is None or not isinstance(value, StillInspectorEdit):
+            return
+        try:
+            updated, clip = update_still_clip(
+                project,
+                value.clip_id,
+                duration_frames=value.duration_frames,
+                fit=value.fit,
+                opacity=value.opacity,
+                enabled=value.enabled,
+                settings=value.settings,
+            )
+            self.commit_project(
+                updated,
+                "Régler le plan réel",
+                merge_key=f"still-settings:{value.clip_id}",
+            )
+            self.timeline.scene.set_selection((clip.clip_id,))
+            self.inspector_tabs.setCurrentWidget(self.media_inspector)
+            self.project_status.setText(
+                f"Plan réel réglé · {value.fit.value} · "
+                f"rotation {value.settings.rotation_degrees:+.1f}°"
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Plan réel inchangé · {exc}")
 
     def _add_timeline_track(self, kind: TrackKind) -> None:
         if self._project is None:

@@ -8,7 +8,7 @@ from typing import Iterable
 from uuid import uuid4
 import wave
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from .image_io import load_normalized_image
 
 from .model import ArtworkAsset, AssetKind, MediaAsset, StudioProject
 from .persistence import normalize_project_path
@@ -124,13 +124,13 @@ def _validate_kind(path: Path, kind: AssetKind) -> tuple[int | None, int | None]
             raise ValueError(f"Audio WAV local illisible : {path}") from exc
     if kind != AssetKind.IMAGE:
         return None, None
-    try:
-        with Image.open(path) as image:
-            oriented = ImageOps.exif_transpose(image)
-            oriented.load()
-            return oriented.size
-    except (OSError, UnidentifiedImageError) as exc:
-        raise ValueError(f"Image locale illisible : {path}") from exc
+    image, _inspection = load_normalized_image(path)
+    return image.size
+
+
+def _image_metadata(path: Path) -> dict[str, object]:
+    _image, inspection = load_normalized_image(path)
+    return inspection.metadata()
 
 
 def _audio_metadata(path: Path) -> dict[str, int | float]:
@@ -170,6 +170,7 @@ def import_media_asset(
             "file_size": identity.size,
             "modified_ns": identity.modified_ns,
             **(_audio_metadata(source) if kind == AssetKind.AUDIO else {}),
+            **(_image_metadata(source) if kind == AssetKind.IMAGE else {}),
         },
     ).validate()
 

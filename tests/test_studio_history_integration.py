@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from artanimate.desktop.studio import StudioPanel
 from artanimate.desktop.studio_document import StudioDocumentController
-from artanimate.studio.model import TrackKind
+from artanimate.studio.model import ClipKind, TrackKind
 
 
 @pytest.fixture(scope="module")
@@ -96,7 +96,12 @@ def test_timeline_and_local_media_commands_are_reversible_without_source_writes(
 
         assert controller.import_media(media)
         assert len(panel.project.assets) == 1
-        assert panel.history.undo_label == f"Importer le média {media.name}"
+        assert any(
+            clip.kind == ClipKind.STILL
+            for track in panel.project.tracks
+            for clip in track.clips
+        )
+        assert panel.history.undo_label == f"Importer et placer l’image {media.name}"
         assert panel.undo()
         assert panel.project.assets == ()
         assert media.read_bytes() == media_bytes

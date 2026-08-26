@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -74,6 +74,7 @@ class StudioAssetPanel(QFrame):
 
         self.tree = QTreeWidget()
         self.tree.setObjectName("studioAssetTree")
+        self.tree.setIconSize(QSize(46, 46))
         self.tree.setHeaderLabels(("Média", "Type", "État", "Utilisé", "Emplacement"))
         self.tree.setRootIsDecorated(False)
         self.tree.setAlternatingRowColors(True)
@@ -142,6 +143,8 @@ class StudioAssetPanel(QFrame):
             artwork_check.state,
             max(1, reference_counts.get(project.artwork.asset_id, 0)),
             artwork_check.resolved_path,
+            dimensions=(project.artwork.width, project.artwork.height),
+            metadata={"role": "œuvre maîtresse"},
         )
         for asset in project.assets:
             check = check_media_asset(asset, self._project_path)
@@ -152,6 +155,8 @@ class StudioAssetPanel(QFrame):
                 check.state,
                 reference_counts.get(asset.asset_id, 0),
                 check.resolved_path,
+                dimensions=(asset.width, asset.height),
+                metadata=asset.metadata or {},
             )
         self.import_button.setEnabled(True)
         self.folder_button.setEnabled(True)
@@ -166,6 +171,9 @@ class StudioAssetPanel(QFrame):
         state: AssetAvailability,
         references: int,
         path: Path,
+        *,
+        dimensions: tuple[int | None, int | None],
+        metadata: dict[str, object],
     ) -> None:
         item = QTreeWidgetItem(
             (name, kind, _STATE_LABELS[state], str(references), str(path))
@@ -174,6 +182,31 @@ class StudioAssetPanel(QFrame):
         item.setData(2, Qt.ItemDataRole.UserRole, state.value)
         item.setForeground(2, _STATE_COLORS[state])
         item.setToolTip(4, str(path))
+        width, height = dimensions
+        details = []
+        if width is not None and height is not None:
+            details.append(f"{width} × {height}")
+        profile = metadata.get("color_profile")
+        if profile:
+            details.append(str(profile))
+        image_format = metadata.get("format")
+        if image_format:
+            details.append(str(image_format))
+        item.setToolTip(0, " · ".join(details) if details else name)
+        if state == AssetAvailability.AVAILABLE and path.is_file() and kind in {"Image", "Œuvre"}:
+            reader = QImageReader(str(path))
+            reader.setAutoTransform(True)
+            source_size = reader.size()
+            if source_size.isValid():
+                reader.setScaledSize(
+                    source_size.scaled(
+                        QSize(46, 46),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                    )
+                )
+            thumbnail = reader.read()
+            if not thumbnail.isNull():
+                item.setIcon(0, QIcon(QPixmap.fromImage(thumbnail)))
         self.tree.addTopLevelItem(item)
 
     def selected_asset_id(self) -> str | None:
