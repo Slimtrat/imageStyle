@@ -18,6 +18,8 @@ from ..studio.preview import (
     StudioProxyCache,
     render_studio_preview_frame,
 )
+from .studio3d_bridge import Studio3DCaptureBridge
+from .studio3d_renderer import ClassicStudio3DRenderer
 
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,7 @@ class StudioPreviewWorker(QObject):
         proxy_width: int,
         cache: StudioProxyCache,
         sources: ArtworkSourceRegistry,
+        three_d_capture: Studio3DCaptureBridge,
     ):
         super().__init__()
         self.revision = int(revision)
@@ -62,12 +65,20 @@ class StudioPreviewWorker(QObject):
         self.cache = cache
         self.sources = sources
         self._cancelled = Event()
+        self.three_d_capture = three_d_capture
 
     def cancel(self) -> None:
         self._cancelled.set()
 
     def run(self) -> None:
         try:
+            three_d_renderer = ClassicStudio3DRenderer(
+                self.artwork_path,
+                fingerprint=self.project.artwork.fingerprint,
+                capture_port=self.three_d_capture,
+                cancelled=self._cancelled,
+            )
+
             frame, cached = render_studio_preview_frame(
                 self.project,
                 self.artwork_path,
@@ -76,6 +87,7 @@ class StudioPreviewWorker(QObject):
                 cache=self.cache,
                 source_registry=self.sources,
                 cancelled=self._cancelled,
+                extra_renderers=(three_d_renderer,),
             )
             if frame is not None and not self._cancelled.is_set():
                 self.ready.emit(
@@ -108,6 +120,7 @@ class StudioPreviewController(QObject):
         self.sources = ArtworkSourceRegistry()
         self.proxy_width = DEFAULT_PROXY_WIDTH
         self._revision = 0
+        self.three_d_capture = Studio3DCaptureBridge(self)
         self._jobs: dict[int, tuple[Future[None], StudioPreviewWorker]] = {}
         self._shutting_down = False
 
@@ -134,6 +147,7 @@ class StudioPreviewController(QObject):
         for future, worker in tuple(self._jobs.values()):
             worker.cancel()
             future.cancel()
+        self.three_d_capture.cancel_pending()
         worker = StudioPreviewWorker(
             revision,
             project,
@@ -142,6 +156,7 @@ class StudioPreviewController(QObject):
             self.proxy_width,
             self.cache,
             self.sources,
+            self.three_d_capture,
         )
         worker.ready.connect(
             self._frame_ready,
@@ -194,6 +209,7 @@ class StudioPreviewController(QObject):
         for future, worker in tuple(self._jobs.values()):
             worker.cancel()
             future.cancel()
+        self.three_d_capture.cancel_pending()
         self.renderingChanged.emit(False)
 
     def shutdown(self, wait_ms: int = 3000) -> None:
@@ -205,6 +221,7 @@ class StudioPreviewController(QObject):
             worker.cancel()
             future.cancel()
         deadline = monotonic() + max(0, int(wait_ms)) / 1000
+        self.three_d_capture.cancel_pending()
         for future, _worker in jobs:
             remaining = max(0.0, deadline - monotonic())
             try:
@@ -217,3 +234,4 @@ class StudioPreviewController(QObject):
         self.cache.clear()
         self.sources.clear()
         self.renderingChanged.emit(False)
+        self.three_d_capture.close()

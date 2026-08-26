@@ -11,6 +11,7 @@ import numpy as np
 from .model import StudioProject
 from .persistence import project_digest
 from .render_session import StudioRenderSession
+from .semantic import CapabilityRenderer
 from .source_registry import ArtworkSourceRegistry, StaticArtworkSource
 
 
@@ -134,6 +135,7 @@ def render_studio_preview_frame(
     cache: StudioProxyCache | None = None,
     source_registry: ArtworkSourceRegistry | None = None,
     cancelled: Event | None = None,
+    extra_renderers: tuple[CapabilityRenderer, ...] = (),
 ) -> tuple[np.ndarray | None, bool]:
     project.validate()
     width, height = proxy_size(project, requested_width)
@@ -151,6 +153,7 @@ def render_studio_preview_frame(
         output_width=width,
         output_height=height,
         source_registry=registry,
+        extra_renderers=extra_renderers,
     ) as session:
         rendered = session.frame_at(int(frame))
     if cancelled is not None and cancelled.is_set():

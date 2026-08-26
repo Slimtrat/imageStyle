@@ -14,13 +14,13 @@ from .adapters.legacy_project import project_as_semantic
 from .adapters.semantic_compositor import SemanticPlanCompositor
 from .compositor import StudioCompositor
 from .model import StudioProject
-from .semantic import RenderConstraints, RenderPlanner
-from .source_registry import ArtworkSourceRegistry
-
-
-_SEMANTIC_2D_CAPABILITIES = frozenset(
-    {"artwork.present", "camera.animate", "audio.play"}
+from .semantic import (
+    CapabilityRenderer,
+    RendererPolicyMode,
+    RenderConstraints,
+    RenderPlanner,
 )
+from .source_registry import ArtworkSourceRegistry
 
 
 class StudioRenderSession:
@@ -33,6 +33,7 @@ class StudioRenderSession:
         *,
         output_width: int | None = None,
         output_height: int | None = None,
+        extra_renderers: tuple[CapabilityRenderer, ...] = (),
         source_registry: ArtworkSourceRegistry | None = None,
     ):
         self.project = project.validate()
@@ -51,17 +52,26 @@ class StudioRenderSession:
             for invocation in semantic.invocations
             if invocation.capability_id != "audio.play"
         )
-        semantic_2d_only = all(
-            invocation.capability_id in _SEMANTIC_2D_CAPABILITIES
-            or invocation.capability_id.startswith("reveal.")
-            for invocation in visual_invocations
+        renderers = build_classic_2d_renderer_registry(
+            self.project,
+            self.artwork_path,
+            sources=self.source_registry,
+            extra_renderers=extra_renderers,
         )
-        if semantic_2d_only:
-            renderers = build_classic_2d_renderer_registry(
-                self.project,
-                self.artwork_path,
-                sources=self.source_registry,
-            )
+
+        def renderer_available(invocation) -> bool:
+            policy = invocation.renderer_policy
+            if policy.mode == RendererPolicyMode.AUTOMATIC:
+                return bool(renderers.candidates_for(invocation.capability_id))
+            for renderer_id in policy.renderer_ids:
+                try:
+                    renderers.get(renderer_id)
+                except KeyError:
+                    continue
+                return True
+            return False
+
+        if all(renderer_available(item) for item in visual_invocations):
             plan = RenderPlanner(
                 build_legacy_capability_registry(),
                 renderers,

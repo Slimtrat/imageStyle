@@ -187,7 +187,7 @@ def project_as_semantic(project: StudioProject) -> LegacySemanticProject:
             else:
                 raise ValueError(f"Type de clip V1 non mappable : {clip.kind}")
 
-            if clip.camera is not None:
+            if clip.camera is not None and clip.kind != ClipKind.ARTWORK_3D:
                 camera_id = _stable_invocation_id(project.project_id, track.track_id, clip.clip_id, "camera")
                 invocations.append(
                     CapabilityInvocation(

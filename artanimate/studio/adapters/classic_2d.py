@@ -15,6 +15,7 @@ from ..source_registry import ArtworkSourceRegistry, StaticArtworkSource
 from ..sources import TimedFrameSource, validate_frame_index, validate_timed_frame
 from ..semantic import (
     CapabilityRegistry,
+    CapabilityRenderer,
     FrozenJsonObject,
     RendererDescriptor,
     RendererEvaluation,
@@ -266,6 +267,7 @@ def build_classic_2d_renderer_registry(
     artwork_path: str | Path,
     *,
     sources: ArtworkSourceRegistry | None = None,
+    extra_renderers: tuple[CapabilityRenderer, ...] = (),
 ) -> RendererRegistry:
     project.validate()
     source_registry = sources or ArtworkSourceRegistry()
@@ -287,6 +289,8 @@ def build_classic_2d_renderer_registry(
                 source_registry,
             )
         )
+    for renderer in extra_renderers:
+        registry.register(renderer)
     return registry.freeze()
 
 

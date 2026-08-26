@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from threading import Event
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -19,7 +20,7 @@ from ..studio.semantic import (
     RenderFrame,
     RenderRequest,
 )
-from ..studio.sources import validate_frame_index
+from ..studio.sources import validate_frame_index, validate_timed_frame
 from .studio3d_particles import StudioSceneData, build_studio_scene_data
 from .studio3d_state import (
     Studio3DSceneSettings,
@@ -111,6 +112,18 @@ def _state_metadata(state: Studio3DSceneState) -> FrozenJsonObject:
     )
 
 
+class Studio3DCapturePort(Protocol):
+    def capture(
+        self,
+        prepared: "PreparedStudio3DRender",
+        frame_index: int,
+        *,
+        cancelled: Event | None = None,
+    ) -> np.ndarray: ...
+
+    def release(self, prepared: "PreparedStudio3DRender") -> None: ...
+
+
 class PreparedStudio3DRender:
     """Random-access texture and complete QML state for one semantic 3D shot."""
 
@@ -158,6 +171,49 @@ class PreparedStudio3DRender:
         self.source.clear_frame_cache()
 
 
+class CapturedStudio3DRender:
+    """Final RGB source backed by a UI-thread capture port with backpressure."""
+
+    def __init__(
+        self,
+        prepared: PreparedStudio3DRender,
+        capture_port: Studio3DCapturePort,
+        cancelled: Event | None,
+    ) -> None:
+        self.prepared = prepared
+        self.capture_port = capture_port
+        self.cancelled = cancelled
+        self.width = prepared.width
+        self.height = prepared.height
+        self.fps = prepared.fps
+        self.frame_count = prepared.frame_count
+        self.closed = False
+
+    def frame_at(self, frame_index: int) -> RenderFrame:
+        if self.closed:
+            raise RuntimeError("La source de capture Studio 3D est fermée")
+        validate_frame_index(frame_index, self.frame_count)
+        image = self.capture_port.capture(
+            self.prepared,
+            frame_index,
+            cancelled=self.cancelled,
+        )
+        image = validate_timed_frame(self, np.ascontiguousarray(image))
+        state = self.prepared.state_at(frame_index)
+        return RenderFrame(
+            image=image,
+            blend_mode="normal",
+            metadata=_state_metadata(state),
+        )
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.capture_port.release(self.prepared)
+        self.prepared.close()
+
+
 class ClassicStudio3DRenderer:
     descriptor = RendererDescriptor(
         "classic.studio-3d",
@@ -175,10 +231,14 @@ class ClassicStudio3DRenderer:
         *,
         fingerprint: str | None = None,
         source_factory: ArtworkTimedSourceFactory | None = None,
+        capture_port: Studio3DCapturePort,
+        cancelled: Event | None = None,
     ) -> None:
         self.artwork_path = Path(artwork_path)
         self.fingerprint = fingerprint
         self.source_factory = source_factory or ArtworkTimedSourceFactory()
+        self.capture_port = capture_port
+        self.cancelled = cancelled
 
     def evaluate(self, request: RenderRequest) -> RendererEvaluation:
         try:
@@ -190,7 +250,7 @@ class ClassicStudio3DRenderer:
             return RendererEvaluation(False, reasons=(str(exc),))
         return RendererEvaluation(True, 100)
 
-    def prepare(self, request: RenderRequest) -> PreparedStudio3DRender:
+    def prepare_state(self, request: RenderRequest) -> PreparedStudio3DRender:
         evaluation = self.evaluate(request)
         if not evaluation.compatible:
             raise ValueError("Renderer Studio 3D incompatible : " + "; ".join(evaluation.reasons))
@@ -215,9 +275,17 @@ class ClassicStudio3DRenderer:
             settings=settings,
             scene_data=scene_data,
         )
-        return PreparedStudio3DRender(
+        prepared = PreparedStudio3DRender(
             request,
             source,
             resolver,
             scene_data,
+        )
+        return prepared
+
+    def prepare(self, request: RenderRequest) -> CapturedStudio3DRender:
+        return CapturedStudio3DRender(
+            self.prepare_state(request),
+            self.capture_port,
+            self.cancelled,
         )
