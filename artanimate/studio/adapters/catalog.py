@@ -8,7 +8,7 @@ def effect_capability_id(effect_key: str) -> str:
     return "reveal.chromatic" if effect_key == "rgb_fade" else f"reveal.{effect_key}"
 
 
-def legacy_capability_catalog() -> tuple[CapabilityDescriptor, ...]:
+def _build_legacy_capability_catalog() -> tuple[CapabilityDescriptor, ...]:
     """Capabilities currently backed by native V1 renderers, without rewriting them."""
     artwork_requirement = CapabilityRequirement(
         "artwork-presentable",
@@ -96,3 +96,10 @@ def legacy_capability_catalog() -> tuple[CapabilityDescriptor, ...]:
             )
         )
     return tuple(capabilities)
+
+
+_LEGACY_CAPABILITY_CATALOG = _build_legacy_capability_catalog()
+
+
+def legacy_capability_catalog() -> tuple[CapabilityDescriptor, ...]:
+    return _LEGACY_CAPABILITY_CATALOG

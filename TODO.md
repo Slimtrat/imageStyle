@@ -28,14 +28,14 @@ sélectionne un faux renderer et obtient un plan immuable sans importer PySide6.
 
 - [x] **MIG-01** Créer automatiquement `artwork`, `background` et `camera` pour un projet V1.
 - [x] **MIG-02** Mapper les clips V1 vers des invocations sans modifier le projet source.
-- [ ] **MIG-03** Enregistrer `artwork.present` et l'adapter statique. `[PAR-D]`
-- [ ] **MIG-04** Enregistrer chaque effet actuel comme `reveal.*`. `[PAR-D]`
-- [ ] **MIG-05** Adapter `ArtworkRenderer` en PreparedRender frame-exact. `[PAR-D]`
-- [ ] **MIG-06** Adapter la caméra 2D comme capability indépendante. `[PAR-D]`
+- [x] **MIG-03** Enregistrer `artwork.present` et l'adapter statique. `[PAR-D]`
+- [x] **MIG-04** Enregistrer chaque effet actuel comme `reveal.*`. `[PAR-D]`
+- [x] **MIG-05** Adapter `ArtworkRenderer` en PreparedRender frame-exact. `[PAR-D]`
+- [x] **MIG-06** Adapter la caméra 2D comme capability indépendante. `[PAR-D]`
 - [ ] **MIG-07** Déplacer l'état 3D adressable derrière `classic.studio_3d`. `[PAR-E]`
 - [ ] **MIG-08** Fournir une capture 3D autonome, retryable et annulable. `[PAR-E]`
-- [ ] **MIG-09** Faire exécuter les adapters par le compositeur sans branche métier 2D/3D.
-- [ ] **MIG-10** Comparer les golden frames legacy et adapter pour tous les effets livrés.
+- [x] **MIG-09** Faire exécuter les adapters par le compositeur sans branche métier 2D/3D.
+- [x] **MIG-10** Comparer les golden frames legacy et adapter pour tous les effets livrés.
 
 Critère de fin P1 : le projet démo actuel produit les mêmes frames par le chemin
 legacy et par le RenderPlan sémantique, y compris après un seek arrière.

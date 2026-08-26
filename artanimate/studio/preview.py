@@ -145,14 +145,14 @@ def render_studio_preview_frame(
     if cancelled is not None and cancelled.is_set():
         return None, False
     registry = source_registry or ArtworkSourceRegistry()
-    session = StudioRenderSession(
+    with StudioRenderSession(
         project,
         artwork_path,
         output_width=width,
         output_height=height,
         source_registry=registry,
-    )
-    rendered = session.frame_at(int(frame))
+    ) as session:
+        rendered = session.frame_at(int(frame))
     if cancelled is not None and cancelled.is_set():
         return None, False
     if cache is not None:

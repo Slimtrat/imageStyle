@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QAction, QColor, QFont, QImage, QKeySequence, QPainter, QPen,
+    QAction, QColor, QCloseEvent, QFont, QImage, QKeySequence, QPainter, QPen,
 )
 from PySide6.QtWidgets import (
     QComboBox,
@@ -1101,6 +1101,10 @@ class StudioPanel(QWidget):
             field
         ]
         self._commit_timeline_project(project, f"Changer {action} de la piste")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.shutdown()
+        super().closeEvent(event)
 
     def shutdown(self) -> None:
         self.preview_controller.shutdown()

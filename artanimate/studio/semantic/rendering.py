@@ -102,6 +102,8 @@ class RenderFrame:
 
     image: Any
     alpha: Any | None = None
+    reference: Any | None = None
+    blend_mode: str = "normal"
     metadata: FrozenJsonObject = field(default_factory=FrozenJsonObject)
 
 

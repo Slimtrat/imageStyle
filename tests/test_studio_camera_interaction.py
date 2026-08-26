@@ -97,3 +97,12 @@ def test_canvas_drag_and_wheel_update_normalized_camera(app, tmp_path: Path) -> 
     QCoreApplication.sendEvent(canvas, wheel)
     assert canvas.camera_pose.zoom > zoom_before
 
+
+
+def test_closing_panel_shuts_down_proxy_workers(app) -> None:
+    panel = StudioPanel()
+    controller = panel.preview_controller
+
+    panel.close()
+
+    assert controller._shutting_down
