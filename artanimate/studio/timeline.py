@@ -17,6 +17,7 @@ from .model import (
     TrackKind,
 )
 from .semantic_actions import is_semantic_action_clip
+from .video import validate_video_source_range
 
 OVERLAP_POLICY = "layered"
 
@@ -289,6 +290,10 @@ def trim_clip(
             raise ValueError("Le clip audio doit référencer un asset")
         validate_audio_source_range(project, clip.asset_id, source_in, duration)
         parameters = AudioClipSettings.from_clip(clip).clamped(duration).to_dict()
+    elif clip.kind == ClipKind.VIDEO:
+        if clip.asset_id is None:
+            raise ValueError("Le clip vidéo doit référencer un asset")
+        validate_video_source_range(project, clip.asset_id, source_in, duration)
     trimmed = replace(
         clip,
         start_frame=start,

@@ -16,6 +16,7 @@ from .effect_2d import (
 from .media import StillClipSettings, StillImageSource
 from .model import ClipKind, MediaAsset, StudioProject
 from .sources import TimedFrameSource
+from .video import VideoClipSettings, VideoFrameSource
 
 
 class StaticArtworkSource:
@@ -38,14 +39,21 @@ class StaticArtworkSource:
 class ArtworkSourceRegistry:
     """Shared, bounded artwork source registry for preview and final render."""
 
-    def __init__(self, max_effect_sources: int = 8, max_media_sources: int = 8):
-        if max_effect_sources < 1 or max_media_sources < 1:
+    def __init__(
+        self,
+        max_effect_sources: int = 8,
+        max_media_sources: int = 8,
+        max_video_sources: int = 2,
+    ):
+        if min(max_effect_sources, max_media_sources, max_video_sources) < 1:
             raise ValueError("Le registre doit conserver au moins une source par famille")
         self.max_effect_sources = int(max_effect_sources)
         self.max_media_sources = int(max_media_sources)
+        self.max_video_sources = int(max_video_sources)
         self._sources: dict[str, np.ndarray] = {}
         self._effect_sources: OrderedDict[str, Effect2DTimedFrameSource] = OrderedDict()
         self._media_sources: OrderedDict[str, StillImageSource] = OrderedDict()
+        self._video_sources: OrderedDict[str, VideoFrameSource] = OrderedDict()
         self.decode_count = 0
         self.media_decode_count = 0
         self.effect_factory = Effect2DSourceFactory()
@@ -60,6 +68,11 @@ class ArtworkSourceRegistry:
     def media_source_count(self) -> int:
         with self._lock:
             return len(self._media_sources)
+
+    @property
+    def video_source_count(self) -> int:
+        with self._lock:
+            return len(self._video_sources)
 
     @staticmethod
     def _key(path: Path, fingerprint: str | None) -> str:
@@ -133,6 +146,37 @@ class ArtworkSourceRegistry:
                 self._media_sources.popitem(last=False)
         return source
 
+    def video(
+        self,
+        asset: MediaAsset,
+        path: str | Path,
+        settings: VideoClipSettings,
+        fps: int,
+    ) -> VideoFrameSource:
+        settings.validate()
+        transform = settings.transform
+        key = (
+            f"{self._key(Path(path), asset.fingerprint)}|fps={int(fps)}|video|"
+            f"{transform.crop_x}:{transform.crop_y}:{transform.crop_width}:"
+            f"{transform.crop_height}:{transform.rotation_degrees}:"
+            f"{settings.native_audio_mode.value}"
+        )
+        with self._lock:
+            cached = self._video_sources.get(key)
+            if cached is not None:
+                self._video_sources.move_to_end(key)
+                return cached
+        source = VideoFrameSource(asset, path, fps, settings)
+        evicted: list[VideoFrameSource] = []
+        with self._lock:
+            self._video_sources[key] = source
+            while len(self._video_sources) > self.max_video_sources:
+                _evicted_key, removed = self._video_sources.popitem(last=False)
+                evicted.append(removed)
+        for removed in evicted:
+            removed.close()
+        return source
+
     def sources_for(
         self,
         project: StudioProject,
@@ -165,8 +209,13 @@ class ArtworkSourceRegistry:
         return sources
 
     def clear(self) -> None:
+        videos: tuple[VideoFrameSource, ...]
         with self._lock:
             self._sources.clear()
             self._effect_sources.clear()
             self._media_sources.clear()
+            videos = tuple(self._video_sources.values())
+            self._video_sources.clear()
+        for source in videos:
+            source.close()
         self.effect_factory.clear()

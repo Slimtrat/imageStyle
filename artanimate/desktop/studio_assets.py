@@ -192,6 +192,15 @@ class StudioAssetPanel(QFrame):
         image_format = metadata.get("format")
         if image_format:
             details.append(str(image_format))
+        codec = metadata.get("codec")
+        native_fps = metadata.get("native_fps")
+        duration = metadata.get("duration_seconds")
+        if codec:
+            details.append(str(codec))
+        if isinstance(native_fps, int | float) and not isinstance(native_fps, bool):
+            details.append(f"{float(native_fps):.3g} FPS")
+        if isinstance(duration, int | float) and not isinstance(duration, bool):
+            details.append(f"{float(duration):.3g} s")
         item.setToolTip(0, " · ".join(details) if details else name)
         if state == AssetAvailability.AVAILABLE and path.is_file() and kind in {"Image", "Œuvre"}:
             reader = QImageReader(str(path))

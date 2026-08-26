@@ -41,6 +41,7 @@ class StudioRenderSession:
     ):
         self.project = project.validate()
         self.artwork_path = Path(artwork_path)
+        self._owns_source_registry = source_registry is None
         self.source_registry = source_registry or ArtworkSourceRegistry()
         self.width = output_width or self.project.settings.width
         self.height = output_height or self.project.settings.height
@@ -129,6 +130,8 @@ class StudioRenderSession:
         if self.prepared_plan is not None:
             self.prepared_plan.close()
             self.prepared_plan = None
+        if self._owns_source_registry:
+            self.source_registry.clear()
 
     def __enter__(self) -> "StudioRenderSession":
         return self

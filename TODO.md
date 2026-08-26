@@ -104,9 +104,9 @@ actions synchronisées, reproduites à l'identique en preview et à l'export.
 
 ## P7 — Médias réels et Reel fini
 
-- [ ] **REAL-01** Adapter image locale et vidéo frame-exact derrière `media.present`.
+- [x] **REAL-01** Adapter image locale et vidéo frame-exact derrière `media.present`.
   - [x] **REAL-01A** Image locale frame-exact, cadrable et diagnostiquable.
-  - [ ] **REAL-01B** Vidéo locale frame-exact, décodable et trimmable.
+  - [x] **REAL-01B** Vidéo locale frame-exact, décodable et trimmable.
 - [ ] **REAL-02** Ajouter cut, dissolve et blend virtuel → réel.
 - [ ] **REAL-03** Ajouter alignement manuel œuvre/photo réelle.
 - [ ] **REAL-04** Construire le parcours éditable Explore.

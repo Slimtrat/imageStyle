@@ -13,10 +13,11 @@ from ..semantic import (
 )
 from ..source_registry import ArtworkSourceRegistry
 from ..sources import validate_frame_index, validate_timed_frame
+from ..video import VideoClipSettings, VideoFrameSource
 
 
 class _PreparedLocalMedia:
-    def __init__(self, source: StillImageSource, request: RenderRequest) -> None:
+    def __init__(self, source: StillImageSource | VideoFrameSource, request: RenderRequest) -> None:
         self.source = source
         self.width = source.width
         self.height = source.height
@@ -93,16 +94,7 @@ class LocalMediaCapabilityRenderer:
         if not path.is_absolute():
             path = self.resource_base / path
         path = path.resolve(strict=False)
-        if asset.kind == AssetKind.VIDEO:
-            source = StillImageSource.missing(
-                asset,
-                path,
-                self.project.settings.fps,
-                request.constraints.width,
-                request.constraints.height,
-                "Décodage vidéo local indisponible",
-            )
-        elif not path.is_file():
+        if not path.is_file():
             source = StillImageSource.missing(
                 asset,
                 path,
@@ -111,7 +103,7 @@ class LocalMediaCapabilityRenderer:
                 request.constraints.height,
                 f"Média manquant : {path.name}",
             )
-        else:
+        elif asset.kind == AssetKind.IMAGE:
             settings = StillClipSettings.from_mapping(
                 request.invocation.parameters.to_dict().get("settings")
             )
@@ -130,5 +122,25 @@ class LocalMediaCapabilityRenderer:
                     request.constraints.width,
                     request.constraints.height,
                     f"Média illisible : {exc}",
+                )
+        else:
+            settings = VideoClipSettings.from_mapping(
+                request.invocation.parameters.to_dict().get("settings")
+            )
+            try:
+                source = self.sources.video(
+                    asset,
+                    path,
+                    settings,
+                    self.project.settings.fps,
+                )
+            except (OSError, ValueError) as exc:
+                source = StillImageSource.missing(
+                    asset,
+                    path,
+                    self.project.settings.fps,
+                    request.constraints.width,
+                    request.constraints.height,
+                    f"Vidéo illisible : {exc}",
                 )
         return _PreparedLocalMedia(source, request)

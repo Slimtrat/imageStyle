@@ -20,6 +20,7 @@ from ..studio.assets import (
     stored_asset_path,
 )
 from ..studio.model import AssetKind, MediaAsset, StudioProject
+from ..studio.video import add_video_clip
 from ..studio.media import add_still_clip
 from ..studio.persistence import (
     PROJECT_SUFFIX,
@@ -358,6 +359,7 @@ class StudioDocumentController(QObject):
             )
             audio_clip = None
             still_clip = None
+            video_clip = None
             if asset.kind == AssetKind.AUDIO:
                 updated, audio_clip = add_audio_clip(
                     updated,
@@ -370,23 +372,35 @@ class StudioDocumentController(QObject):
                     asset.asset_id,
                     start_frame=self.panel.transport.current_frame,
                 )
-            if created or audio_clip is not None or still_clip is not None:
+            elif asset.kind == AssetKind.VIDEO:
+                updated, video_clip = add_video_clip(
+                    updated,
+                    asset.asset_id,
+                    start_frame=self.panel.transport.current_frame,
+                )
+            if created or audio_clip is not None or still_clip is not None or video_clip is not None:
                 label = (
                     f"Importer et placer l’audio {source.name}"
                     if audio_clip is not None
                     else f"Importer et placer l’image {source.name}"
                     if still_clip is not None
+                    else f"Importer et placer la vidéo {source.name}"
+                    if video_clip is not None
                     else f"Importer le média {source.name}"
                 )
                 self.panel.commit_project(
                     updated,
                     label,
                 )
-                placed_clip = audio_clip or still_clip
+                placed_clip = audio_clip or still_clip or video_clip
                 if placed_clip is not None:
                     self.panel.timeline.scene.set_selection((placed_clip.clip_id,))
                     self.panel.editor_tabs.setCurrentWidget(self.panel.timeline)
-                    media_label = "Audio local" if audio_clip is not None else "Plan réel"
+                    media_label = (
+                        "Audio local"
+                        if audio_clip is not None
+                        else "Plan vidéo réel" if video_clip is not None else "Plan réel"
+                    )
                     message = (
                         f"{media_label} placé · {source.name} · "
                         f"frame {placed_clip.start_frame} · aucun fichier copié"

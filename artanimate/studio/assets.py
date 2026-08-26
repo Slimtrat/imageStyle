@@ -9,9 +9,9 @@ from uuid import uuid4
 import wave
 
 from .image_io import load_normalized_image
-
 from .model import ArtworkAsset, AssetKind, MediaAsset, StudioProject
 from .persistence import normalize_project_path
+from .video import inspect_video
 
 
 FINGERPRINT_SAMPLE_BYTES = 1024 * 1024
@@ -122,6 +122,9 @@ def _validate_kind(path: Path, kind: AssetKind) -> tuple[int | None, int | None]
                     raise ValueError("WAV local sans format audio exploitable")
         except (EOFError, OSError, wave.Error) as exc:
             raise ValueError(f"Audio WAV local illisible : {path}") from exc
+    if kind == AssetKind.VIDEO:
+        inspection = inspect_video(path, count_frames=False)
+        return inspection.width, inspection.height
     if kind != AssetKind.IMAGE:
         return None, None
     image, _inspection = load_normalized_image(path)
@@ -145,6 +148,10 @@ def _audio_metadata(path: Path) -> dict[str, int | float]:
             "channels": source.getnchannels(),
             "sample_width_bytes": source.getsampwidth(),
         }
+
+
+def _video_metadata(path: Path) -> dict[str, object]:
+    return inspect_video(path, count_frames=True).metadata()
 
 
 def import_media_asset(
@@ -171,6 +178,7 @@ def import_media_asset(
             "modified_ns": identity.modified_ns,
             **(_audio_metadata(source) if kind == AssetKind.AUDIO else {}),
             **(_image_metadata(source) if kind == AssetKind.IMAGE else {}),
+            **(_video_metadata(source) if kind == AssetKind.VIDEO else {}),
         },
     ).validate()
 
