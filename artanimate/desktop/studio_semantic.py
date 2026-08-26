@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..studio.adapters.classic_2d import build_legacy_capability_registry
-from ..studio.model import StudioProject
+from ..studio.model import AssetKind, StudioProject
 from ..studio.semantic import (
     AvailabilityStatus,
     CapabilityDecision,
@@ -241,8 +241,17 @@ class StudioSemanticPanel(QFrame):
 
         self.empty_state.hide()
         scene = self._project.scene
+        artwork = next(
+            (item for item in scene.objects if item.semantic_type == "artwork"),
+            None,
+        )
+        ordered_objects = (
+            (artwork,) + tuple(item for item in scene.objects if item is not artwork)
+            if artwork is not None
+            else scene.objects
+        )
         artwork_root: QTreeWidgetItem | None = None
-        for scene_object in scene.objects:
+        for scene_object in ordered_objects:
             label = scene_object.label
             if scene_object.confidence < 1.0:
                 label += f" · {scene_object.confidence:.0%}"
@@ -305,6 +314,40 @@ class StudioSemanticPanel(QFrame):
             return None
         return self._target_id
 
+    def _evaluate(
+        self,
+        descriptor: CapabilityDescriptor,
+        target_id: str | None,
+    ) -> CapabilityDecision:
+        project = self._project
+        if project is None or project.scene is None:
+            return CapabilityDecision(
+                descriptor.capability_id,
+                target_id,
+                AvailabilityStatus.UNAVAILABLE,
+                ("Aucune scène n’est ouverte.",),
+            )
+        decision = self.registry.evaluate(
+            descriptor.capability_id,
+            project.scene,
+            target_id,
+        )
+        if not decision.available:
+            return decision
+        required_kinds = {
+            "media": {AssetKind.IMAGE, AssetKind.VIDEO},
+            "audio": {AssetKind.AUDIO},
+        }.get(descriptor.category)
+        if required_kinds and not any(asset.kind in required_kinds for asset in project.assets):
+            noun = "audio local" if descriptor.category == "audio" else "média local"
+            return CapabilityDecision(
+                descriptor.capability_id,
+                target_id,
+                AvailabilityStatus.UNAVAILABLE,
+                (f"Importez d’abord un {noun} dans le projet.",),
+            )
+        return decision
+
     def _populate_capabilities(self) -> None:
         self.capability_tree.clear()
         self._capability_id = None
@@ -316,11 +359,7 @@ class StudioSemanticPanel(QFrame):
         first_available: QTreeWidgetItem | None = None
         for descriptor in self.registry.descriptors():
             target_id = self._effective_target(descriptor)
-            decision = self.registry.evaluate(
-                descriptor.capability_id,
-                project.scene,
-                target_id,
-            )
+            decision = self._evaluate(descriptor, target_id)
             group = groups.get(descriptor.category)
             if group is None:
                 group = QTreeWidgetItem(
@@ -361,11 +400,7 @@ class StudioSemanticPanel(QFrame):
         descriptor = self.registry.get(str(capability_id))
         raw_target = item.data(0, TARGET_ID_ROLE)
         target_id = str(raw_target) if raw_target else None
-        return descriptor, self.registry.evaluate(
-            descriptor.capability_id,
-            project.scene,
-            target_id,
-        )
+        return descriptor, self._evaluate(descriptor, target_id)
 
     def _capability_item_changed(
         self,
@@ -515,7 +550,8 @@ class StudioSemanticPanel(QFrame):
             return control
         control = QLineEdit()
         if spec.value_type in {"any", "point"}:
-            control.setText(json.dumps(value if value is not None else {}))
+            fallback: Any = [0.0, 0.0] if spec.value_type == "point" else {}
+            control.setText(json.dumps(value if value is not None else fallback))
         else:
             control.setText("" if value is None else str(value))
         return control
@@ -548,11 +584,7 @@ class StudioSemanticPanel(QFrame):
             try:
                 descriptor = self.registry.get(self._capability_id)
                 target = self._effective_target(descriptor)
-                decision = self.registry.evaluate(
-                    descriptor.capability_id,
-                    self._project.scene,
-                    target,
-                )
+                decision = self._evaluate(descriptor, target)
             except (KeyError, ValueError):
                 decision = None
         self.add_button.setEnabled(
@@ -560,7 +592,15 @@ class StudioSemanticPanel(QFrame):
             and decision is not None
             and decision.available
         )
-        self.apply_button.setEnabled(self._invocation_id is not None)
+        known_invocation = (
+            self._invocation_id is not None
+            and self._capability_id is not None
+            and any(
+                item.capability_id == self._capability_id
+                for item in self.registry.descriptors()
+            )
+        )
+        self.apply_button.setEnabled(known_invocation)
         self.delete_button.setEnabled(self._invocation_id is not None)
 
     def _request_capability(self) -> None:

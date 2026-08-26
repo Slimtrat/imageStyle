@@ -181,6 +181,10 @@ class StudioEffectInspector(QFrame):
             raise TypeError("Le fournisseur de réglages 2D doit retourner RenderConfig")
         return RenderConfig.from_dict(provided.to_dict())
 
+    def source_config_snapshot(self) -> RenderConfig:
+        """Return an isolated Atelier configuration for semantic actions."""
+        return self._provider_snapshot()
+
     def _load_effect_fields(self, config: RenderConfig, effect: str) -> None:
         for field, control in self._controls[effect].items():
             value = getattr(config, field)

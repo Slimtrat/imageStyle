@@ -54,13 +54,13 @@ un document V2 conserve l'intention même si le renderer préféré est absent.
 
 ## P3 — UI artwork-first du Studio
 
-- [ ] **UI-01** Ajouter l'arbre Scene avec œuvre, objets, fond et caméra. `[PAR-G]`
-- [ ] **UI-02** Afficher les capabilities compatibles pour la sélection. `[PAR-G]`
-- [ ] **UI-03** Expliquer les capabilities indisponibles et analyses manquantes. `[PAR-G]`
-- [ ] **UI-04** Remplacer la bibliothèque « FX 2D/3D » par catégories métier. `[PAR-G]`
-- [ ] **UI-05** Éditer les paramètres typés d'une invocation dans Properties. `[PAR-G]`
-- [ ] **UI-06** Afficher le renderer automatique ou épinglé sans exposer un graphe technique.
-- [ ] **UI-07** Garder Atelier 2D et Studio 3D accessibles pendant la migration.
+- [x] **UI-01** Ajouter l'arbre Scene avec œuvre, objets, fond et caméra. `[PAR-G]`
+- [x] **UI-02** Afficher les capabilities compatibles pour la sélection. `[PAR-G]`
+- [x] **UI-03** Expliquer les capabilities indisponibles et analyses manquantes. `[PAR-G]`
+- [x] **UI-04** Remplacer la bibliothèque « FX 2D/3D » par catégories métier. `[PAR-G]`
+- [x] **UI-05** Éditer les paramètres typés d'une invocation dans Properties. `[PAR-G]`
+- [x] **UI-06** Afficher le renderer automatique ou épinglé sans exposer un graphe technique.
+- [x] **UI-07** Garder Atelier 2D et Studio 3D accessibles pendant la migration.
 
 Critère de fin P3 : l'utilisateur sélectionne l'œuvre ou un objet, voit ce qui peut
 bouger, ajoute l'action à la timeline et la modifie sans choisir un « effet 2D/3D ».

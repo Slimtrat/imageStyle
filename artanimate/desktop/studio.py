@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction, QColor, QCloseEvent, QFont, QImage, QKeySequence, QPainter, QPen,
 )
@@ -36,21 +36,26 @@ from ..studio.effect_2d import (
     update_effect_clip,
 )
 from ..studio.camera_presets import CameraPreset, PresetApplyMode, apply_camera_preset
+from ..studio.adapters.legacy_project import project_as_semantic
+from ..studio.semantic import CapabilityInvocation, SemanticScene
 from ..studio.history import StudioHistory
 from ..studio.model import (
     CameraAnimation,
+    CameraKeyframe,
     CameraPose,
     ClipKind,
+    FitMode,
     Easing,
     StudioProject,
     TrackKind,
 )
-from ..studio.timeline import add_track, set_track_state
+from ..studio.timeline import add_track, delete_clips, set_track_state
 from .studio_camera import StudioCameraInspector
 from .studio_camera_presets import StudioCameraPresetPanel
 from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
 from .studio_effects import StudioEffectInspector
+from .studio_semantic import StudioSemanticPanel
 from .studio_preview import StudioPreviewController
 from .studio_timeline import StudioTimeline
 from .studio_timeline_actions import StudioTimelineActions
@@ -62,6 +67,7 @@ class StudioCanvas(QWidget):
 
     cameraPoseChanged = Signal(object)
     artworkChanged = Signal(object)
+    semanticTargetSelected = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -80,6 +86,8 @@ class StudioCanvas(QWidget):
         self._camera_pose = CameraPose()
         self._dragging_camera = False
         self._last_pointer = None
+        self._semantic_scene: SemanticScene | None = None
+        self._semantic_target_id: str | None = None
 
     def sizeHint(self) -> QSize:
         return QSize(360, 640)
@@ -107,6 +115,66 @@ class StudioCanvas(QWidget):
     @property
     def artwork_path(self) -> Path | None:
         return self._artwork_path
+
+    @property
+    def semantic_target_id(self) -> str | None:
+        return self._semantic_target_id
+
+    def set_semantic_scene(self, scene: SemanticScene | None) -> None:
+        self._semantic_scene = scene
+        known = (
+            scene is not None
+            and self._semantic_target_id is not None
+            and scene.object_by_id(self._semantic_target_id) is not None
+        )
+        if not known:
+            self._semantic_target_id = (
+                "artwork"
+                if scene is not None and scene.object_by_id("artwork") is not None
+                else None
+            )
+        self.update()
+
+    def set_semantic_target(self, object_id: str) -> bool:
+        if self._semantic_scene is None:
+            return False
+        if self._semantic_scene.object_by_id(object_id) is None:
+            return False
+        self._semantic_target_id = object_id
+        self.update()
+        return True
+
+    def _semantic_selection_rect(self, object_id: str, frame: QRect) -> QRectF:
+        scene = self._semantic_scene
+        scene_object = scene.object_by_id(object_id) if scene is not None else None
+        if scene_object is None:
+            return QRectF()
+        if scene_object.semantic_type in {"scene.background", "scene.camera"}:
+            return QRectF(frame)
+        bounds = scene_object.bounds
+        artwork = self._artwork_rect(frame)
+        if bounds is None or artwork.isEmpty():
+            return artwork
+        return QRectF(
+            artwork.left() + bounds.x * artwork.width(),
+            artwork.top() + bounds.y * artwork.height(),
+            bounds.width * artwork.width(),
+            bounds.height * artwork.height(),
+        )
+
+    def _semantic_target_at(self, point: QPointF, frame: QRect) -> str:
+        scene = self._semantic_scene
+        if scene is None:
+            return "artwork"
+        candidates = [
+            item for item in scene.objects
+            if item.bounds is not None
+            and item.semantic_type not in {"artwork", "scene.background", "scene.camera"}
+            and self._semantic_selection_rect(item.object_id, frame).contains(point)
+        ]
+        if candidates:
+            return min(candidates, key=lambda item: item.bounds.width * item.bounds.height).object_id
+        return "artwork"
 
     @property
     def preview_frame_index(self) -> int:
@@ -239,6 +307,20 @@ class StudioCanvas(QWidget):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                 self._artwork_name,
             )
+        if self._semantic_target_id is not None and not self._artwork.isNull():
+            selection = self._semantic_selection_rect(self._semantic_target_id, frame)
+            if not selection.isEmpty():
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor("#66d9ff"), 2))
+                painter.drawRoundedRect(selection, 3, 3)
+                selected = self._semantic_scene.object_by_id(self._semantic_target_id) if self._semantic_scene else None
+                if selected is not None:
+                    painter.setPen(QColor("#bcefff"))
+                    painter.drawText(
+                        selection.adjusted(4, 4, -4, -4),
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                        selected.label,
+                    )
 
         guide_pen = QPen(QColor(255, 255, 255, 55), 1, Qt.PenStyle.DashLine)
         painter.setPen(guide_pen)
@@ -271,6 +353,9 @@ class StudioCanvas(QWidget):
             and self.frame_rect().contains(event.position().toPoint())
             and not self._artwork.isNull()
         ):
+            target_id = self._semantic_target_at(event.position(), self.frame_rect())
+            self.set_semantic_target(target_id)
+            self.semanticTargetSelected.emit(target_id)
             self._dragging_camera = True
             self._last_pointer = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -342,7 +427,7 @@ class StudioTrackSummary(QFrame):
         )
         icon = {
             TrackKind.VIDEO: "CAM / IMAGE",
-            TrackKind.EFFECT: "FX 2D / 3D",
+            TrackKind.EFFECT: "ACTIONS",
             TrackKind.AUDIO: "AUDIO",
         }
         for track in project.tracks:
@@ -465,6 +550,16 @@ class StudioPanel(QWidget):
         inspector_layout.addWidget(principle)
         self.inspector_tabs = QTabWidget()
         self.inspector_tabs.setObjectName("studioInspectorTabs")
+        self.semantic_panel = StudioSemanticPanel()
+        self.semantic_panel.targetSelected.connect(self.canvas.set_semantic_target)
+        self.canvas.semanticTargetSelected.connect(self.semantic_panel.select_target)
+        self.semantic_panel.invocationSelected.connect(
+            self._semantic_invocation_selected
+        )
+        self.semantic_panel.capabilityRequested.connect(self._semantic_add_capability)
+        self.semantic_panel.invocationUpdateRequested.connect(self._semantic_update_invocation)
+        self.semantic_panel.invocationDeleteRequested.connect(self._semantic_delete_invocation)
+
         camera_page = QWidget()
         camera_layout = QVBoxLayout(camera_page)
         camera_layout.setContentsMargins(0, 0, 0, 0)
@@ -487,8 +582,9 @@ class StudioPanel(QWidget):
         self.effect_inspector.duplicateRequested.connect(
             lambda clip_id: self.timeline_actions.duplicate_clips((clip_id,))
         )
+        self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
         self.inspector_tabs.addTab(camera_page, "Caméra")
-        self.inspector_tabs.addTab(self.effect_inspector, "Effets 2D")
+        self.inspector_tabs.addTab(self.effect_inspector, "Réglages 2D")
         inspector_layout.addWidget(self.inspector_tabs, 1)
         body.addWidget(inspector)
         page.addLayout(body, 1)
@@ -557,6 +653,9 @@ class StudioPanel(QWidget):
                 self.history.commit(validated, label, merge_key=merge_key)
         self._project = validated
         self.track_summary.set_project(self._project)
+        scene = self._project.scene if self._project is not None else None
+        self.canvas.set_semantic_scene(scene)
+        self.semantic_panel.set_project(self._project)
         self.timeline.set_project(self._project)
         self.effect_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
@@ -603,6 +702,8 @@ class StudioPanel(QWidget):
         )
         self._project = validated
         self.track_summary.set_project(validated)
+        self.canvas.set_semantic_scene(validated.scene)
+        self.semantic_panel.set_project(validated)
         self.timeline.set_project(validated)
         self.effect_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
@@ -680,12 +781,13 @@ class StudioPanel(QWidget):
             _track_index, _clip_index, clip = active
             local_frame = frame - clip.start_frame
             pose = resolve_camera_pose(clip.camera, local_frame)
+            animation = clip.camera or CameraAnimation()
             self.canvas.set_camera_pose(pose)
             self.camera_inspector.set_pose(pose)
             exact = next(
                 (
                     keyframe
-                    for keyframe in clip.camera.keyframes
+                    for keyframe in animation.keyframes
                     if keyframe.frame == local_frame
                 ),
                 None,
@@ -694,7 +796,7 @@ class StudioPanel(QWidget):
             if exact is not None:
                 self.camera_inspector.set_easing(exact.easing)
             self.keyframe_strip.set_animation(
-                clip.camera,
+                animation,
                 clip_start=clip.start_frame,
                 clip_duration=clip.duration_frames,
             )
@@ -900,7 +1002,7 @@ class StudioPanel(QWidget):
             return
         _track_index, _clip_index, clip = active
         source = self.transport.current_frame - clip.start_frame
-        occupied = {keyframe.frame for keyframe in clip.camera.keyframes}
+        occupied = {keyframe.frame for keyframe in (clip.camera or CameraAnimation()).keyframes}
         target = next(
             (frame for frame in range(source + 1, clip.duration_frames) if frame not in occupied),
             None,
@@ -989,6 +1091,255 @@ class StudioPanel(QWidget):
         )
 
 
+    def _semantic_binding_for(self, invocation_id: str):
+        if self._project is None:
+            return None
+        try:
+            return project_as_semantic(self._project).binding_for(invocation_id)
+        except KeyError:
+            return None
+
+    def _semantic_bound_clip(self, invocation_id: str):
+        binding = self._semantic_binding_for(invocation_id)
+        if binding is None or self._project is None:
+            return None
+        for track_index, track in enumerate(self._project.tracks):
+            if track.track_id != binding.track_id:
+                continue
+            for clip_index, clip in enumerate(track.clips):
+                if clip.clip_id == binding.clip_id:
+                    return binding, track_index, clip_index, clip
+        return None
+
+    def _semantic_invocation_selected(self, invocation_id: str) -> None:
+        resolved = self._semantic_bound_clip(invocation_id)
+        if resolved is None:
+            return
+        _binding, _track_index, _clip_index, clip = resolved
+        self.timeline.scene.set_selection((clip.clip_id,))
+
+    def _semantic_add_capability(
+        self,
+        capability_id: str,
+        target_id: str,
+        values: object,
+    ) -> None:
+        project = self._project
+        if project is None or not isinstance(values, dict):
+            return
+        try:
+            descriptor = self.semantic_panel.registry.get(capability_id)
+            if capability_id.startswith("reveal."):
+                renderer_id = descriptor.renderer_candidates[0]
+                effect = renderer_id.removeprefix("classic.effect.")
+                config_values = self.effect_inspector.source_config_snapshot().to_dict()
+                config_values["effect"] = effect
+                config = RenderConfig.from_dict(config_values)
+                self._add_effect_layer(
+                    config,
+                    1.0,
+                    float(values.get("intensity", 1.0)),
+                    float(values.get("opacity", 1.0)),
+                )
+                return
+            if capability_id == "camera.animate":
+                self.inspector_tabs.setCurrentWidget(
+                    self.camera_inspector.parentWidget()
+                )
+                self._add_camera_keyframe()
+                return
+            if capability_id in {"artwork.present", "scene.depth_present"}:
+                active = self._active_camera_clip(self.transport.current_frame)
+                if active is None:
+                    raise ValueError("aucun plan de l’œuvre sous la tête de lecture")
+                track_index, clip_index, clip = active
+                if capability_id == "scene.depth_present":
+                    settings = values.get("settings")
+                    if not isinstance(settings, dict):
+                        settings = {}
+                    parameters = {"schema_version": 1, **settings}
+                    updated_clip = replace(
+                        clip,
+                        kind=ClipKind.ARTWORK_3D,
+                        parameters=parameters,
+                        source_in_frame=int(values.get("source_in_frame", 0)),
+                        opacity=float(values.get("opacity", 1.0)),
+                        fit=FitMode(values.get("fit", FitMode.CONTAIN.value)),
+                    )
+                    label = "Mettre l’œuvre en profondeur"
+                else:
+                    updated_clip = replace(
+                        clip,
+                        kind=ClipKind.ARTWORK_2D,
+                        parameters=None,
+                        source_in_frame=int(values.get("source_in_frame", 0)),
+                        opacity=float(values.get("opacity", 1.0)),
+                        fit=FitMode(values.get("fit", FitMode.CONTAIN.value)),
+                    )
+                    label = "Présenter l’œuvre en 2D"
+                tracks = list(project.tracks)
+                clips = list(tracks[track_index].clips)
+                clips[clip_index] = updated_clip
+                tracks[track_index] = replace(tracks[track_index], clips=tuple(clips))
+                self.commit_project(replace(project, tracks=tuple(tracks)), label)
+                return
+
+            parameters = descriptor.normalize_parameters(values)
+            start = self.transport.current_frame
+            duration = min(
+                project.settings.fps,
+                project.settings.duration_frames - start,
+            )
+            invocation = CapabilityInvocation.create(
+                capability_id,
+                start_frame=start,
+                duration_frames=max(1, duration),
+                target_id=target_id or None,
+                parameters=parameters,
+            )
+            updated = replace(
+                project,
+                invocations=(*project.invocations, invocation),
+            )
+            self.commit_project(updated, f"Ajouter l’action {descriptor.label}")
+            self.semantic_panel.select_invocation(invocation.invocation_id)
+        except (IndexError, KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Action inchangée · {exc}")
+
+    def _semantic_update_invocation(
+        self,
+        invocation_id: str,
+        values: object,
+    ) -> None:
+        project = self._project
+        if project is None or not isinstance(values, dict):
+            return
+        try:
+            invocation = next(
+                item for item in project.invocations
+                if item.invocation_id == invocation_id
+            )
+            resolved = self._semantic_bound_clip(invocation_id)
+            if resolved is None:
+                descriptor = self.semantic_panel.registry.get(
+                    invocation.capability_id
+                )
+                normalized = descriptor.normalize_parameters(values)
+                invocations = tuple(
+                    replace(item, parameters=normalized)
+                    if item.invocation_id == invocation_id else item
+                    for item in project.invocations
+                )
+                self.commit_project(
+                    replace(project, invocations=invocations),
+                    f"Régler l’action {descriptor.label}",
+                    merge_key=f"semantic-invocation:{invocation_id}",
+                )
+                return
+
+            binding, track_index, clip_index, clip = resolved
+            if binding.role == "effect":
+                settings = settings_for_effect_clip(clip)
+                config = RenderConfig.from_dict(values["render_config"])
+                updated, updated_clip = update_effect_clip(
+                    project,
+                    clip.clip_id,
+                    config=config,
+                    duration_seconds=clip.duration_frames / project.settings.fps,
+                    intensity=float(values.get("intensity", settings.intensity)),
+                    opacity=float(values.get("opacity", clip.opacity)),
+                    enabled=clip.enabled,
+                )
+            else:
+                if binding.role == "camera":
+                    keyframes = []
+                    for item in values.get("keyframes", []):
+                        pose = item["pose"]
+                        keyframes.append(
+                            CameraKeyframe(
+                                int(item["frame"]),
+                                CameraPose(
+                                    x=float(pose["x"]),
+                                    y=float(pose["y"]),
+                                    zoom=float(pose["zoom"]),
+                                    rotation_degrees=float(pose["rotation_degrees"]),
+                                    perspective=float(pose["perspective"]),
+                                    focus=float(pose["focus"]),
+                                ),
+                                Easing(item.get("easing", Easing.EASE_IN_OUT.value)),
+                            )
+                        )
+                    updated_clip = replace(
+                        clip,
+                        camera=CameraAnimation(
+                            tuple(sorted(keyframes, key=lambda item: item.frame))
+                        ),
+                    )
+                else:
+                    changes = {
+                        "source_in_frame": int(values.get("source_in_frame", clip.source_in_frame)),
+                        "opacity": float(values.get("opacity", clip.opacity)),
+                        "fit": FitMode(values.get("fit", clip.fit.value)),
+                    }
+                    if invocation.capability_id == "scene.depth_present":
+                        settings = values.get("settings", clip.parameters or {})
+                        if not isinstance(settings, dict):
+                            raise TypeError("les réglages 3D doivent être un objet")
+                        changes["parameters"] = settings
+                    updated_clip = replace(clip, **changes)
+                tracks = list(project.tracks)
+                clips = list(tracks[track_index].clips)
+                clips[clip_index] = updated_clip
+                tracks[track_index] = replace(tracks[track_index], clips=tuple(clips))
+                updated = replace(project, tracks=tuple(tracks))
+            self.commit_project(
+                updated,
+                f"Régler l’action {invocation.capability_id}",
+                merge_key=f"semantic-invocation:{invocation_id}",
+            )
+            self.timeline.scene.set_selection((updated_clip.clip_id,))
+        except (KeyError, StopIteration, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Action inchangée · {exc}")
+
+    def _semantic_delete_invocation(self, invocation_id: str) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            resolved = self._semantic_bound_clip(invocation_id)
+            if resolved is None:
+                invocations = tuple(
+                    item for item in project.invocations
+                    if item.invocation_id != invocation_id
+                )
+                if len(invocations) == len(project.invocations):
+                    raise KeyError("action introuvable")
+                triggers = tuple(
+                    item for item in project.triggers
+                    if item.source_invocation_id != invocation_id
+                    and item.action_invocation_id != invocation_id
+                )
+                updated = replace(
+                    project,
+                    invocations=invocations,
+                    triggers=triggers,
+                )
+            else:
+                binding, track_index, clip_index, clip = resolved
+                if binding.role == "camera":
+                    tracks = list(project.tracks)
+                    clips = list(tracks[track_index].clips)
+                    clips[clip_index] = replace(clip, camera=None)
+                    tracks[track_index] = replace(
+                        tracks[track_index], clips=tuple(clips)
+                    )
+                    updated = replace(project, tracks=tuple(tracks))
+                else:
+                    updated = delete_clips(project, (clip.clip_id,))
+            self.commit_project(updated, "Retirer une action de la mise en scène")
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Action inchangée · {exc}")
+
     def _timeline_selection_changed(self, value: object) -> None:
         clip_ids = (
             tuple(str(item) for item in value)
@@ -996,6 +1347,26 @@ class StudioPanel(QWidget):
             else ()
         )
         self.effect_inspector.set_selection(self._project, clip_ids)
+        if self._project is not None and clip_ids:
+            selected = next(
+                (
+                    clip for track in self._project.tracks
+                    for clip in track.clips
+                    if clip.clip_id == clip_ids[0]
+                ),
+                None,
+            )
+            current_id = self.semantic_panel.selected_invocation_id
+            current_binding = (
+                self._semantic_binding_for(current_id)
+                if current_id is not None else None
+            )
+            already_represents_clip = (
+                current_binding is not None
+                and current_binding.clip_id == clip_ids[0]
+            )
+            if selected is not None and selected.invocation_id is not None and not already_represents_clip:
+                self.semantic_panel.select_invocation(selected.invocation_id)
         if self.effect_inspector.selected_clip_id is not None:
             self.inspector_tabs.setCurrentWidget(self.effect_inspector)
 
