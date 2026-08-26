@@ -153,3 +153,56 @@ class TimelineTrigger:
             values["action_invocation_id"],
             values.get("offset_frames", 0),
         )
+
+
+def trigger_cycle_path(
+    triggers: tuple[TimelineTrigger, ...],
+) -> tuple[str, ...] | None:
+    adjacency: dict[str, set[str]] = {}
+    nodes: set[str] = set()
+    for trigger in triggers:
+        adjacency.setdefault(trigger.source_invocation_id, set()).add(
+            trigger.action_invocation_id
+        )
+        nodes.add(trigger.source_invocation_id)
+        nodes.add(trigger.action_invocation_id)
+    state: dict[str, int] = {}
+    stack: list[str] = []
+
+    def visit(node: str) -> tuple[str, ...] | None:
+        state[node] = 1
+        stack.append(node)
+        for target in sorted(adjacency.get(node, ())):
+            if state.get(target, 0) == 0:
+                cycle = visit(target)
+                if cycle is not None:
+                    return cycle
+            elif state.get(target) == 1:
+                start = stack.index(target)
+                return tuple((*stack[start:], target))
+        stack.pop()
+        state[node] = 2
+        return None
+
+    for node in sorted(nodes):
+        if state.get(node, 0) == 0:
+            cycle = visit(node)
+            if cycle is not None:
+                return cycle
+    return None
+
+
+def validate_trigger_graph(triggers: tuple[TimelineTrigger, ...]) -> None:
+    duplicate_edges: set[tuple[str, str, str]] = set()
+    for trigger in triggers:
+        edge = (
+            trigger.source_invocation_id,
+            trigger.event_id,
+            trigger.action_invocation_id,
+        )
+        if edge in duplicate_edges:
+            raise ValueError("Le graphe contient deux fois le même déclenchement")
+        duplicate_edges.add(edge)
+    cycle = trigger_cycle_path(triggers)
+    if cycle is not None:
+        raise ValueError("Cycle de déclencheurs : " + " -> ".join(cycle))

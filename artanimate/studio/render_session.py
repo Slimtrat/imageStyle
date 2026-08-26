@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ from .adapters.classic_2d import (
 )
 from .adapters.legacy_project import project_as_semantic
 from .adapters.semantic_compositor import SemanticPlanCompositor
+from .events import TriggerCompilation, compile_timeline_triggers
 from .compositor import StudioCompositor
 from .model import StudioProject
 from .semantic import (
@@ -48,6 +50,12 @@ class StudioRenderSession:
         self.execution_mode = "legacy"
 
         semantic = project_as_semantic(self.project)
+        capabilities = build_studio_capability_registry()
+        self.trigger_compilation: TriggerCompilation = compile_timeline_triggers(
+            self.project,
+            capabilities,
+        )
+        semantic = replace(semantic, invocations=self.trigger_compilation.invocations)
         visual_invocations = tuple(
             invocation
             for invocation in semantic.invocations
@@ -75,7 +83,7 @@ class StudioRenderSession:
 
         if all(renderer_available(item) for item in visual_invocations):
             plan = RenderPlanner(
-                build_studio_capability_registry(),
+                capabilities,
                 renderers,
             ).plan(
                 self.project.project_id,

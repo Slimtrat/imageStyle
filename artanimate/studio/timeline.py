@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from .camera import resolve_camera_pose
 from .effect_2d import MIN_EFFECT_DURATION_SECONDS, settings_for_effect_clip
+from .legacy_semantics import invocation_bindings
 from .model import (
     CameraAnimation,
     CameraKeyframe,
@@ -454,12 +455,10 @@ def delete_clips(project: StudioProject, clip_ids: tuple[str, ...]) -> StudioPro
     selected = set(clip_ids)
     if not selected:
         return project
-    action_invocation_ids = {
-        clip.invocation_id
-        for track in project.tracks
-        for clip in track.clips
-        if clip.clip_id in selected and is_semantic_action_clip(clip)
-        and clip.invocation_id is not None
+    selected_invocation_ids = {
+        invocation_id
+        for invocation_id, _track_id, clip_id, _role in invocation_bindings(project)
+        if clip_id in selected
     }
     known = {clip.clip_id for track in project.tracks for clip in track.clips}
     missing = selected - known
@@ -481,23 +480,16 @@ def delete_clips(project: StudioProject, clip_ids: tuple[str, ...]) -> StudioPro
         if transition.from_clip_id not in selected
         and transition.to_clip_id not in selected
     )
-    remaining_action_ids = {
-        clip.invocation_id
-        for track in tracks
-        for clip in track.clips
-        if is_semantic_action_clip(clip) and clip.invocation_id is not None
-    }
-    removed_invocation_ids = action_invocation_ids - remaining_action_ids
     invocations = tuple(
         item
         for item in project.invocations
-        if item.invocation_id not in removed_invocation_ids
+        if item.invocation_id not in selected_invocation_ids
     )
     triggers = tuple(
         item
         for item in project.triggers
-        if item.source_invocation_id not in removed_invocation_ids
-        and item.action_invocation_id not in removed_invocation_ids
+        if item.source_invocation_id not in selected_invocation_ids
+        and item.action_invocation_id not in selected_invocation_ids
     )
     return replace(
         project,

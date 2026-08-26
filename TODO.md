@@ -91,8 +91,8 @@ contrôlable, combiné à une caméra et un reveal existant.
 
 ## P6 — Events, audio et mise en scène
 
-- [ ] **EVT-01** Ajouter TimelineTrigger et validation acyclique. `[PAR-H]`
-- [ ] **EVT-02** Compiler les événements déterministes en frames. `[PAR-H]`
+- [x] **EVT-01** Ajouter TimelineTrigger et validation acyclique. `[PAR-H]`
+- [x] **EVT-02** Compiler les événements déterministes en frames. `[PAR-H]`
 - [ ] **AUD-01** Importer/décoder une piste audio locale frame-synchronisée. `[PAR-H]`
 - [ ] **AUD-02** Afficher waveform, trim, volume et fades. `[PAR-H]`
 - [ ] **AUD-03** Ajouter markers, sections et BeatMap éditable. `[PAR-H]`

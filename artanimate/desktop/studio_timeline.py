@@ -40,6 +40,21 @@ class TimelineTrackLayout:
     lanes: int
 
 
+def semantic_clip_label(project: StudioProject, clip: Clip) -> str:
+    """Expose event graph participation without turning the timeline into a graph editor."""
+
+    invocation_id = clip.invocation_id
+    if invocation_id is None:
+        return clip.clip_id
+    emits = any(
+        item.source_invocation_id == invocation_id for item in project.triggers
+    )
+    follows = any(
+        item.action_invocation_id == invocation_id for item in project.triggers
+    )
+    badges = ("⚡" if emits else "") + ("↳" if follows else "")
+    return f"{badges} {clip.clip_id}" if badges else clip.clip_id
+
 def _clip_lanes(clips: tuple[Clip, ...]) -> dict[str, int]:
     """Assign deterministic sub-lanes so overlaps never paint ambiguously."""
 
@@ -285,7 +300,7 @@ class StudioTimelineScene(QWidget):
             painter.drawText(
                 layout.rect.adjusted(6, 0, -4, 0),
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                layout.clip.clip_id,
+                semantic_clip_label(self._project, layout.clip),
             )
 
         if self._drag_clip is not None and self._drag_started:

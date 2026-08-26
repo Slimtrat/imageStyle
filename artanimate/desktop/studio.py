@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QStandardPaths, Qt, Signal
 from PySide6.QtGui import (
@@ -40,6 +41,7 @@ from ..studio.camera import (
     upsert_camera_keyframe,
 )
 from ..studio.clock import StudioClock
+from ..studio.events import compile_timeline_triggers
 from ..studio.effect_2d import (
     add_effect_clip,
     settings_for_effect_clip,
@@ -52,7 +54,7 @@ from ..studio.semantic_actions import (
 )
 from ..studio.camera_presets import CameraPreset, PresetApplyMode, apply_camera_preset
 from ..studio.adapters.legacy_project import project_as_semantic
-from ..studio.semantic import Bounds, CapabilityInvocation, SemanticScene
+from ..studio.semantic import Bounds, CapabilityInvocation, SemanticScene, TimelineTrigger
 from ..studio.history import StudioHistory
 from ..studio.model import (
     CameraAnimation,
@@ -72,6 +74,7 @@ from .studio_assets import StudioAssetPanel
 from .studio_keyframes import StudioKeyframeStrip
 from .studio_effects import StudioEffectInspector
 from .studio_semantic import StudioSemanticPanel
+from .studio_triggers import StudioTriggerPanel
 from .studio_preview import StudioPreviewController
 from .studio_timeline import StudioTimeline
 from .studio_timeline_actions import StudioTimelineActions
@@ -594,6 +597,13 @@ class StudioPanel(QWidget):
         self.semantic_panel.capabilityRequested.connect(self._semantic_add_capability)
         self.semantic_panel.invocationUpdateRequested.connect(self._semantic_update_invocation)
         self.semantic_panel.invocationDeleteRequested.connect(self._semantic_delete_invocation)
+        self.trigger_panel = StudioTriggerPanel(
+            capabilities=self.semantic_panel.registry,
+        )
+        self.trigger_panel.triggerAddRequested.connect(self._trigger_add)
+        self.trigger_panel.triggerUpdateRequested.connect(self._trigger_update)
+        self.trigger_panel.triggerDeleteRequested.connect(self._trigger_delete)
+
 
         camera_page = QWidget()
         self.analysis_panel = StudioAnalysisPanel()
@@ -630,6 +640,7 @@ class StudioPanel(QWidget):
         )
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
         self.inspector_tabs.addTab(self.analysis_panel, "Analyse locale")
+        self.inspector_tabs.addTab(self.trigger_panel, "Déclencheurs")
         self.inspector_tabs.addTab(camera_page, "Caméra")
         self.inspector_tabs.addTab(self.effect_inspector, "Réglages 2D")
         inspector_layout.addWidget(self.inspector_tabs, 1)
@@ -705,6 +716,7 @@ class StudioPanel(QWidget):
         self.canvas.set_semantic_scene(scene)
         self.semantic_panel.set_project(self._project)
         self.analysis_panel.set_project(self._project)
+        self.trigger_panel.set_project(self._project)
         self.timeline.set_project(self._project)
         self.effect_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
@@ -754,6 +766,7 @@ class StudioPanel(QWidget):
         self.canvas.set_semantic_scene(validated.scene)
         self.semantic_panel.set_project(validated)
         self.analysis_panel.set_project(validated)
+        self.trigger_panel.set_project(validated)
         self.timeline.set_project(validated)
         self.effect_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
@@ -1297,6 +1310,79 @@ class StudioPanel(QWidget):
             f"Mouvement {CameraPreset(preset).value} · {len(animation.keyframes)} keyframes éditables"
         )
 
+
+    def _trigger_add(
+        self,
+        source_invocation_id: str,
+        event_id: str,
+        action_invocation_id: str,
+        offset_frames: int,
+    ) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            trigger = TimelineTrigger(
+                f"trigger-{uuid4().hex}",
+                source_invocation_id,
+                event_id,
+                action_invocation_id,
+                int(offset_frames),
+            )
+            updated = replace(project, triggers=project.triggers + (trigger,))
+            compile_timeline_triggers(updated, self.semantic_panel.registry)
+            self.commit_project(updated, "Créer un déclencheur sémantique")
+            self.project_status.setText(
+                f"Déclencheur créé · {event_id} · {offset_frames:+d} frame(s)"
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            self.trigger_panel.status.setText(f"Lien inchangé · {exc}")
+            self.project_status.setText(f"Déclencheur refusé · {exc}")
+
+    def _trigger_update(self, trigger_id: str, offset_frames: int) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            found = False
+            triggers = []
+            for trigger in project.triggers:
+                if trigger.trigger_id == trigger_id:
+                    trigger = replace(trigger, offset_frames=int(offset_frames))
+                    found = True
+                triggers.append(trigger)
+            if not found:
+                raise KeyError(f"Déclencheur introuvable : {trigger_id}")
+            updated = replace(project, triggers=tuple(triggers))
+            compile_timeline_triggers(updated, self.semantic_panel.registry)
+            self.commit_project(
+                updated,
+                "Décaler un déclencheur sémantique",
+                merge_key=f"trigger-offset:{trigger_id}",
+            )
+            self.project_status.setText(
+                f"Déclencheur décalé · {offset_frames:+d} frame(s)"
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            self.trigger_panel.status.setText(f"Décalage inchangé · {exc}")
+            self.project_status.setText(f"Déclencheur inchangé · {exc}")
+
+    def _trigger_delete(self, trigger_id: str) -> None:
+        project = self._project
+        if project is None:
+            return
+        triggers = tuple(
+            trigger for trigger in project.triggers
+            if trigger.trigger_id != trigger_id
+        )
+        if len(triggers) == len(project.triggers):
+            self.trigger_panel.status.setText(
+                f"Déclencheur introuvable · {trigger_id}"
+            )
+            return
+        updated = replace(project, triggers=triggers)
+        self.commit_project(updated, "Supprimer un déclencheur sémantique")
+        self.project_status.setText("Déclencheur supprimé")
 
     def _semantic_binding_for(self, invocation_id: str):
         if self._project is None:

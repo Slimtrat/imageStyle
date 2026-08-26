@@ -14,6 +14,7 @@ from .semantic import (
     FrozenJsonObject,
     SemanticScene,
     TimelineTrigger,
+    validate_trigger_graph,
 )
 
 
@@ -618,6 +619,7 @@ class StudioProject:
                 raise ValueError(
                     f"Le trigger {trigger.trigger_id} référence une action absente"
                 )
+        validate_trigger_graph(self.triggers)
 
         known_project_keys = {
             "schema_version",
