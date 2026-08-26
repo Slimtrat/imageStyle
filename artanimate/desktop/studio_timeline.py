@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from ..studio.clock import StudioClock
 from ..studio.model import Clip, ClipKind, StudioProject, Track, TrackKind
+from ..studio.waveform import WaveformEnvelope, waveform_peaks_for_clip
 
 
 HEADER_WIDTH = 190
@@ -87,6 +88,7 @@ class StudioTimelineScene(QWidget):
         self.setObjectName("studioTimelineScene")
         self.setAccessibleName("Timeline multi-pistes du Studio")
         self.setMouseTracking(True)
+        self._waveforms: dict[str, WaveformEnvelope] = {}
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._project: StudioProject | None = None
         self._pixels_per_frame = 3.0
@@ -121,6 +123,10 @@ class StudioTimelineScene(QWidget):
     def selected_track_id(self) -> str | None:
         return self._selected_track_id
 
+    @property
+    def waveform_asset_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._waveforms))
+
 
     def set_project(self, project: StudioProject | None) -> None:
         self._project = project
@@ -133,6 +139,11 @@ class StudioTimelineScene(QWidget):
             clip_id for clip_id in self._selected if clip_id in valid_clip_ids
         )
         self._rebuild_geometry()
+
+    def set_waveforms(self, waveforms: dict[str, WaveformEnvelope]) -> None:
+        self._waveforms = dict(waveforms)
+        self.update()
+
 
     def set_pixels_per_frame(self, value: float) -> None:
         self._pixels_per_frame = min(18.0, max(0.75, float(value)))
@@ -296,6 +307,25 @@ class StudioTimelineScene(QWidget):
             )
             painter.setBrush(colors[layout.clip.kind])
             painter.drawRoundedRect(layout.rect, 4, 4)
+            if layout.clip.kind == ClipKind.AUDIO and layout.clip.asset_id is not None:
+                envelope = self._waveforms.get(layout.clip.asset_id)
+                if envelope is not None:
+                    width = max(1, int(layout.rect.width()))
+                    peaks = waveform_peaks_for_clip(
+                        envelope,
+                        layout.clip,
+                        self._project.settings.fps,
+                        width,
+                    )
+                    painter.setPen(QPen(QColor("#f3dcff"), 1))
+                    middle = layout.rect.center().y()
+                    amplitude = max(1.0, layout.rect.height() * 0.42)
+                    for offset, (minimum, maximum) in enumerate(peaks):
+                        x = layout.rect.left() + offset
+                        painter.drawLine(
+                            QPointF(x, middle - maximum * amplitude),
+                            QPointF(x, middle - minimum * amplitude),
+                        )
             painter.setPen(QColor("#ffffff"))
             painter.drawText(
                 layout.rect.adjusted(6, 0, -4, 0),
@@ -578,6 +608,9 @@ class StudioTimeline(QWidget):
 
     def set_project(self, project: StudioProject | None) -> None:
         self.scene.set_project(project)
+
+    def set_waveforms(self, waveforms: dict[str, WaveformEnvelope]) -> None:
+        self.scene.set_waveforms(waveforms)
 
     def set_playhead(self, frame: int) -> None:
         self.scene.set_playhead(frame)

@@ -57,6 +57,7 @@ from ..studio.adapters.legacy_project import project_as_semantic
 from ..studio.semantic import Bounds, CapabilityInvocation, SemanticScene, TimelineTrigger
 from ..studio.history import StudioHistory
 from ..studio.model import (
+    AssetKind,
     CameraAnimation,
     CameraKeyframe,
     CameraPose,
@@ -67,6 +68,7 @@ from ..studio.model import (
     TrackKind,
 )
 from .studio_audio import StudioAudioMonitor
+from .studio_waveform import StudioWaveformController
 from ..studio.timeline import add_track, delete_clips, set_track_state
 from .studio_camera import StudioCameraInspector
 from .studio_analysis import StudioAnalysisController, StudioAnalysisPanel
@@ -511,6 +513,15 @@ class StudioPanel(QWidget):
         self.analysis_controller.runningChanged.connect(self._analysis_running_changed)
         self.analysis_controller.failed.connect(self._analysis_failed)
         self.analysis_controller.cancelled.connect(self._analysis_cancelled)
+        self.waveform_controller = StudioWaveformController(
+            self,
+            cache_dir=cache_root / "waveforms",
+        )
+        self.waveform_controller.waveformsReady.connect(self._waveforms_ready)
+        self.waveform_controller.runningChanged.connect(self._waveform_running_changed)
+        self.waveform_controller.failed.connect(self._waveform_failed)
+        self._waveforms = {}
+
         self._analysis_project_id: str | None = None
         page = QVBoxLayout(self)
         page.setContentsMargins(8, 10, 8, 4)
@@ -705,6 +716,7 @@ class StudioPanel(QWidget):
         self.preview_controller.cancel_pending()
         self.analysis_controller.cancel_pending(notify=False)
         validated = project.validate() if project is not None else None
+        self.waveform_controller.cancel_pending(notify=False)
         if not self._replaying_history:
             current = self.history.current
             if (
@@ -728,6 +740,15 @@ class StudioPanel(QWidget):
             self.asset_panel.project_path,
         )
         self.timeline.set_project(self._project)
+        valid_audio_assets = (
+            {asset.asset_id for asset in self._project.assets if asset.kind == AssetKind.AUDIO}
+            if self._project is not None else set()
+        )
+        self._waveforms = {
+            key: value for key, value in self._waveforms.items()
+            if key in valid_audio_assets
+        }
+        self.timeline.set_waveforms(self._waveforms)
         self.effect_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
         )
@@ -782,6 +803,15 @@ class StudioPanel(QWidget):
             self.asset_panel.project_path,
         )
         self.timeline.set_project(validated)
+        valid_audio_assets = {
+            asset.asset_id for asset in validated.assets
+            if asset.kind == AssetKind.AUDIO
+        }
+        self._waveforms = {
+            key: value for key, value in self._waveforms.items()
+            if key in valid_audio_assets
+        }
+        self.timeline.set_waveforms(self._waveforms)
         self.effect_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
         )
@@ -904,16 +934,36 @@ class StudioPanel(QWidget):
         project_path: Path | None,
     ) -> None:
         self.audio_monitor.set_project(project, project_path)
-        if project is not None:
+        if project is not None and project_path is not None:
             self.audio_monitor.sync_frame(
                 self.transport.current_frame,
                 playing=self.transport.is_playing,
             )
+            self.waveform_controller.request(project, project_path)
+        else:
+            self._waveforms = {}
+            self.timeline.set_waveforms({})
+
+    def _waveforms_ready(self, waveforms: object) -> None:
+        if not isinstance(waveforms, dict):
+            return
+        self._waveforms = dict(waveforms)
+        self.timeline.set_waveforms(self._waveforms)
+        if self._waveforms:
+            self.asset_panel.set_feedback(
+                f"Waveform locale prête · {len(self._waveforms)} piste(s) en cache"
+            )
+
+    def _waveform_running_changed(self, running: bool) -> None:
+        if running:
+            self.asset_panel.set_feedback("Calcul local de la waveform…")
+
+    def _waveform_failed(self, message: str) -> None:
+        self.asset_panel.set_feedback(f"Waveform indisponible · {message}")
 
     def _audio_monitor_failed(self, message: str) -> None:
         self.asset_panel.set_feedback(message)
         self.project_status.setText(message)
-
 
     def _artwork_changed(self, path: Path | None) -> None:
         if path is None:
@@ -1834,6 +1884,7 @@ class StudioPanel(QWidget):
         self.preview_controller.shutdown()
         self.analysis_controller.shutdown()
         self.audio_monitor.shutdown()
+        self.waveform_controller.shutdown()
 
     def activate(self) -> None:
         self.canvas.update()

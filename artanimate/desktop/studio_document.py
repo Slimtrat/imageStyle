@@ -385,6 +385,7 @@ class StudioDocumentController(QObject):
                 message = f"Référence déjà partagée · {source.name} · {asset.asset_id}"
             self.panel.asset_panel.set_feedback(message)
         except Exception as exc:
+            logger.exception("Import du média impossible")
             QMessageBox.critical(
                 self.parent_widget,
                 "Import du média impossible",
