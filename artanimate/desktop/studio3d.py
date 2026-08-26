@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import logging
 from pathlib import Path
 from threading import Lock
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRect, QSize, QSignalBlocker, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QImage
@@ -38,6 +39,9 @@ from .studio3d_wave import (
     OrganicWaveSettings,
     artwork_dimensions,
 )
+
+if TYPE_CHECKING:
+    from .studio3d_state import Studio3DSceneState
 
 
 logger = logging.getLogger(__name__)
@@ -705,6 +709,16 @@ class Studio3DPanel(QWidget):
         self._set_scene_property("effectProgress", self._effect_progress)
         self._publish_laser_cursor()
         self._output_ratio_changed()
+
+    def apply_scene_state(self, state: "Studio3DSceneState") -> None:
+        """Restore every authored, frame-varying QML property atomically."""
+        self._current_effect = state.settings.effect
+        self._rgb_mode = state.settings.rgb_mode
+        self._effect_direction = state.settings.direction
+        self._effect_progress = state.effect_progress
+        self._wave_settings = state.settings.wave
+        for name, value in state.qml_properties().items():
+            self._set_scene_property(name, value)
 
     def begin_export(self, total_frames: int) -> None:
         for control in self._export_controls:

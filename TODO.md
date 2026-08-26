@@ -32,8 +32,8 @@ sélectionne un faux renderer et obtient un plan immuable sans importer PySide6.
 - [x] **MIG-04** Enregistrer chaque effet actuel comme `reveal.*`. `[PAR-D]`
 - [x] **MIG-05** Adapter `ArtworkRenderer` en PreparedRender frame-exact. `[PAR-D]`
 - [x] **MIG-06** Adapter la caméra 2D comme capability indépendante. `[PAR-D]`
-- [ ] **MIG-07** Déplacer l'état 3D adressable derrière `classic.studio_3d`. `[PAR-E]`
-- [ ] **MIG-08** Fournir une capture 3D autonome, retryable et annulable. `[PAR-E]`
+- [x] **MIG-07** Déplacer l'état 3D adressable derrière `classic.studio_3d`. `[PAR-E]`
+- [x] **MIG-08** Fournir une capture 3D autonome, retryable et annulable. `[PAR-E]`
 - [x] **MIG-09** Faire exécuter les adapters par le compositeur sans branche métier 2D/3D.
 - [x] **MIG-10** Comparer les golden frames legacy et adapter pour tous les effets livrés.
 
