@@ -23,6 +23,7 @@ from .semantic import (
     RenderPlanner,
 )
 from .source_registry import ArtworkSourceRegistry
+from .transitions import validate_project_transitions
 
 
 class StudioRenderSession:
@@ -40,6 +41,7 @@ class StudioRenderSession:
         source_registry: ArtworkSourceRegistry | None = None,
     ):
         self.project = project.validate()
+        validate_project_transitions(self.project, validate_sources=True)
         self.artwork_path = Path(artwork_path)
         self._owns_source_registry = source_registry is None
         self.source_registry = source_registry or ArtworkSourceRegistry()

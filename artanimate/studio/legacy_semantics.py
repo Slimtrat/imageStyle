@@ -109,26 +109,36 @@ def minimal_scene_for_project(project: StudioProject) -> SemanticScene:
 def _camera_parameters(
     clip: Clip,
     target_invocation_id: str,
+    *,
+    pre_handle_frames: int = 0,
+    post_handle_frames: int = 0,
 ) -> FrozenJsonObject:
     assert clip.camera is not None
+    keyframes = [
+        {
+            "frame": keyframe.frame + pre_handle_frames,
+            "easing": keyframe.easing.value,
+            "pose": {
+                "x": keyframe.pose.x,
+                "y": keyframe.pose.y,
+                "zoom": keyframe.pose.zoom,
+                "rotation_degrees": keyframe.pose.rotation_degrees,
+                "perspective": keyframe.pose.perspective,
+                "focus": keyframe.pose.focus,
+            },
+        }
+        for keyframe in clip.camera.keyframes
+    ]
+    if pre_handle_frames > 0:
+        keyframes.insert(0, {**keyframes[0], "frame": 0})
+    if post_handle_frames > 0:
+        final_frame = pre_handle_frames + clip.duration_frames + post_handle_frames - 1
+        if keyframes[-1]["frame"] != final_frame:
+            keyframes.append({**keyframes[-1], "frame": final_frame})
     return FrozenJsonObject(
         {
             "target_invocation_id": target_invocation_id,
-            "keyframes": [
-                {
-                    "frame": keyframe.frame,
-                    "easing": keyframe.easing.value,
-                    "pose": {
-                        "x": keyframe.pose.x,
-                        "y": keyframe.pose.y,
-                        "zoom": keyframe.pose.zoom,
-                        "rotation_degrees": keyframe.pose.rotation_degrees,
-                        "perspective": keyframe.pose.perspective,
-                        "focus": keyframe.pose.focus,
-                    },
-                }
-                for keyframe in clip.camera.keyframes
-            ],
+            "keyframes": keyframes,
         },
         where="legacy.camera.parameters",
     )
@@ -149,9 +159,11 @@ def _effect_identity(parameters: Mapping[str, Any] | None) -> tuple[str, str]:
 
 def _content_spec(
     clip: Clip,
+    *,
+    source_in_frame: int | None = None,
 ) -> tuple[str, str, str | None, dict[str, Any], str]:
     visual = {
-        "source_in_frame": clip.source_in_frame,
+        "source_in_frame": clip.source_in_frame if source_in_frame is None else source_in_frame,
         "opacity": clip.opacity,
         "fit": clip.fit.value,
     }
@@ -216,8 +228,17 @@ def _legacy_clip_invocations(
     project_id: str,
     track_id: str,
     clip: Clip,
+    project: StudioProject,
 ) -> tuple[Clip, tuple[CapabilityInvocation, ...]]:
-    role, capability_id, target_id, parameters, renderer_id = _content_spec(clip)
+    from .transitions import render_source_in_frame, render_window_for_clip
+
+    render_start, render_end = render_window_for_clip(project, clip)
+    source_in = render_source_in_frame(project, clip, render_start)
+    role, capability_id, target_id, parameters, renderer_id = _content_spec(
+        clip,
+        source_in_frame=source_in,
+    )
+    render_duration = render_end - render_start
     content_id = stable_legacy_invocation_id(
         project_id,
         track_id,
@@ -233,8 +254,8 @@ def _legacy_clip_invocations(
         CapabilityInvocation(
             content_id,
             capability_id,
-            clip.start_frame,
-            clip.duration_frames,
+            render_start,
+            render_duration,
             target_id=target_id,
             parameters=FrozenJsonObject(
                 parameters,
@@ -255,10 +276,15 @@ def _legacy_clip_invocations(
             CapabilityInvocation(
                 camera_id,
                 "camera.animate",
-                clip.start_frame,
-                clip.duration_frames,
+                render_start,
+                render_duration,
                 target_id="camera",
-                parameters=_camera_parameters(clip, content_id),
+                parameters=_camera_parameters(
+                    clip,
+                    content_id,
+                    pre_handle_frames=clip.start_frame - render_start,
+                    post_handle_frames=render_end - clip.end_frame,
+                ),
                 renderer_policy=_pinned("classic.camera-2d"),
                 enabled=clip.enabled,
             )
@@ -283,6 +309,7 @@ def synchronize_legacy_fields(
                 project.project_id,
                 track.track_id,
                 clip,
+                project,
             )
             clips.append(updated)
             generated.extend(clip_invocations)

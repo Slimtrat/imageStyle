@@ -17,6 +17,7 @@ from .model import (
     TrackKind,
 )
 from .semantic_actions import is_semantic_action_clip
+from .transitions import without_clip_transitions
 from .video import validate_video_source_range
 
 OVERLAP_POLICY = "layered"
@@ -216,6 +217,7 @@ def move_clip(
 ) -> StudioProject:
     source_track_index, _clip_index, source_track, clip = clip_location(project, clip_id)
     _require_editable(source_track)
+    project = without_clip_transitions(project, {clip_id})
     target_frame = int(target_frame)
     if target_frame < 0 or target_frame + clip.duration_frames > project.settings.duration_frames:
         raise ValueError("Le déplacement sortirait le clip de la durée du projet")
@@ -275,6 +277,7 @@ def trim_clip(
 ) -> StudioProject:
     track_index, clip_index, track, clip = clip_location(project, clip_id)
     _require_editable(track)
+    project = without_clip_transitions(project, {clip_id})
     start = int(new_start_frame)
     end = int(new_end_frame)
     if not 0 <= start < end <= project.settings.duration_frames:
@@ -344,6 +347,7 @@ def split_clip(
 ) -> tuple[StudioProject, Clip]:
     track_index, clip_index, track, clip = clip_location(project, clip_id)
     _require_editable(track)
+    project = without_clip_transitions(project, {clip_id})
     frame = int(project_frame)
     if not clip.start_frame < frame < clip.end_frame:
         raise ValueError("Le split doit être strictement à l’intérieur du clip")

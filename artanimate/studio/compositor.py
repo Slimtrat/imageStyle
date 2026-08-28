@@ -9,6 +9,12 @@ from .camera import render_camera_frame, resolve_camera_pose
 from .effect_2d import Effect2DClipSettings, settings_for_effect_clip
 from .model import Clip, ClipKind, FitMode, StudioProject, TrackKind
 from .sources import TimedFrameSource, validate_frame_index, validate_timed_frame
+from .transitions import (
+    active_dissolve,
+    dissolve_progress,
+    transition_clip_pair,
+    validate_project_transitions,
+)
 
 
 class MissingClipSourceError(KeyError):
@@ -92,6 +98,25 @@ def alpha_composite_rgb(
     return np.rint(np.clip(mixed, 0.0, 255.0)).astype(np.uint8)
 
 
+def blend_rgb_frames(
+    from_frame: np.ndarray,
+    to_frame: np.ndarray,
+    to_weight: float,
+) -> np.ndarray:
+    if (
+        from_frame.shape != to_frame.shape
+        or from_frame.dtype != np.uint8
+        or to_frame.dtype != np.uint8
+    ):
+        raise ValueError("Les deux états du fondu doivent être des frames RGB uint8 identiques")
+    weight = min(1.0, max(0.0, float(to_weight)))
+    mixed = (
+        from_frame.astype(np.float32) * (1.0 - weight)
+        + to_frame.astype(np.float32) * weight
+    )
+    return np.rint(np.clip(mixed, 0.0, 255.0)).astype(np.uint8)
+
+
 def composite_artwork_effect(
     background: np.ndarray,
     effected: np.ndarray,
@@ -129,6 +154,7 @@ class StudioCompositor:
         output_height: int | None = None,
     ):
         self.project = project.validate()
+        validate_project_transitions(self.project, validate_sources=True)
         self.sources = dict(sources)
         self.fps = self.project.settings.fps
         self.frame_count = self.project.settings.duration_frames
@@ -180,12 +206,31 @@ class StudioCompositor:
             return rendered, np.ones((self.height, self.width), dtype=np.float32)
         return fit_frame(raw, self.width, self.height, clip.fit)
 
-    def _clip_frame(self, clip: Clip, project_frame: int) -> tuple[np.ndarray, np.ndarray]:
+    def _clip_frame(
+        self,
+        clip: Clip,
+        project_frame: int,
+        *,
+        virtual_handle: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray]:
         source = self._source_for(clip)
         local_frame = clip.source_in_frame + project_frame - clip.start_frame
+        if virtual_handle and clip.kind in {ClipKind.STILL, ClipKind.ARTWORK_2D}:
+            local_frame = min(source.frame_count - 1, max(0, local_frame))
         validate_frame_index(local_frame, source.frame_count)
         raw = validate_timed_frame(source, source.frame_at(local_frame))
         return self._transform_frame(raw, clip, project_frame)
+
+    def _composite_clip(
+        self,
+        background: np.ndarray,
+        clip: Clip,
+        frame: int,
+        *,
+        virtual_handle: bool = False,
+    ) -> np.ndarray:
+        foreground, alpha = self._clip_frame(clip, frame, virtual_handle=virtual_handle)
+        return alpha_composite_rgb(background, foreground, alpha, opacity=clip.opacity)
 
     def _effect_target(self, clip: Clip, project_frame: int) -> Clip:
         settings = self.effect_settings[clip.clip_id]
@@ -248,7 +293,35 @@ class StudioCompositor:
         for track in self.project.tracks:
             if track.kind == TrackKind.AUDIO or track.hidden or track.muted:
                 continue
+            transition = active_dissolve(self.project, track.track_id, frame_index)
+            transitioned_clip_ids: set[str] = set()
+            if transition is not None:
+                pair = transition_clip_pair(self.project, transition)
+                if pair.from_clip.enabled and pair.to_clip.enabled:
+                    from_state = self._composite_clip(
+                        background,
+                        pair.from_clip,
+                        frame_index,
+                        virtual_handle=True,
+                    )
+                    to_state = self._composite_clip(
+                        background,
+                        pair.to_clip,
+                        frame_index,
+                        virtual_handle=True,
+                    )
+                    background = blend_rgb_frames(
+                        from_state,
+                        to_state,
+                        dissolve_progress(transition, frame_index),
+                    )
+                    transitioned_clip_ids = {
+                        pair.from_clip.clip_id,
+                        pair.to_clip.clip_id,
+                    }
             for clip in track.clips:
+                if clip.clip_id in transitioned_clip_ids:
+                    continue
                 if (
                     not clip.enabled
                     or frame_index < clip.start_frame
@@ -269,11 +342,5 @@ class StudioCompositor:
                         opacity=clip.opacity,
                     )
                     continue
-                foreground, alpha = self._clip_frame(clip, frame_index)
-                background = alpha_composite_rgb(
-                    background,
-                    foreground,
-                    alpha,
-                    opacity=clip.opacity,
-                )
+                background = self._composite_clip(background, clip, frame_index)
         return background

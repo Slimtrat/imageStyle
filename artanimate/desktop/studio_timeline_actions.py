@@ -18,6 +18,11 @@ from ..studio.timeline import (
     track_by_id,
     trim_clip,
 )
+from ..studio.transitions import (
+    add_dissolve as create_dissolve,
+    delete_transition,
+    update_dissolve,
+)
 
 
 if TYPE_CHECKING:
@@ -38,6 +43,9 @@ class StudioTimelineActions(QObject):
         timeline.duplicateRequested.connect(self.duplicate_clips)
         timeline.deleteRequested.connect(self.delete_clips)
         timeline.trackReorderRequested.connect(self.reorder_track)
+        timeline.dissolveRequested.connect(self.add_dissolve)
+        timeline.transitionResizeRequested.connect(self.resize_transition)
+        timeline.transitionDeleteRequested.connect(self.delete_transition)
 
     @staticmethod
     def _ids(value: object) -> tuple[str, ...]:
@@ -203,6 +211,90 @@ class StudioTimelineActions(QObject):
             self.panel._commit_timeline_project(updated, "Supprimer les clips")
             self.panel.timeline.scene.set_selection(())
         except (KeyError, ValueError, PermissionError) as exc:
+            self._error(exc)
+
+    def add_dissolve(self, clip_ids: object) -> None:
+        project = self.panel.project
+        selected = self._ids(clip_ids)
+        if project is None:
+            return
+        if len(selected) != 2:
+            self._error(ValueError("Sélectionnez exactement deux plans adjacents"))
+            return
+        try:
+            updated, transition = create_dissolve(project, selected[0], selected[1])
+            self.panel._commit_timeline_project(
+                updated,
+                "Ajouter un fondu enchaîné",
+            )
+            self.panel.timeline.scene.set_transition_selection(
+                transition.transition_id
+            )
+            self.panel.project_status.setText(
+                f"Fondu créé · {transition.duration_frames} frames · "
+                "poignées de source validées"
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self._error(exc)
+
+    def resize_transition(
+        self,
+        transition_id: str,
+        start_frame: int,
+        end_frame: int,
+    ) -> None:
+        project = self.panel.project
+        if project is None:
+            return
+        try:
+            updated = update_dissolve(
+                project,
+                transition_id,
+                start_frame=int(start_frame),
+                end_frame=int(end_frame),
+            )
+            self.panel._commit_timeline_project(
+                updated,
+                "Régler la fenêtre du fondu",
+                merge_key=f"transition-window:{transition_id}",
+            )
+            self.panel.timeline.scene.set_transition_selection(transition_id)
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self._error(exc)
+
+    def apply_transition_edit(self, edit: object) -> None:
+        project = self.panel.project
+        if project is None:
+            return
+        try:
+            transition_id = str(getattr(edit, "transition_id"))
+            updated = update_dissolve(
+                project,
+                transition_id,
+                duration_frames=int(getattr(edit, "duration_frames")),
+                easing=getattr(edit, "easing"),
+            )
+            self.panel._commit_timeline_project(
+                updated,
+                "Régler le fondu enchaîné",
+                merge_key=f"transition-settings:{transition_id}",
+            )
+            self.panel.timeline.scene.set_transition_selection(transition_id)
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self._error(exc)
+
+    def delete_transition(self, transition_id: str) -> None:
+        project = self.panel.project
+        if project is None or not transition_id:
+            return
+        try:
+            updated = delete_transition(project, transition_id)
+            self.panel._commit_timeline_project(updated, "Retrouver le cut")
+            self.panel.timeline.scene.set_transition_selection(None)
+            self.panel.project_status.setText(
+                "Fondu retiré · cut frame-exact restauré"
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
             self._error(exc)
 
     def reorder_track(self, track_id: str, direction: int) -> None:

@@ -6,23 +6,8 @@ import math
 import numpy as np
 from PIL import Image
 
+from .easing import eased_progress
 from .model import CameraAnimation, CameraKeyframe, CameraPose, Easing
-
-
-def eased_progress(progress: float, easing: Easing) -> float:
-    t = min(1.0, max(0.0, float(progress)))
-    if easing == Easing.LINEAR:
-        return t
-    if easing == Easing.EASE_IN:
-        return t * t * t
-    if easing == Easing.EASE_OUT:
-        return 1.0 - (1.0 - t) ** 3
-    if easing == Easing.EASE_IN_OUT:
-        if t < 0.5:
-            return 4.0 * t * t * t
-        return 1.0 - ((-2.0 * t + 2.0) ** 3) / 2.0
-    raise ValueError(f"Easing caméra inconnu : {easing}")
-
 
 def _shortest_rotation(start: float, end: float, progress: float) -> float:
     delta = (end - start + 180.0) % 360.0 - 180.0

@@ -25,7 +25,14 @@ from PySide6.QtWidgets import (
 
 from ..studio.audio import AudioClipSettings, AudioMixSettings, audio_envelope_gain
 from ..studio.clock import StudioClock
-from ..studio.model import Clip, ClipKind, StudioProject, Track, TrackKind
+from ..studio.model import (
+    Clip,
+    ClipKind,
+    StudioProject,
+    Track,
+    TrackKind,
+    Transition,
+)
 from ..studio.waveform import WaveformEnvelope, waveform_peaks_for_clip
 
 
@@ -41,6 +48,13 @@ class TimelineClipLayout:
     clip: Clip
     lane: int
     rect: QRectF
+
+@dataclass(frozen=True, slots=True)
+class TimelineTransitionLayout:
+    track_id: str
+    transition: Transition
+    rect: QRectF
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +106,8 @@ class StudioTimelineScene(QWidget):
     clipMoveRequested = Signal(object, str, int, str)
     clipTrimRequested = Signal(str, int, int)
     audioFadeRequested = Signal(str, int, int)
+    transitionSelectionChanged = Signal(object)
+    transitionResizeRequested = Signal(str, int, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -106,11 +122,16 @@ class StudioTimelineScene(QWidget):
         self._selected: tuple[str, ...] = ()
         self._track_layouts: tuple[TimelineTrackLayout, ...] = ()
         self._clip_layouts: tuple[TimelineClipLayout, ...] = ()
+        self._transition_layouts: tuple[TimelineTransitionLayout, ...] = ()
         self._selected_track_id: str | None = None
+        self._selected_transition_id: str | None = None
         self._drag_clip: TimelineClipLayout | None = None
+        self._drag_transition: TimelineTransitionLayout | None = None
         self._drag_mode: str | None = None
         self._drag_press_frame = 0
         self._drag_target_frame = 0
+        self._transition_target_start = 0
+        self._transition_target_end = 0
         self._drag_target_track_id: str | None = None
         self._drag_started = False
 
@@ -129,6 +150,15 @@ class StudioTimelineScene(QWidget):
     @property
     def clip_layouts(self) -> tuple[TimelineClipLayout, ...]:
         return self._clip_layouts
+
+    @property
+    def transition_layouts(self) -> tuple[TimelineTransitionLayout, ...]:
+        return self._transition_layouts
+
+    @property
+    def selected_transition_id(self) -> str | None:
+        return self._selected_transition_id
+
     @property
     def selected_track_id(self) -> str | None:
         return self._selected_track_id
@@ -148,6 +178,14 @@ class StudioTimelineScene(QWidget):
         self._selected = tuple(
             clip_id for clip_id in self._selected if clip_id in valid_clip_ids
         )
+        valid_transition_ids = {
+            transition.transition_id for transition in project.transitions
+        } if project is not None else set()
+        if self._selected_transition_id not in valid_transition_ids:
+            changed = self._selected_transition_id is not None
+            self._selected_transition_id = None
+            if changed:
+                self.transitionSelectionChanged.emit(None)
         self._rebuild_geometry()
 
     def set_waveforms(self, waveforms: dict[str, WaveformEnvelope]) -> None:
@@ -169,7 +207,24 @@ class StudioTimelineScene(QWidget):
         if selection == self._selected:
             return
         self._selected = selection
+        if selection and self._selected_transition_id is not None:
+            self._selected_transition_id = None
+            self.transitionSelectionChanged.emit(None)
         self.selectionChanged.emit(self._selected)
+        self.update()
+
+    def set_transition_selection(self, transition_id: str | None) -> None:
+        known = {
+            layout.transition.transition_id for layout in self._transition_layouts
+        }
+        selected = transition_id if transition_id in known else None
+        if selected == self._selected_transition_id:
+            return
+        self._selected_transition_id = selected
+        if selected is not None and self._selected:
+            self._selected = ()
+            self.selectionChanged.emit(())
+        self.transitionSelectionChanged.emit(selected)
         self.update()
 
     def frame_x(self, frame: int) -> float:
@@ -181,11 +236,18 @@ class StudioTimelineScene(QWidget):
         frame = int(round((x - HEADER_WIDTH) / self._pixels_per_frame))
         return min(self._project.settings.duration_frames - 1, max(0, frame))
 
+    def frame_endpoint_at_x(self, x: float) -> int:
+        if self._project is None:
+            return 0
+        frame = int(round((x - HEADER_WIDTH) / self._pixels_per_frame))
+        return min(self._project.settings.duration_frames, max(0, frame))
+
     def _rebuild_geometry(self) -> None:
         project = self._project
         if project is None:
             self._track_layouts = ()
             self._clip_layouts = ()
+            self._transition_layouts = ()
             self.setFixedSize(QSize(HEADER_WIDTH + 400, RULER_HEIGHT + BASE_TRACK_HEIGHT))
             self.update()
             return
@@ -198,6 +260,7 @@ class StudioTimelineScene(QWidget):
         y = float(RULER_HEIGHT)
         tracks: list[TimelineTrackLayout] = []
         clips: list[TimelineClipLayout] = []
+        transitions: list[TimelineTransitionLayout] = []
         # The compositor consumes project order bottom-to-top. The timeline
         # displays the highest compositing layer first, like a physical stack.
         for track in reversed(project.tracks):
@@ -216,8 +279,29 @@ class StudioTimelineScene(QWidget):
                 )
                 clips.append(TimelineClipLayout(track.track_id, clip, lane, clip_rect))
             y += height
+            clip_ids = {clip.clip_id for clip in track.clips}
+            for transition in project.transitions:
+                if not {
+                    transition.from_clip_id,
+                    transition.to_clip_id,
+                } <= clip_ids:
+                    continue
+                transition_rect = QRectF(
+                    self.frame_x(transition.start_frame),
+                    track_rect.top() + 25,
+                    max(4.0, transition.duration_frames * self._pixels_per_frame),
+                    max(12.0, track_rect.height() - 28),
+                )
+                transitions.append(
+                    TimelineTransitionLayout(
+                        track.track_id,
+                        transition,
+                        transition_rect,
+                    )
+                )
         self._track_layouts = tuple(tracks)
         self._clip_layouts = tuple(clips)
+        self._transition_layouts = tuple(transitions)
         self.setFixedSize(QSize(width, max(RULER_HEIGHT + BASE_TRACK_HEIGHT, int(y))))
         self.update()
 
@@ -244,6 +328,39 @@ class StudioTimelineScene(QWidget):
             ),
             None,
         )
+
+    def _transition_at(
+        self,
+        point: QPointF,
+    ) -> TimelineTransitionLayout | None:
+        return next(
+            (
+                layout
+                for layout in reversed(self._transition_layouts)
+                if self._display_transition_rect(layout).contains(point)
+            ),
+            None,
+        )
+
+    def _display_transition_rect(
+        self,
+        layout: TimelineTransitionLayout,
+    ) -> QRectF:
+        if self._drag_transition is layout and self._drag_started:
+            return QRectF(
+                self.frame_x(self._transition_target_start),
+                layout.rect.top(),
+                max(
+                    4.0,
+                    (
+                        self._transition_target_end
+                        - self._transition_target_start
+                    )
+                    * self._pixels_per_frame,
+                ),
+                layout.rect.height(),
+            )
+        return layout.rect
 
     def _display_audio_settings(
         self,
@@ -415,6 +532,31 @@ class StudioTimelineScene(QWidget):
                 semantic_clip_label(self._project, layout.clip),
             )
 
+        for layout in self._transition_layouts:
+            rect = self._display_transition_rect(layout)
+            selected = layout.transition.transition_id == self._selected_transition_id
+            painter.setBrush(QColor(246, 184, 80, 115))
+            painter.setPen(
+                QPen(QColor("#fff2b3") if selected else QColor("#dca33e"), 2)
+            )
+            painter.drawRoundedRect(rect, 3, 3)
+            painter.drawLine(rect.topLeft(), rect.bottomRight())
+            painter.drawLine(rect.bottomLeft(), rect.topRight())
+            painter.fillRect(
+                QRectF(rect.left() - 2, rect.top(), 5, rect.height()),
+                QColor("#fff2b3"),
+            )
+            painter.fillRect(
+                QRectF(rect.right() - 2, rect.top(), 5, rect.height()),
+                QColor("#fff2b3"),
+            )
+            painter.setPen(QColor("#17130b"))
+            painter.drawText(
+                rect.adjusted(7, 0, -7, 0),
+                Qt.AlignmentFlag.AlignCenter,
+                f"FONDU · {layout.transition.duration_frames}f",
+            )
+
         if self._drag_clip is not None and self._drag_started:
             preview = QRectF(self._drag_clip.rect)
             if self._drag_mode == "move":
@@ -490,6 +632,32 @@ class StudioTimelineScene(QWidget):
             event.accept()
             return
         if point.x() >= HEADER_WIDTH:
+            transition = self._transition_at(point)
+            if transition is not None:
+                self.set_selection(())
+                self.set_transition_selection(
+                    transition.transition.transition_id
+                )
+                self._selected_track_id = transition.track_id
+                self.trackSelected.emit(transition.track_id)
+                self._drag_transition = transition
+                self._transition_target_start = transition.transition.start_frame
+                self._transition_target_end = (
+                    transition.transition.start_frame
+                    + transition.transition.duration_frames
+                )
+                rect = self._display_transition_rect(transition)
+                edge = 8.0
+                if abs(point.x() - rect.left()) <= edge:
+                    self._drag_mode = "transition-left"
+                elif abs(point.x() - rect.right()) <= edge:
+                    self._drag_mode = "transition-right"
+                else:
+                    self._drag_mode = None
+                self.seekRequested.emit(self.frame_at_x(point.x()))
+                event.accept()
+                return
+            self.set_transition_selection(None)
             clip = self._clip_at(point)
             ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             if clip is None:
@@ -543,6 +711,35 @@ class StudioTimelineScene(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._drag_transition is not None and self._drag_mode in {
+            "transition-left",
+            "transition-right",
+        }:
+            frame = self.frame_endpoint_at_x(event.position().x())
+            original = self._drag_transition.transition
+            original_end = original.start_frame + original.duration_frames
+            if self._drag_mode == "transition-left":
+                self._transition_target_start = min(
+                    self._transition_target_end - 2,
+                    max(0, frame),
+                )
+            else:
+                duration = (
+                    self._project.settings.duration_frames
+                    if self._project
+                    else original_end
+                )
+                self._transition_target_end = max(
+                    self._transition_target_start + 2,
+                    min(duration, frame),
+                )
+            self._drag_started = self._drag_started or (
+                self._transition_target_start != original.start_frame
+                or self._transition_target_end != original_end
+            )
+            self.update()
+            event.accept()
+            return
         if self._drag_clip is None or self._drag_mode is None:
             super().mouseMoveEvent(event)
             return
@@ -595,6 +792,23 @@ class StudioTimelineScene(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_transition is not None:
+            layout = self._drag_transition
+            started = self._drag_started
+            start = self._transition_target_start
+            end = self._transition_target_end
+            self._drag_transition = None
+            self._drag_mode = None
+            self._drag_started = False
+            if started:
+                self.transitionResizeRequested.emit(
+                    layout.transition.transition_id,
+                    start,
+                    end,
+                )
+            self.update()
+            event.accept()
+            return
         if event.button() != Qt.MouseButton.LeftButton or self._drag_clip is None:
             super().mouseReleaseEvent(event)
             return
@@ -641,6 +855,10 @@ class StudioTimeline(QWidget):
     duplicateRequested = Signal(object)
     deleteRequested = Signal(object)
     trackReorderRequested = Signal(str, int)
+    dissolveRequested = Signal(object)
+    transitionSelectionChanged = Signal(object)
+    transitionResizeRequested = Signal(str, int, int)
+    transitionDeleteRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -669,6 +887,8 @@ class StudioTimeline(QWidget):
         self.split_button = QPushButton("Scinder")
         self.duplicate_button = QPushButton("Dupliquer")
         self.delete_button = QPushButton("Supprimer")
+        self.dissolve_button = QPushButton("Fondu")
+        self.cut_button = QPushButton("Retrouver le cut")
         self.track_down = QPushButton("Piste ↓")
         self.track_up = QPushButton("Piste ↑")
         self.snap_button = QPushButton("Aimant")
@@ -678,6 +898,8 @@ class StudioTimeline(QWidget):
             self.split_button,
             self.duplicate_button,
             self.delete_button,
+            self.dissolve_button,
+            self.cut_button,
             self.track_down,
             self.track_up,
             self.snap_button,
@@ -689,10 +911,17 @@ class StudioTimeline(QWidget):
         self.duplicate_button.clicked.connect(
             lambda: self.duplicateRequested.emit(self.selected_clip_ids)
         )
-        self.delete_button.clicked.connect(
-            lambda: self.deleteRequested.emit(self.selected_clip_ids)
-        )
+        self.delete_button.clicked.connect(self._delete_selection)
         self.track_down.clicked.connect(lambda: self._request_track_reorder(-1))
+        self.dissolve_button.clicked.connect(
+            lambda: self.dissolveRequested.emit(self.selected_clip_ids)
+        )
+        self.cut_button.clicked.connect(
+            lambda: self.transitionDeleteRequested.emit(
+                self.scene.selected_transition_id
+            )
+            if self.scene.selected_transition_id is not None else None
+        )
         self.track_up.clicked.connect(lambda: self._request_track_reorder(1))
         toolbar.addWidget(QLabel("Zoom"))
         self.zoom = QSlider(Qt.Orientation.Horizontal)
@@ -722,8 +951,16 @@ class StudioTimeline(QWidget):
         self.scene.clipMoveRequested.connect(self.clipMoveRequested)
         self.scene.clipTrimRequested.connect(self.clipTrimRequested)
         self.scene.audioFadeRequested.connect(self.audioFadeRequested)
+        self.scene.transitionSelectionChanged.connect(
+            self.transitionSelectionChanged
+        )
+        self.scene.transitionResizeRequested.connect(self.transitionResizeRequested)
         self._shortcuts = (
-            QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self.delete_button.click),
+            QShortcut(
+                QKeySequence(Qt.Key.Key_Delete),
+                self,
+                activated=self._delete_selection,
+            ),
             QShortcut(QKeySequence("Ctrl+D"), self, activated=self.duplicate_button.click),
             QShortcut(QKeySequence("S"), self, activated=self.split_button.click),
         )
@@ -734,8 +971,19 @@ class StudioTimeline(QWidget):
         return self.scene.selected_clip_ids
 
     @property
+    def selected_transition_id(self) -> str | None:
+        return self.scene.selected_transition_id
+
+    @property
     def snapping_enabled(self) -> bool:
         return self.snap_button.isChecked()
+
+    def _delete_selection(self) -> None:
+        transition_id = self.scene.selected_transition_id
+        if transition_id is not None:
+            self.transitionDeleteRequested.emit(transition_id)
+        else:
+            self.deleteRequested.emit(self.selected_clip_ids)
 
     def _request_track_reorder(self, direction: int) -> None:
         track_id = self.scene.selected_track_id

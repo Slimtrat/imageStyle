@@ -78,6 +78,7 @@ from .studio_audio import StudioAudioMonitor
 from .studio_audio_inspector import AudioInspectorEdit, StudioAudioInspector
 from .studio_media_inspector import StillInspectorEdit, StudioMediaInspector
 from .studio_video_inspector import StudioVideoInspector, VideoInspectorEdit
+from .studio_transition_inspector import StudioTransitionInspector
 from .studio_waveform import StudioWaveformController
 from ..studio.timeline import add_track, delete_clips, set_track_state
 from .studio_camera import StudioCameraInspector
@@ -666,6 +667,7 @@ class StudioPanel(QWidget):
         self.video_inspector.applyRequested.connect(self._apply_media_edit)
         self.audio_inspector = StudioAudioInspector()
         self.audio_inspector.applyRequested.connect(self._apply_audio_edit)
+        self.transition_inspector = StudioTransitionInspector()
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
         self.inspector_tabs.addTab(self.analysis_panel, "Analyse locale")
         self.inspector_tabs.addTab(self.trigger_panel, "Déclencheurs")
@@ -674,6 +676,7 @@ class StudioPanel(QWidget):
         self.inspector_tabs.addTab(self.media_inspector, "Plan réel")
         self.inspector_tabs.addTab(self.video_inspector, "Vidéo réelle")
         self.inspector_tabs.addTab(self.audio_inspector, "Audio")
+        self.inspector_tabs.addTab(self.transition_inspector, "Transition")
         inspector_layout.addWidget(self.inspector_tabs, 1)
         body.addWidget(inspector)
         page.addLayout(body, 1)
@@ -701,7 +704,16 @@ class StudioPanel(QWidget):
         self.timeline.addTrackRequested.connect(self._add_timeline_track)
         self.timeline.trackStateRequested.connect(self._timeline_track_state)
         self.timeline.selectionChanged.connect(self._timeline_selection_changed)
+        self.timeline.transitionSelectionChanged.connect(
+            self._timeline_transition_changed
+        )
         self.timeline_actions = StudioTimelineActions(self)
+        self.transition_inspector.applyRequested.connect(
+            self.timeline_actions.apply_transition_edit
+        )
+        self.transition_inspector.deleteRequested.connect(
+            self.timeline_actions.delete_transition
+        )
 
         self.track_summary = StudioTrackSummary()
         self.asset_panel = StudioAssetPanel()
@@ -780,6 +792,9 @@ class StudioPanel(QWidget):
         self.audio_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
         )
+        self.transition_inspector.set_selection(
+            self._project, self.timeline.selected_transition_id
+        )
         if self._project is None:
             self.transport.set_project(30, 1)
             self.canvas.set_artwork(None)
@@ -851,6 +866,9 @@ class StudioPanel(QWidget):
         )
         self.audio_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
+        )
+        self.transition_inspector.set_selection(
+            validated, self.timeline.selected_transition_id
         )
         if timing_changed:
             self.transport.set_project(
@@ -1790,7 +1808,7 @@ class StudioPanel(QWidget):
         self.media_inspector.set_selection(self._project, clip_ids)
         self.video_inspector.set_selection(self._project, clip_ids)
         self.audio_inspector.set_selection(self._project, clip_ids)
-        if self._project is not None and clip_ids:
+        if self._project is not None and len(clip_ids) == 1:
             selected = next(
                 (
                     clip for track in self._project.tracks
@@ -1818,6 +1836,12 @@ class StudioPanel(QWidget):
             self.inspector_tabs.setCurrentWidget(self.media_inspector)
         elif self.effect_inspector.selected_clip_id is not None:
             self.inspector_tabs.setCurrentWidget(self.effect_inspector)
+
+    def _timeline_transition_changed(self, value: object) -> None:
+        transition_id = str(value) if isinstance(value, str) and value else None
+        self.transition_inspector.set_selection(self._project, transition_id)
+        if self.transition_inspector.selected_transition_id is not None:
+            self.inspector_tabs.setCurrentWidget(self.transition_inspector)
 
     def _add_effect_layer(
         self,

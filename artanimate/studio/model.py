@@ -593,6 +593,9 @@ class StudioProject:
                     f"La transition {transition.transition_id} dépasse la durée du projet"
                 )
 
+        from .transitions import validate_project_transitions
+        validate_project_transitions(self)
+
         for invocation in self.invocations:
             if invocation.end_frame > self.settings.duration_frames:
                 raise ValueError(

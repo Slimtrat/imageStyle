@@ -3,10 +3,16 @@ from __future__ import annotations
 import numpy as np
 
 from ..camera import render_camera_frame
-from ..compositor import alpha_composite_rgb, composite_artwork_effect, fit_frame
+from ..compositor import (
+    alpha_composite_rgb,
+    blend_rgb_frames,
+    composite_artwork_effect,
+    fit_frame,
+)
 from ..model import CameraPose, FitMode, StudioProject
 from ..sources import validate_frame_index
 from ..semantic_actions import SEMANTIC_ACTION_IDS
+from ..transitions import active_dissolve, dissolve_progress, transition_clip_pair
 from .classic_2d import PreparedRenderPlan, PreparedRenderPlanEntry
 from .legacy_project import LegacySemanticProject
 
@@ -196,6 +202,10 @@ class SemanticPlanCompositor:
             for binding in semantic.bindings
             if binding.role == "content"
         }
+        self._binding_by_invocation = {
+            binding.invocation_id: binding
+            for binding in semantic.bindings
+        }
         self._semantic_resource_cache: dict[tuple[str, str], np.ndarray] = {}
 
     @staticmethod
@@ -274,6 +284,30 @@ class SemanticPlanCompositor:
         fitted = _fit_scalar(rendered.alpha, self.width, self.height, fit)
         self._semantic_resource_cache[key] = fitted
         return fitted
+
+    def _content_state(
+        self,
+        background: np.ndarray,
+        entry: PreparedRenderPlanEntry,
+        project_frame: int,
+    ) -> np.ndarray:
+        invocation = entry.plan_entry.request.invocation
+        local = project_frame - invocation.start_frame
+        rendered = entry.prepared.frame_at(local)
+        if rendered.blend_mode == "artwork.delta":
+            raise ValueError("Un calque d’effet ne peut pas être une extrémité de fondu")
+        foreground, alpha = self._transform(
+            _require_rgb(rendered.image, invocation.invocation_id),
+            entry,
+            project_frame,
+        )
+        opacity = float(invocation.parameters.to_dict().get("opacity", 1.0))
+        return alpha_composite_rgb(
+            background,
+            foreground,
+            alpha,
+            opacity=opacity,
+        )
 
 
     def _semantic_action(
@@ -383,11 +417,54 @@ class SemanticPlanCompositor:
         background[:] = self.project.settings.background
         semantic_actions = []
         artwork_fit = FitMode.CONTAIN
+        processed_transitions: set[str] = set()
         for entry in self.prepared.entries:
             invocation = entry.plan_entry.request.invocation
             if not self._active(entry, frame_index):
                 continue
             if invocation.capability_id in {"camera.animate", "audio.play"}:
+                continue
+            binding = self._binding_by_invocation.get(invocation.invocation_id)
+            transition = (
+                active_dissolve(self.project, binding.track_id, frame_index)
+                if binding is not None and binding.role == "content"
+                else None
+            )
+            if (
+                transition is not None
+                and binding is not None
+                and binding.clip_id in {
+                    transition.from_clip_id,
+                    transition.to_clip_id,
+                }
+            ):
+                if transition.transition_id in processed_transitions:
+                    continue
+                pair = transition_clip_pair(self.project, transition)
+                from_entry = self._entries[
+                    self._content_by_clip[pair.from_clip.clip_id]
+                ]
+                to_entry = self._entries[
+                    self._content_by_clip[pair.to_clip.clip_id]
+                ]
+                from_state = self._content_state(background, from_entry, frame_index)
+                to_state = self._content_state(background, to_entry, frame_index)
+                background = blend_rgb_frames(
+                    from_state,
+                    to_state,
+                    dissolve_progress(transition, frame_index),
+                )
+                processed_transitions.add(transition.transition_id)
+                for content_entry in (from_entry, to_entry):
+                    content_invocation = content_entry.plan_entry.request.invocation
+                    if content_invocation.capability_id in {
+                        "artwork.present",
+                        "scene.depth_present",
+                    }:
+                        values = content_invocation.parameters.to_dict()
+                        artwork_fit = FitMode(
+                            values.get("fit", FitMode.CONTAIN.value)
+                        )
                 continue
             local = frame_index - invocation.start_frame
             rendered = entry.prepared.frame_at(local)
