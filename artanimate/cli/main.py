@@ -132,6 +132,27 @@ def _build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--json", type=Path, help="destination du manifeste JSON")
     analyze.add_argument("--preview", type=Path, help="planche palette PNG")
     _add_configuration_options(analyze)
+
+    studio = subparsers.add_parser(
+        "studio",
+        help="compiler et rendre un projet Studio sans interface",
+    )
+    studio_commands = studio.add_subparsers(dest="studio_command", required=True)
+    build = studio_commands.add_parser(
+        "build",
+        help="compiler une recette JSON en dossier Studio portable",
+    )
+    build.add_argument("recipe", type=Path, help="recette Studio JSON")
+    build.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        required=True,
+        help="dossier de projet portable",
+    )
+    build.add_argument("--report", type=Path, help="rapport JSON (par défaut dans le projet)")
+    build.add_argument("--controls", type=Path, help="planche de contrôle visuel")
+    build.add_argument("--export", type=Path, help="vidéo finale")
     return parser
 
 
@@ -216,6 +237,19 @@ def _analyze(namespace: argparse.Namespace) -> int:
     return 0
 
 
+def _studio(namespace: argparse.Namespace) -> int:
+    from ..headless_studio import write_headless_studio_report
+
+    report = namespace.report or namespace.output / "headless-report.json"
+    return write_headless_studio_report(
+        namespace.recipe,
+        namespace.output,
+        report,
+        control_sheet=namespace.controls,
+        export=namespace.export,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     namespace = parser.parse_args(argv)
@@ -226,7 +260,9 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Commande CLI démarrée : %s", namespace.command)
         if namespace.command == "render":
             return _render(namespace)
-        return _analyze(namespace)
+        if namespace.command == "analyze":
+            return _analyze(namespace)
+        return _studio(namespace)
     except KeyboardInterrupt:
         print(file=sys.stderr)
         logger.warning("Rendu interrompu par l’utilisateur")

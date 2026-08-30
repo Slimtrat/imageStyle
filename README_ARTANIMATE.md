@@ -104,6 +104,30 @@ l’historique.
 Le protocole et la revue visuelle sont détaillés dans
 [docs/studio-v3-qualification.md](docs/studio-v3-qualification.md).
 
+## Studio programmable et projets portables
+
+Une recette JSON peut maintenant construire sans interface un dossier Studio autonome :
+projet `.artanimate` réouvrable, médias copiés en chemins relatifs, recette canonique,
+snapshots des versions précédentes, planche de contrôle et export optionnel.
+
+```powershell
+artanimate studio build .\transition.json --output .\mon-projet
+```
+
+Le même job peut être lancé depuis l’exécutable autonome, sans Python installé :
+
+```powershell
+.\ArtAnimate.exe --headless-studio .\transition.json .\mon-projet .\rapport.json
+```
+
+À recette et médias identiques, la reconstruction ne crée aucune révision parasite. Si
+le contenu change, l’ancien projet complet est archivé avant remplacement atomique. Un
+échec conserve la dernière version valide et produit un rapport JSON exploitable.
+
+Le contrat, le schéma et l’exemple `3D → mur3 → mur2` sont décrits dans
+[docs/studio-headless.md](docs/studio-headless.md) et
+[examples/headless-transition-mur.json](examples/headless-transition-mur.json).
+
 ## Premier film en ligne de commande
 
 ```powershell

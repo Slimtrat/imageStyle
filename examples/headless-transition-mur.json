@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "name": "Œuvre 3D vers mur réel",
+  "artwork": "./artwork.jpg",
+  "project": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "background": [14, 15, 20],
+    "quality": "fast",
+    "crf": 18,
+    "audio_mode": "reference"
+  },
+  "media": {
+    "mur3": {"path": "./mur3.jpg", "kind": "image"},
+    "mur2": {"path": "./mur2.jpg", "kind": "image"}
+  },
+  "shots": [
+    {
+      "id": "virtual",
+      "kind": "artwork_3d",
+      "duration_frames": 90,
+      "settings": {
+        "render_config": {
+          "effect": "sand",
+          "seed": 31,
+          "width": 540,
+          "hold_start": 0.1,
+          "hold_end": 0.2
+        },
+        "camera": {
+          "yaw": 4.0,
+          "pitch": -73.0,
+          "distance": 610.0,
+          "motion": "top_drift",
+          "motion_strength": 0.55
+        },
+        "lamp_brightness": 2.7,
+        "lamp_motion": 0.3
+      }
+    },
+    {
+      "id": "mur3",
+      "kind": "still",
+      "asset": "mur3",
+      "duration_frames": 45,
+      "fit": "cover"
+    },
+    {
+      "id": "mur2",
+      "kind": "still",
+      "asset": "mur2",
+      "duration_frames": 60,
+      "fit": "cover"
+    }
+  ],
+  "transitions": [
+    {
+      "kind": "manual_match",
+      "from": "virtual",
+      "to": "mur3",
+      "duration_frames": 18,
+      "settings": {"overlay_opacity": 0.58}
+    },
+    {
+      "kind": "dissolve",
+      "from": "mur3",
+      "to": "mur2",
+      "duration_frames": 15
+    }
+  ],
+  "outputs": {
+    "control_sheet": "renders/controls.jpg",
+    "export": "renders/transition.mp4",
+    "control_width": 270
+  }
+}
