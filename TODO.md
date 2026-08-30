@@ -97,7 +97,7 @@ contrôlable, combiné à une caméra et un reveal existant.
 - [x] **AUD-02** Afficher waveform, trim, volume et fades. `[PAR-H]`
 - [ ] **AUD-03** Ajouter markers, sections et BeatMap éditable. `[PAR-H]`
 - [ ] **AUD-04** Déclencher une invocation sur marker/beat/drop. `[PAR-H]`
-- [ ] **AUD-05** Muxer ou exclure l'audio de référence sans changer le montage.
+- [x] **AUD-05** Muxer ou exclure l'audio de référence sans changer le montage.
 
 Critère de fin P6 : la fin d'une action et un marqueur audio peuvent déclencher deux
 actions synchronisées, reproduites à l'identique en preview et à l'export.

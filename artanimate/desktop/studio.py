@@ -83,6 +83,7 @@ from ..studio.semantic import Bounds, CapabilityInvocation, SemanticScene, Timel
 from ..studio.history import StudioHistory
 from ..studio.model import (
     AssetKind,
+    AudioExportMode,
     CameraAnimation,
     CameraKeyframe,
     CameraPose,
@@ -723,6 +724,7 @@ class StudioPanel(QWidget):
         self.preview_controller.failed.connect(self._preview_failed)
         self.export_controller = StudioExportController(self)
         self.export_controller.progressChanged.connect(self._export_progress)
+        self.export_controller.phaseChanged.connect(self._export_phase)
         self.export_controller.runningChanged.connect(self._export_running_changed)
         self.export_controller.succeeded.connect(self._export_succeeded)
         self.export_controller.failed.connect(self._export_failed)
@@ -2099,6 +2101,7 @@ class StudioPanel(QWidget):
         container: str,
         crf: int,
         quality: str,
+        audio_mode: str,
     ) -> None:
         project = self._project
         if project is None or self.export_controller.running:
@@ -2109,6 +2112,7 @@ class StudioPanel(QWidget):
                 container=container,
                 crf=crf,
                 quality=quality,
+                audio_mode=AudioExportMode(audio_mode),
             ).validate()
             self.commit_project(
                 replace(project, export=export),
@@ -2181,6 +2185,9 @@ class StudioPanel(QWidget):
 
     def _export_progress(self, done: int, total: int) -> None:
         self.export_panel.set_progress(done, total)
+
+    def _export_phase(self, phase: str) -> None:
+        self.export_panel.set_phase(phase)
 
     def _export_running_changed(self, running: bool) -> None:
         self.export_panel.set_running(running)

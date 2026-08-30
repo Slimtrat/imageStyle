@@ -9,7 +9,12 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from artanimate.desktop.studio import StudioPanel
-from artanimate.studio.model import ExportSettings, ProjectSettings, StudioProject
+from artanimate.studio.model import (
+    AudioExportMode,
+    ExportSettings,
+    ProjectSettings,
+    StudioProject,
+)
 from artanimate.studio.video import inspect_video
 
 
@@ -61,12 +66,16 @@ def test_export_panel_persists_settings_and_opens_from_header(app, tmp_path: Pat
         panel.export_panel.quality.findData("studio")
     )
     panel.export_panel.crf.setValue(14)
+    panel.export_panel.audio_mode.setCurrentIndex(
+        panel.export_panel.audio_mode.findData(AudioExportMode.EMBEDDED.value)
+    )
 
     assert panel.inspector_tabs.currentWidget() is panel.export_panel
     assert panel.project is not None
     assert panel.project.export.container == "mov"
     assert panel.project.export.quality == "studio"
     assert panel.project.export.crf == 14
+    assert panel.project.export.audio_mode == AudioExportMode.EMBEDDED
     assert "5 images" in panel.export_panel.format_label.text()
     panel.close()
 

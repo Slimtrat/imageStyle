@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import Callable
 
+from uuid import uuid4
 import numpy as np
 
 from ..core.video import RenderCancelled, VideoFrameEncoder
-from .model import StudioProject
+from .audio_export import (
+    mix_studio_audio,
+    mux_studio_audio,
+    write_pcm_wav,
+)
+from .model import AudioExportMode, StudioProject
 from .render_session import StudioRenderSession
 from .semantic import CapabilityRenderer
 
@@ -22,6 +28,8 @@ class StudioExportResult:
     fps: int
     first_frame_digest: str
     last_frame_digest: str
+    audio_mode: AudioExportMode = AudioExportMode.REFERENCE
+    audio_sample_count: int = 0
 
 
 def frame_digest(frame: np.ndarray) -> str:
@@ -105,3 +113,107 @@ def export_studio_video(
         first_digest,
         last_digest,
     )
+
+
+def export_studio_project(
+    project: StudioProject,
+    artwork_path: str | Path,
+    destination: str | Path,
+    *,
+    resource_base: str | Path | None = None,
+    output_width: int | None = None,
+    output_height: int | None = None,
+    progress: Callable[[int, int], None] | None = None,
+    phase: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+    extra_renderers: tuple[CapabilityRenderer, ...] = (),
+) -> StudioExportResult:
+    """Export a Studio project with its explicit reference/embedded audio policy."""
+
+    validated = project.validate()
+    output = Path(destination)
+    expected_suffix = f".{validated.export.container}"
+    if output.suffix.lower() != expected_suffix:
+        raise ValueError(
+            f"Le projet demande {expected_suffix}, pas {output.suffix or 'sans extension'}"
+        )
+    if validated.export.audio_mode == AudioExportMode.REFERENCE:
+        if phase is not None:
+            phase("video")
+        result = export_studio_video(
+            validated,
+            artwork_path,
+            output,
+            resource_base=resource_base,
+            output_width=output_width,
+            output_height=output_height,
+            progress=progress,
+            should_cancel=should_cancel,
+            extra_renderers=extra_renderers,
+        )
+        if phase is not None:
+            phase("complete")
+        return result
+
+    token = uuid4().hex
+    video_stage = output.with_name(f".{output.stem}.{token}.video{expected_suffix}")
+    video_partial = video_stage.with_name(
+        f"{video_stage.stem}.part{expected_suffix}"
+    )
+    audio_stage = output.with_name(f".{output.stem}.{token}.audio.wav")
+    mux_stage = output.with_name(f".{output.stem}.{token}.mux{expected_suffix}")
+    stages = (video_stage, video_partial, audio_stage, mux_stage)
+    try:
+        if phase is not None:
+            phase("video")
+        video_result = export_studio_video(
+            validated,
+            artwork_path,
+            video_stage,
+            resource_base=resource_base,
+            output_width=output_width,
+            output_height=output_height,
+            progress=progress,
+            should_cancel=should_cancel,
+            extra_renderers=extra_renderers,
+        )
+        if should_cancel is not None and should_cancel():
+            raise RenderCancelled("Export Studio annulé")
+        if phase is not None:
+            phase("audio")
+        audio_mix = mix_studio_audio(
+            validated,
+            artwork_path,
+            resource_base=resource_base,
+            cancelled=should_cancel,
+        )
+        write_pcm_wav(audio_mix, audio_stage)
+        if should_cancel is not None and should_cancel():
+            raise RenderCancelled("Export Studio annulé")
+        if phase is not None:
+            phase("mux")
+        mux_studio_audio(
+            video_stage,
+            audio_stage,
+            mux_stage,
+            duration_seconds=(
+                validated.settings.duration_frames / validated.settings.fps
+            ),
+            cancelled=should_cancel,
+        )
+        if should_cancel is not None and should_cancel():
+            raise RenderCancelled("Export Studio annulé")
+        for stage in stages[:-1]:
+            stage.unlink(missing_ok=True)
+        mux_stage.replace(output)
+        if phase is not None:
+            phase("complete")
+        return replace(
+            video_result,
+            path=output.resolve(strict=True),
+            audio_mode=AudioExportMode.EMBEDDED,
+            audio_sample_count=audio_mix.sample_count,
+        )
+    finally:
+        for stage in stages:
+            stage.unlink(missing_ok=True)

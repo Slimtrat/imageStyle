@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.video import RenderCancelled
-from ..studio.export import StudioExportResult, export_studio_video
-from ..studio.model import ExportSettings, StudioProject
+from ..studio.export import StudioExportResult, export_studio_project
+from ..studio.model import AudioExportMode, ExportSettings, StudioProject
 from .studio3d_bridge import Studio3DCaptureBridge
 from .studio3d_renderer import ClassicStudio3DRenderer
 
@@ -33,6 +33,7 @@ _EXPORT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="studio-
 
 class StudioExportWorker(QObject):
     progress = Signal(int, int, int)
+    phase = Signal(int, str)
     succeeded = Signal(int, object)
     failed = Signal(int, object)
     cancelled = Signal(int)
@@ -67,7 +68,7 @@ class StudioExportWorker(QObject):
                 capture_port=self.three_d_capture,
                 cancelled=self._cancelled,
             )
-            result = export_studio_video(
+            result = export_studio_project(
                 self.project,
                 self.artwork_path,
                 self.destination,
@@ -75,6 +76,7 @@ class StudioExportWorker(QObject):
                 progress=lambda done, total: self.progress.emit(
                     self.job_id, done, total
                 ),
+                phase=lambda value: self.phase.emit(self.job_id, value),
                 should_cancel=self._cancelled.is_set,
                 extra_renderers=(three_d_renderer,),
             )
@@ -90,6 +92,7 @@ class StudioExportWorker(QObject):
 
 class StudioExportController(QObject):
     progressChanged = Signal(int, int)
+    phaseChanged = Signal(str)
     runningChanged = Signal(bool)
     succeeded = Signal(object)
     failed = Signal(str)
@@ -128,6 +131,7 @@ class StudioExportController(QObject):
             self.three_d_capture,
         )
         worker.progress.connect(self._progress, Qt.ConnectionType.QueuedConnection)
+        worker.phase.connect(self._phase, Qt.ConnectionType.QueuedConnection)
         worker.succeeded.connect(self._succeeded, Qt.ConnectionType.QueuedConnection)
         worker.failed.connect(self._failed, Qt.ConnectionType.QueuedConnection)
         worker.cancelled.connect(self._cancelled, Qt.ConnectionType.QueuedConnection)
@@ -148,6 +152,11 @@ class StudioExportController(QObject):
     def _progress(self, job_id: int, done: int, total: int) -> None:
         if not self._shutting_down and job_id == self._job_id:
             self.progressChanged.emit(done, total)
+
+    @Slot(int, str)
+    def _phase(self, job_id: int, phase: str) -> None:
+        if not self._shutting_down and job_id == self._job_id:
+            self.phaseChanged.emit(phase)
 
     @Slot(int, object)
     def _succeeded(self, job_id: int, result: StudioExportResult) -> None:
@@ -200,7 +209,7 @@ class StudioExportController(QObject):
 
 
 class StudioExportPanel(QWidget):
-    settingsRequested = Signal(str, int, str)
+    settingsRequested = Signal(str, int, str, str)
     exportRequested = Signal()
     cancelRequested = Signal()
 
@@ -237,6 +246,11 @@ class StudioExportPanel(QWidget):
         self.quality.addItem("Studio · encodage soigné", "studio")
         self.quality.addItem("Rapide · validation", "fast")
         form.addRow("Profil", self.quality)
+        self.audio_mode = QComboBox()
+        self.audio_mode.setObjectName("studioExportAudioMode")
+        self.audio_mode.addItem("Référence · vidéo seule", AudioExportMode.REFERENCE.value)
+        self.audio_mode.addItem("Intégré · AAC / Opus", AudioExportMode.EMBEDDED.value)
+        form.addRow("Musique", self.audio_mode)
         self.crf = QSpinBox()
         self.crf.setObjectName("studioExportCrf")
         self.crf.setRange(0, 51)
@@ -274,6 +288,7 @@ class StudioExportPanel(QWidget):
 
         self.container.currentIndexChanged.connect(self._settings_changed)
         self.quality.currentIndexChanged.connect(self._settings_changed)
+        self.audio_mode.currentIndexChanged.connect(self._settings_changed)
         self.crf.valueChanged.connect(self._settings_changed)
         self.set_project(None)
 
@@ -284,6 +299,7 @@ class StudioExportPanel(QWidget):
             enabled = project is not None and not self._running
             self.container.setEnabled(enabled)
             self.quality.setEnabled(enabled)
+            self.audio_mode.setEnabled(enabled)
             self.crf.setEnabled(enabled)
             self.export_button.setEnabled(enabled)
             if project is None:
@@ -299,6 +315,7 @@ class StudioExportPanel(QWidget):
             )
             self._select_data(self.container, project.export.container)
             self._select_data(self.quality, project.export.quality)
+            self._select_data(self.audio_mode, project.export.audio_mode.value)
             self.crf.setValue(project.export.crf)
             if not self.status.text() or self.status.text().startswith("Ouvrez"):
                 self.status.setText("Prêt à exporter localement.")
@@ -318,6 +335,7 @@ class StudioExportPanel(QWidget):
             str(self.container.currentData()),
             int(self.crf.value()),
             str(self.quality.currentData()),
+            str(self.audio_mode.currentData()),
         )
 
     def settings(self) -> ExportSettings:
@@ -328,6 +346,7 @@ class StudioExportPanel(QWidget):
             container=str(self.container.currentData()),
             crf=int(self.crf.value()),
             quality=str(self.quality.currentData()),
+            audio_mode=AudioExportMode(str(self.audio_mode.currentData())),
         ).validate()
 
     def set_destination(self, path: str | Path) -> None:
@@ -338,6 +357,7 @@ class StudioExportPanel(QWidget):
         enabled = self._project is not None and not self._running
         self.container.setEnabled(enabled)
         self.quality.setEnabled(enabled)
+        self.audio_mode.setEnabled(enabled)
         self.crf.setEnabled(enabled)
         self.export_button.setEnabled(enabled)
         self.cancel_button.setEnabled(self._running)
@@ -350,13 +370,27 @@ class StudioExportPanel(QWidget):
         self.progress.setValue(max(0, min(int(done), safe_total)))
         self.progress.setFormat(f"{done} / {total} images · %p %")
 
+    def set_phase(self, phase: str) -> None:
+        messages = {
+            "video": "Calcul des images et encodage vidéo…",
+            "audio": "Décodage et mix PCM local…",
+            "mux": "Intégration de la musique sans réencoder les images…",
+            "complete": "Finalisation atomique terminée.",
+        }
+        self.status.setText(messages.get(phase, f"Export · {phase}"))
+
     def show_success(self, result: StudioExportResult) -> None:
         self.progress.setRange(0, max(1, result.frame_count))
         self.progress.setValue(result.frame_count)
         self.progress.setFormat("Export terminé · 100 %")
+        audio = (
+            "musique intégrée"
+            if result.audio_mode == AudioExportMode.EMBEDDED
+            else "vidéo seule · musique de référence conservée"
+        )
         self.status.setText(
             f"Reel créé · {result.width} × {result.height} · {result.fps} FPS · "
-            f"{result.frame_count} images."
+            f"{result.frame_count} images · {audio}."
         )
         self.set_destination(result.path)
 
