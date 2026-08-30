@@ -114,7 +114,7 @@ actions synchronisées, reproduites à l'identique en preview et à l'export.
 - [x] **EXP-02** Intégrer historique, annulation, reprise d'erreur et nettoyage atomique.
 - [x] **EXP-03** Borner caches CPU/GPU et fermer tous les workers.
 - [x] **PKG-01** Embarquer les dépendances locales dans le gros EXE Windows accepté.
-- [ ] **PKG-02** Valider un Reel complet dans l'EXE packagé.
+- [x] **PKG-02** Valider un Reel complet dans l'EXE packagé.
 
 Critère de fin P7 : œuvre → mise en scène sémantique + 2D + 3D → transition réelle
 → audio → MP4 Reel fini, testé de bout en bout sur Windows.

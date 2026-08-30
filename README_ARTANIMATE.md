@@ -92,6 +92,18 @@ AAC et Opus, puis round-trip H.264. Les rapports `ArtAnimate-build.json` et
 Le détail des budgets et de la validation est dans
 [docs/studio-production-hardening.md](docs/studio-production-hardening.md).
 
+La qualification produit rejoue ensuite un Reel V3 complet depuis ce même EXE :
+projet vertical de 12 secondes, plans caméra 2D/3D, effet, match vers une photo,
+musique rognée, sauvegarde/réouverture, exports avec et sans audio et relecture depuis
+l’historique.
+
+```powershell
+.\packaging\windows\qualify-v3.ps1
+```
+
+Le protocole et la revue visuelle sont détaillés dans
+[docs/studio-v3-qualification.md](docs/studio-v3-qualification.md).
+
 ## Premier film en ligne de commande
 
 ```powershell
