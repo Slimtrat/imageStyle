@@ -117,6 +117,7 @@ from .studio_effects import StudioEffectInspector
 from .studio_semantic import StudioSemanticPanel
 from .studio_triggers import StudioTriggerPanel
 from .studio_preview import StudioPreviewController
+from .studio_export import StudioExportController, StudioExportPanel
 from .studio_timeline import StudioTimeline
 from .studio_timeline_actions import StudioTimelineActions
 from .studio_transport import StudioTransport
@@ -720,6 +721,12 @@ class StudioPanel(QWidget):
         self.preview_controller.frameReady.connect(self._preview_ready)
         self.preview_controller.renderingChanged.connect(self._preview_rendering_changed)
         self.preview_controller.failed.connect(self._preview_failed)
+        self.export_controller = StudioExportController(self)
+        self.export_controller.progressChanged.connect(self._export_progress)
+        self.export_controller.runningChanged.connect(self._export_running_changed)
+        self.export_controller.succeeded.connect(self._export_succeeded)
+        self.export_controller.failed.connect(self._export_failed)
+        self.export_controller.cancelled.connect(self._export_cancelled)
 
         cache_root = (
             Path(analysis_cache_dir)
@@ -791,6 +798,11 @@ class StudioPanel(QWidget):
         self.explore_button.clicked.connect(self._open_explore)
         header.addWidget(self.explore_button)
         self.import_button.setObjectName("studioImportArtworkButton")
+        self.export_button = QPushButton("Exporter…")
+        self.export_button.setObjectName("studioExportButton")
+        self.export_button.clicked.connect(self._open_export)
+        header.addWidget(self.export_button)
+
         self.import_button.clicked.connect(self.choose_artwork_requested)
         header.addWidget(self.import_button)
         page.addLayout(header)
@@ -891,6 +903,10 @@ class StudioPanel(QWidget):
         self.inspector_tabs.addTab(self.analysis_panel, "Analyse locale")
         self.explore_panel = StudioExplorePanel()
         self.inspector_tabs.addTab(self.trigger_panel, "Déclencheurs")
+        self.export_panel = StudioExportPanel()
+        self.export_panel.settingsRequested.connect(self._export_settings_requested)
+        self.export_panel.exportRequested.connect(self.export_video)
+        self.export_panel.cancelRequested.connect(self.export_controller.cancel)
         self.inspector_tabs.addTab(camera_page, "Caméra")
         self.inspector_tabs.addTab(self.effect_inspector, "Réglages 2D")
         self.inspector_tabs.addTab(self.media_inspector, "Plan réel")
@@ -901,6 +917,7 @@ class StudioPanel(QWidget):
         self.inspector_tabs.addTab(self.explore_panel, "Explore")
         inspector_layout.addWidget(self.inspector_tabs, 1)
         body.addWidget(inspector)
+        self.inspector_tabs.addTab(self.export_panel, "Export")
         page.addLayout(body, 1)
 
         self.transport = StudioTransport()
@@ -1005,6 +1022,8 @@ class StudioPanel(QWidget):
         )
         self.explore_panel.set_project(self._project)
         self.timeline.set_project(self._project)
+        self.export_panel.set_project(self._project)
+        self.export_panel.set_running(self.export_controller.running)
         valid_audio_assets = (
             {asset.asset_id for asset in self._project.assets if asset.kind == AssetKind.AUDIO}
             if self._project is not None else set()
@@ -1079,6 +1098,8 @@ class StudioPanel(QWidget):
         )
         self.explore_panel.set_project(validated)
         self.timeline.set_project(validated)
+        self.export_panel.set_project(validated)
+        self.export_panel.set_running(self.export_controller.running)
         valid_audio_assets = {
             asset.asset_id for asset in validated.assets
             if asset.kind == AssetKind.AUDIO
@@ -2070,6 +2091,110 @@ class StudioPanel(QWidget):
 
     def _open_explore(self) -> None:
         self.inspector_tabs.setCurrentWidget(self.explore_panel)
+    def _open_export(self) -> None:
+        self.inspector_tabs.setCurrentWidget(self.export_panel)
+
+    def _export_settings_requested(
+        self,
+        container: str,
+        crf: int,
+        quality: str,
+    ) -> None:
+        project = self._project
+        if project is None or self.export_controller.running:
+            return
+        try:
+            export = replace(
+                project.export,
+                container=container,
+                crf=crf,
+                quality=quality,
+            ).validate()
+            self.commit_project(
+                replace(project, export=export),
+                "Régler l’export final",
+                merge_key="export-settings",
+            )
+        except (TypeError, ValueError) as exc:
+            self.export_panel.show_error(str(exc))
+
+    def export_video(self, destination: str | Path | None = None) -> bool:
+        project = self._project
+        artwork_path = self.canvas.artwork_path
+        if project is None or artwork_path is None:
+            self._open_export()
+            self.export_panel.show_error("aucune œuvre locale n’est ouverte")
+            return False
+        if self.export_controller.running:
+            self._open_export()
+            return False
+        container = project.export.container
+        expected_suffix = f".{container}"
+        output = Path(destination) if destination is not None else None
+        if output is None:
+            project_path = self.asset_panel.project_path
+            if project_path is not None:
+                suggested = project_path.parent / f"{project_path.stem}-reel{expected_suffix}"
+            else:
+                suggested = artwork_path.parent / f"{artwork_path.stem}-reel{expected_suffix}"
+            filters = {
+                "mp4": "Vidéo MP4 H.264 (*.mp4)",
+                "mov": "Vidéo MOV H.264 (*.mov)",
+                "webm": "Vidéo WebM VP9 (*.webm)",
+            }
+            selected, _selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "Exporter le Reel final",
+                str(suggested),
+                filters[container],
+            )
+            if not selected:
+                return False
+            output = Path(selected)
+        if not output.suffix:
+            output = output.with_suffix(expected_suffix)
+        if output.suffix.lower() != expected_suffix:
+            self._open_export()
+            self.export_panel.show_error(
+                f"la destination doit utiliser l’extension {expected_suffix}"
+            )
+            return False
+        self._open_export()
+        self.export_panel.set_destination(output)
+        self.export_panel.set_progress(0, project.settings.duration_frames)
+        try:
+            self.preview_controller.cancel_pending()
+            self.export_controller.request(
+                project,
+                artwork_path,
+                output,
+                resource_base=(
+                    self.asset_panel.project_path.parent
+                    if self.asset_panel.project_path is not None
+                    else None
+                ),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self.export_panel.show_error(str(exc))
+            return False
+        return True
+
+    def _export_progress(self, done: int, total: int) -> None:
+        self.export_panel.set_progress(done, total)
+
+    def _export_running_changed(self, running: bool) -> None:
+        self.export_panel.set_running(running)
+        self.export_button.setEnabled(not running)
+
+    def _export_succeeded(self, result) -> None:
+        self.export_panel.show_success(result)
+        self.project_status.setText(f"Reel exporté · {result.path.name}")
+
+    def _export_failed(self, message: str) -> None:
+        self.export_panel.show_error(message)
+
+    def _export_cancelled(self) -> None:
+        self.export_panel.show_cancelled()
 
     def _create_explore(self, macro_zone_id: str, inspection_zone_id: str) -> None:
         project = self._project
@@ -2402,6 +2527,7 @@ class StudioPanel(QWidget):
 
     def shutdown(self) -> None:
         self.preview_controller.shutdown()
+        self.export_controller.shutdown()
         self.analysis_controller.shutdown()
         self.audio_monitor.shutdown()
         self.waveform_controller.shutdown()
