@@ -34,6 +34,7 @@ class TrackKind(StrEnum):
 
 
 class ClipKind(StrEnum):
+    PROLOGUE = "prologue"
     ARTWORK_2D = "artwork_2d"
     ARTWORK_3D = "artwork_3d"
     STILL = "still"
@@ -51,6 +52,7 @@ class Easing(StrEnum):
 
 class TransitionKind(StrEnum):
     CUT = "cut"
+    DISCOVER = "discover"
     DISSOLVE = "dissolve"
     SPATIAL_MATCH = "spatial_match"
     MATCH = "match"
@@ -319,6 +321,7 @@ class Track:
             raise TypeError("Les états de piste doivent être booléens")
         allowed = {
             TrackKind.VIDEO: {
+                ClipKind.PROLOGUE,
                 ClipKind.ARTWORK_2D,
                 ClipKind.ARTWORK_3D,
                 ClipKind.STILL,

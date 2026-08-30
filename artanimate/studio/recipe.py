@@ -29,6 +29,7 @@ from .artwork_rectification import rectify_artwork
 from .audio import AudioClipSettings
 from .manual_match import ManualMatchTransform, add_manual_match, update_manual_match
 from .media import StillClipSettings
+from .prologue import DiscoverySettings, PrologueSettings, add_discovery
 from .model import (
     AssetKind,
     AudioExportMode,
@@ -45,6 +46,12 @@ from .model import (
     Track,
     TrackKind,
 )
+from .recipe_semantics import (
+    RecipeSemanticAction,
+    RecipeSemanticRegion,
+    compile_recipe_semantics,
+    validate_recipe_semantics,
+)
 from .spatial_match import add_spatial_match
 from .transition_matching import (
     AkazeArtworkMatchSolver,
@@ -56,7 +63,7 @@ from .video import VideoClipSettings
 
 
 RECIPE_SCHEMA_VERSION = 1
-RECIPE_COMPILER_VERSION = 3
+RECIPE_COMPILER_VERSION = 4
 PROJECT_FILENAME = "project.artanimate"
 RECIPE_FILENAME = "recipe.json"
 ASSETS_DIRECTORY = "assets"
@@ -294,6 +301,7 @@ class RecipeShot:
         )
         kind = _enum(ClipKind, values.get("kind"), f"{where}.kind")
         if kind not in {
+            ClipKind.PROLOGUE,
             ClipKind.ARTWORK_2D,
             ClipKind.ARTWORK_3D,
             ClipKind.STILL,
@@ -312,6 +320,8 @@ class RecipeShot:
         settings = values.get("settings")
         if settings is not None:
             settings = _object(settings, f"{where}.settings")
+        if kind == ClipKind.PROLOGUE:
+            PrologueSettings.from_mapping(settings)
         opacity = _number(values.get("opacity", 1.0), f"{where}.opacity")
         if not 0.0 <= opacity <= 1.0:
             raise ValueError(f"{where}.opacity doit être compris entre 0 et 1")
@@ -373,8 +383,12 @@ class RecipeTransition:
             where,
         )
         kind = _text(values.get("kind"), f"{where}.kind")
-        if kind not in {"cut", "dissolve", "manual_match", "spatial_match"}:
-            raise ValueError(f"{where}.kind doit être cut, dissolve, manual_match ou spatial_match")
+        if kind not in {
+            "cut", "discover", "dissolve", "manual_match", "spatial_match"
+        }:
+            raise ValueError(
+                f"{where}.kind doit être cut, discover, dissolve, manual_match ou spatial_match"
+            )
         duration = _integer(
             values.get("duration_frames", 1 if kind == "cut" else 12),
             f"{where}.duration_frames",
@@ -563,6 +577,8 @@ class StudioRecipe:
     audio: tuple[RecipeAudio, ...] = ()
     outputs: RecipeOutputs = RecipeOutputs()
     artwork_preparation: RecipeArtworkPreparation = RecipeArtworkPreparation()
+    semantic_regions: tuple[RecipeSemanticRegion, ...] = ()
+    semantic_actions: tuple[RecipeSemanticAction, ...] = ()
     schema_version: int = RECIPE_SCHEMA_VERSION
 
     @classmethod
@@ -581,6 +597,8 @@ class StudioRecipe:
                 "transitions",
                 "audio",
                 "outputs",
+                "semantic_regions",
+                "semantic_actions",
             },
             "recipe",
         )
@@ -598,22 +616,32 @@ class StudioRecipe:
         shots = tuple(RecipeShot.from_dict(item, index) for index, item in enumerate(raw_shots))
         raw_transitions = values.get("transitions", [])
         raw_audio = values.get("audio", [])
-        if not isinstance(raw_transitions, list) or not isinstance(raw_audio, list):
-            raise TypeError("recipe.transitions et recipe.audio doivent être des listes")
+        raw_regions = values.get("semantic_regions", [])
+        raw_actions = values.get("semantic_actions", [])
+        if not all(isinstance(item, list) for item in (raw_transitions, raw_audio, raw_regions, raw_actions)):
+            raise TypeError("transitions, audio, semantic_regions et semantic_actions doivent être des listes")
         result = cls(
-            _text(values.get("name"), "recipe.name"),
-            _path_text(values.get("artwork"), "recipe.artwork"),
-            RecipeProjectSettings.from_dict(values.get("project", {})),
-            media,
-            shots,
-            tuple(
+            name=_text(values.get("name"), "recipe.name"),
+            artwork=_path_text(values.get("artwork"), "recipe.artwork"),
+            project=RecipeProjectSettings.from_dict(values.get("project", {})),
+            media=media,
+            shots=shots,
+            transitions=tuple(
                 RecipeTransition.from_dict(item, index)
                 for index, item in enumerate(raw_transitions)
             ),
-            tuple(RecipeAudio.from_dict(item, index) for index, item in enumerate(raw_audio)),
-            RecipeOutputs.from_dict(values.get("outputs", {})),
-            RecipeArtworkPreparation.from_dict(values.get("artwork_preparation", {})),
-            version,
+            audio=tuple(RecipeAudio.from_dict(item, index) for index, item in enumerate(raw_audio)),
+            outputs=RecipeOutputs.from_dict(values.get("outputs", {})),
+            artwork_preparation=RecipeArtworkPreparation.from_dict(values.get("artwork_preparation", {})),
+            semantic_regions=tuple(
+                RecipeSemanticRegion.from_dict(item, index)
+                for index, item in enumerate(raw_regions)
+            ),
+            semantic_actions=tuple(
+                RecipeSemanticAction.from_dict(item, index)
+                for index, item in enumerate(raw_actions)
+            ),
+            schema_version=version,
         )
         result.validate()
         return result
@@ -635,6 +663,8 @@ class StudioRecipe:
         if len(shot_ids) != len(set(shot_ids)):
             raise ValueError("La recette contient deux plans portant le même identifiant")
         for shot in self.shots:
+            if shot.kind == ClipKind.PROLOGUE:
+                PrologueSettings.from_mapping(shot.settings)
             if shot.asset is not None:
                 asset = media.get(shot.asset)
                 if asset is None:
@@ -653,21 +683,26 @@ class StudioRecipe:
             if endpoint in endpoints:
                 raise ValueError("Deux transitions relient les mêmes plans")
             endpoints.add(endpoint)
+            first = self.shots[positions[transition.from_shot]]
+            second = self.shots[positions[transition.to_shot]]
+            if transition.kind == "discover":
+                if first.kind != ClipKind.PROLOGUE:
+                    raise ValueError("La découverte doit partir d’un prologue")
+                if second.kind not in {ClipKind.ARTWORK_2D, ClipKind.ARTWORK_3D}:
+                    raise ValueError("La découverte doit arriver sur l’œuvre")
+                settings = transition.settings or {}
+                _known(settings, {"direction", "softness"}, "recipe.transition.discover.settings")
+                DiscoverySettings(
+                    transition.easing,
+                    str(settings.get("direction", "center-out")),
+                    _number(settings.get("softness", 0.035), "discovery.softness"),
+                ).validate()
             if transition.kind == "manual_match":
-                first = self.shots[positions[transition.from_shot]]
-                second = self.shots[positions[transition.to_shot]]
                 if first.kind not in {ClipKind.ARTWORK_2D, ClipKind.ARTWORK_3D}:
                     raise ValueError("Le match manuel doit partir de l’œuvre")
                 if second.kind not in {ClipKind.STILL, ClipKind.VIDEO}:
                     raise ValueError("Le match manuel doit arriver sur une photo ou vidéo")
-        duration = self.duration_frames
-        for audio in self.audio:
-            asset = media.get(audio.asset)
-            if asset is None or asset.kind != AssetKind.AUDIO:
-                raise ValueError(f"L’audio {audio.audio_id} référence un média audio absent")
             if transition.kind == "spatial_match":
-                first = self.shots[positions[transition.from_shot]]
-                second = self.shots[positions[transition.to_shot]]
                 if first.kind not in {ClipKind.ARTWORK_2D, ClipKind.ARTWORK_3D}:
                     raise ValueError("Le raccord spatial doit partir de l’œuvre")
                 if second.kind != ClipKind.STILL:
@@ -675,8 +710,19 @@ class StudioRecipe:
                 settings = transition.settings or {}
                 _known(settings, {"solver"}, "recipe.transition.spatial_match.settings")
                 AkazeMatchSettings.from_dict(settings.get("solver"))
+        duration = self.duration_frames
+        for audio in self.audio:
+            asset = media.get(audio.asset)
+            if asset is None or asset.kind != AssetKind.AUDIO:
+                raise ValueError(f"L’audio {audio.audio_id} référence un média audio absent")
             if audio.start_frame + audio.duration_frames > duration:
                 raise ValueError(f"L’audio {audio.audio_id} dépasse la durée du projet")
+        validate_recipe_semantics(
+            self.semantic_regions,
+            self.semantic_actions,
+            media=media,
+            shot_ids=set(shot_ids),
+        )
         return self
 
     @property
@@ -695,6 +741,8 @@ class StudioRecipe:
             "transitions": [item.to_dict() for item in self.transitions],
             "audio": [item.to_dict() for item in self.audio],
             "outputs": self.outputs.to_dict(),
+            "semantic_regions": [item.to_dict() for item in self.semantic_regions],
+            "semantic_actions": [item.to_dict() for item in self.semantic_actions],
         }
 
 
@@ -1006,7 +1054,9 @@ def compile_studio_recipe(
     for shot in recipe.shots:
         parameters: dict[str, Any] | None = None
         asset_id: str | None = None
-        if shot.kind == ClipKind.ARTWORK_3D:
+        if shot.kind == ClipKind.PROLOGUE:
+            parameters = PrologueSettings.from_mapping(shot.settings).to_dict()
+        elif shot.kind == ClipKind.ARTWORK_3D:
             parameters = _three_d_parameters(
                 shot,
                 recipe,
@@ -1084,7 +1134,18 @@ def compile_studio_recipe(
     for transition_recipe in recipe.transitions:
         if transition_recipe.kind == "cut":
             continue
-        if transition_recipe.kind == "dissolve":
+        if transition_recipe.kind == "discover":
+            settings = transition_recipe.settings or {}
+            project, transition = add_discovery(
+                project,
+                clip_ids[transition_recipe.from_shot],
+                clip_ids[transition_recipe.to_shot],
+                duration_frames=transition_recipe.duration_frames,
+                easing=transition_recipe.easing,
+                direction=str(settings.get("direction", "center-out")),
+                softness=float(settings.get("softness", 0.035)),
+            )
+        elif transition_recipe.kind == "dissolve":
             project, transition = add_dissolve(
                 project,
                 clip_ids[transition_recipe.from_shot],
@@ -1153,6 +1214,13 @@ def compile_studio_recipe(
                 for item in project.transitions
             ),
         ).validate()
+    project = compile_recipe_semantics(
+        project,
+        path,
+        recipe.semantic_regions,
+        recipe.semantic_actions,
+        media_by_recipe_id=media_by_id,
+    )
     return project.validate()
 
 

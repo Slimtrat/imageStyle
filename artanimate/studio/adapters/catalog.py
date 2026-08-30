@@ -40,6 +40,13 @@ def _build_legacy_capability_catalog() -> tuple[CapabilityDescriptor, ...]:
     )
     capabilities = [
         CapabilityDescriptor(
+            "scene.prologue", "Présenter le prologue", "scene",
+            parameters=(
+                CapabilityParameter("settings", "Réglages du prologue", "any", required=True),
+            ),
+            renderer_candidates=("local.prologue",),
+        ),
+        CapabilityDescriptor(
             "artwork.present", "Présenter l'œuvre", "artwork",
             requirements=(artwork_requirement,), parameters=(source_in, opacity, fit),
             renderer_candidates=("classic.artwork.static",),

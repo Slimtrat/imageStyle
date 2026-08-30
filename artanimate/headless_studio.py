@@ -75,8 +75,20 @@ def _requested_output(
     return _portable_output_path(output, recipe_value, label)
 
 
-def representative_frames(project: StudioProject, maximum: int = 9) -> tuple[int, ...]:
+def representative_frames(project: StudioProject, maximum: int = 12) -> tuple[int, ...]:
     candidates = {0, project.settings.duration_frames - 1}
+    semantic_moments: set[int] = set()
+    for invocation in project.invocations:
+        if invocation.capability_id != "region.blink":
+            continue
+        close_frames = int(invocation.parameters.get("close_frames", 6))
+        moments = {
+            invocation.start_frame,
+            invocation.start_frame + max(0, close_frames - 1),
+            invocation.end_frame - 1,
+        }
+        semantic_moments.update(moments)
+        candidates.update(moments)
     for track in project.tracks:
         if track.kind != TrackKind.VIDEO:
             continue
@@ -100,10 +112,19 @@ def representative_frames(project: StudioProject, maximum: int = 9) -> tuple[int
     ordered = sorted(index for index in candidates if 0 <= index < project.settings.duration_frames)
     if len(ordered) <= maximum:
         return tuple(ordered)
-    selected = {
-        ordered[round(index * (len(ordered) - 1) / (maximum - 1))]
-        for index in range(maximum)
-    }
+    selected = {0, project.settings.duration_frames - 1}
+    for index in sorted(semantic_moments):
+        if len(selected) >= maximum:
+            break
+        if 0 <= index < project.settings.duration_frames:
+            selected.add(index)
+    remaining = maximum - len(selected)
+    available = [index for index in ordered if index not in selected]
+    if remaining > 0 and available:
+        selected.update(
+            available[round(index * (len(available) - 1) / max(1, remaining - 1))]
+            for index in range(remaining)
+        )
     return tuple(sorted(selected))
 
 
@@ -320,6 +341,25 @@ def run_headless_studio(
                     "parameters": transition.parameters,
                 }
                 for transition in result.project.transitions
+            ],
+            "semantic_regions": [
+                item.to_dict()
+                for item in (result.project.scene.objects if result.project.scene is not None else ())
+                if item.semantic_type.startswith("artwork.region.")
+            ],
+            "semantic_actions": [
+                invocation.to_dict()
+                for invocation in result.project.invocations
+                if invocation.capability_id.startswith("region.")
+            ],
+            "semantic_triggers": [
+                trigger.to_dict()
+                for trigger in result.project.triggers
+                if any(
+                    invocation.invocation_id == trigger.action_invocation_id
+                    and invocation.capability_id.startswith("region.")
+                    for invocation in result.project.invocations
+                )
             ],
             "resolution": [result.project.settings.width, result.project.settings.height],
         },

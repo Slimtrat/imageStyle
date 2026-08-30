@@ -17,6 +17,7 @@ SEMANTIC_ACTION_IDS = frozenset(
     {
         "object.move",
         "object.exit_frame",
+        "region.blink",
         "scene.parallax",
         "camera.inspect",
         "camera.zoom_out",
@@ -61,6 +62,13 @@ def semantic_action_capability_catalog() -> tuple[CapabilityDescriptor, ...]:
         "exitable-mask",
         "L’objet doit être détouré et autorisé à quitter le cadre",
         affordance_ids=("frame-exitable",),
+        resource_kinds=("mask",),
+    )
+    blinkable_eye = CapabilityRequirement(
+        "blinkable-eye-mask",
+        "L’œil doit posséder un masque canonique et être déclaré clignable",
+        semantic_types=("artwork.region.eye",),
+        affordance_ids=("blinkable",),
         resource_kinds=("mask",),
     )
     depth = CapabilityRequirement(
@@ -151,6 +159,57 @@ def semantic_action_capability_catalog() -> tuple[CapabilityDescriptor, ...]:
             description=(
                 "Anime le masque jusqu’à ce qu’il franchisse entièrement le bord "
                 "choisi ; la dernière frame émet object-exited."
+            ),
+        ),
+        CapabilityDescriptor(
+            "region.blink",
+            "Faire cligner cet œil",
+            "region",
+            requirements=(blinkable_eye,),
+            parameters=(
+                CapabilityParameter(
+                    "close_frames",
+                    "Fermeture",
+                    "integer",
+                    default=6,
+                    has_default=True,
+                    minimum=2,
+                    maximum=60,
+                ),
+                CapabilityParameter(
+                    "hold_frames",
+                    "Maintien",
+                    "integer",
+                    default=2,
+                    has_default=True,
+                    minimum=0,
+                    maximum=60,
+                ),
+                CapabilityParameter(
+                    "open_frames",
+                    "Ouverture",
+                    "integer",
+                    default=8,
+                    has_default=True,
+                    minimum=2,
+                    maximum=60,
+                ),
+                CapabilityParameter(
+                    "intensity",
+                    "Intensité",
+                    "number",
+                    default=1.0,
+                    has_default=True,
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+                _easing_parameter(),
+            ),
+            renderer_candidates=(SEMANTIC_ACTION_RENDERER_ID,),
+            emitted_events=("started", "blink-closed", "completed"),
+            description=(
+                "Ferme puis rouvre uniquement la région de l’œil. Le même masque "
+                "canonique est reprojeté sur le plan réel par le raccord spatial."
             ),
         ),
         CapabilityDescriptor(

@@ -459,6 +459,7 @@ class StudioTimelineScene(QWidget):
                 )
 
         colors = {
+            ClipKind.PROLOGUE: QColor("#8f6c5b"),
             ClipKind.ARTWORK_2D: QColor("#4f86c6"),
             ClipKind.ARTWORK_3D: QColor("#8a63d2"),
             ClipKind.STILL: QColor("#4ea39a"),
@@ -551,10 +552,15 @@ class StudioTimelineScene(QWidget):
         for layout in self._transition_layouts:
             rect = self._display_transition_rect(layout)
             selected = layout.transition.transition_id == self._selected_transition_id
-            is_match = layout.transition.kind == TransitionKind.MATCH
-            fill = QColor(76, 210, 196, 125) if is_match else QColor(246, 184, 80, 115)
-            border = QColor("#c5fff8") if is_match else QColor("#fff2b3")
-            idle_border = QColor("#3bc7b8") if is_match else QColor("#dca33e")
+            transition_style = {
+                TransitionKind.MATCH: (QColor(76, 210, 196, 125), QColor("#c5fff8"), QColor("#3bc7b8"), "MATCH RÉEL"),
+                TransitionKind.SPATIAL_MATCH: (QColor(76, 210, 196, 125), QColor("#c5fff8"), QColor("#3bc7b8"), "RACCORD SPATIAL"),
+                TransitionKind.DISCOVER: (QColor(174, 111, 205, 125), QColor("#f0d4ff"), QColor("#ac6ec9"), "DÉCOUVERTE"),
+            }.get(
+                layout.transition.kind,
+                (QColor(246, 184, 80, 115), QColor("#fff2b3"), QColor("#dca33e"), "FONDU"),
+            )
+            fill, border, idle_border, label = transition_style
             painter.setBrush(fill)
             painter.setPen(
                 QPen(border if selected else idle_border, 2)
@@ -571,7 +577,6 @@ class StudioTimelineScene(QWidget):
                 border,
             )
             painter.setPen(QColor("#17130b"))
-            label = "MATCH RÉEL" if is_match else "FONDU"
             painter.drawText(
                 rect.adjusted(7, 0, -7, 0),
                 Qt.AlignmentFlag.AlignCenter,

@@ -167,6 +167,14 @@ def _content_spec(
         "opacity": clip.opacity,
         "fit": clip.fit.value,
     }
+    if clip.kind == ClipKind.PROLOGUE:
+        return (
+            "content",
+            "scene.prologue",
+            None,
+            {"settings": clip.parameters or {}},
+            "local.prologue",
+        )
     if clip.kind == ClipKind.ARTWORK_2D:
         return (
             "content",

@@ -56,6 +56,10 @@ def transition_end_frame(transition: Transition) -> int:
 
 
 def _transition_easing(transition: Transition) -> Easing:
+    if transition.kind == TransitionKind.DISCOVER:
+        from .prologue import DiscoverySettings
+
+        return DiscoverySettings.from_transition(transition).easing
     if transition.kind == TransitionKind.DISSOLVE:
         return DissolveSettings.from_transition(transition).easing
     if transition.kind == TransitionKind.MATCH:
@@ -72,7 +76,12 @@ def _transition_easing(transition: Transition) -> Easing:
 def transition_progress(transition: Transition, project_frame: int) -> float:
     """Return B's exact weight, including exact zero/one endpoint frames."""
 
-    if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
+    if transition.kind not in {
+        TransitionKind.DISCOVER,
+        TransitionKind.DISSOLVE,
+        TransitionKind.MATCH,
+        TransitionKind.SPATIAL_MATCH,
+    }:
         raise ValueError("La progression exige une transition visuelle")
     if not transition.start_frame <= project_frame < transition_end_frame(transition):
         raise ValueError("La frame demandée est hors de la transition")
@@ -135,7 +144,7 @@ def transition_clip_pair(
 
 
 def _source_frame_count(project: StudioProject, clip: Clip) -> int | None:
-    if clip.kind in {ClipKind.STILL, ClipKind.ARTWORK_2D}:
+    if clip.kind in {ClipKind.PROLOGUE, ClipKind.STILL, ClipKind.ARTWORK_2D}:
         return None
     if clip.kind == ClipKind.VIDEO:
         if clip.asset_id is None:
@@ -197,7 +206,11 @@ def _validate_visual_transition_topology(
 ) -> TransitionClipPair:
     if transition.duration_frames < 2:
         raise ValueError("Une transition visuelle doit durer au moins deux frames")
-    if transition.kind == TransitionKind.DISSOLVE:
+    if transition.kind == TransitionKind.DISCOVER:
+        from .prologue import validate_discovery_transition
+
+        validate_discovery_transition(project, transition)
+    elif transition.kind == TransitionKind.DISSOLVE:
         DissolveSettings.from_transition(transition)
     elif transition.kind == TransitionKind.MATCH:
         from .manual_match import validate_manual_match_transition
@@ -218,6 +231,14 @@ def _validate_visual_transition_topology(
         )
     cut = pair.from_clip.end_frame
     end = transition_end_frame(transition)
+    if transition.kind == TransitionKind.DISCOVER:
+        if transition.start_frame != cut or end > pair.to_clip.end_frame:
+            raise ValueError(
+                "La découverte doit commencer au cut et rester dans le plan d’œuvre"
+            )
+        if validate_sources:
+            _validate_source_handles(project, transition, pair)
+        return pair
     ordered = sorted(
         pair.track.clips,
         key=lambda clip: (clip.start_frame, clip.end_frame, clip.clip_id),
@@ -259,7 +280,12 @@ def validate_project_transitions(
     windows_by_track: dict[str, list[tuple[int, int, str]]] = {}
     endpoints: set[tuple[str, str]] = set()
     for transition in project.transitions:
-        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
+        if transition.kind not in {
+            TransitionKind.DISCOVER,
+            TransitionKind.DISSOLVE,
+            TransitionKind.MATCH,
+            TransitionKind.SPATIAL_MATCH,
+        }:
             continue
         pair = _validate_visual_transition_topology(
             project,
@@ -463,7 +489,12 @@ def render_window_for_clip(project: StudioProject, clip: Clip) -> tuple[int, int
     start = clip.start_frame
     end = clip.end_frame
     for transition in project.transitions:
-        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
+        if transition.kind not in {
+            TransitionKind.DISCOVER,
+            TransitionKind.DISSOLVE,
+            TransitionKind.MATCH,
+            TransitionKind.SPATIAL_MATCH,
+        }:
             continue
         if transition.from_clip_id == clip.clip_id:
             end = max(end, transition_end_frame(transition))
@@ -473,7 +504,7 @@ def render_window_for_clip(project: StudioProject, clip: Clip) -> tuple[int, int
 
 
 def render_source_in_frame(project: StudioProject, clip: Clip, render_start: int) -> int:
-    if clip.kind in {ClipKind.STILL, ClipKind.ARTWORK_2D}:
+    if clip.kind in {ClipKind.PROLOGUE, ClipKind.STILL, ClipKind.ARTWORK_2D}:
         return 0
     return clip.source_in_frame + render_start - clip.start_frame
 
@@ -485,7 +516,12 @@ def active_visual_transition(
 ) -> Transition | None:
     matches = []
     for transition in project.transitions:
-        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
+        if transition.kind not in {
+            TransitionKind.DISCOVER,
+            TransitionKind.DISSOLVE,
+            TransitionKind.MATCH,
+            TransitionKind.SPATIAL_MATCH,
+        }:
             continue
         if not transition.start_frame <= project_frame < transition_end_frame(transition):
             continue

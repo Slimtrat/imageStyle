@@ -14,6 +14,12 @@ from ..manual_match import (
     incoming_manual_match,
     warp_matched_frame,
 )
+from ..semantic_projection import (
+    blink_amount,
+    compose_blink,
+    project_canonical_mask,
+)
+from ..spatial_match import SpatialMatchSettings
 from ..sources import validate_frame_index
 from ..semantic_actions import SEMANTIC_ACTION_IDS
 from ..transitions import active_visual_transition, transition_clip_pair, transition_progress
@@ -300,6 +306,55 @@ class SemanticPlanCompositor:
         self._semantic_resource_cache[key] = fitted
         return fitted
 
+    def _projected_region_resource(
+        self,
+        rendered,
+        project_frame: int,
+    ) -> np.ndarray:
+        metadata = rendered.metadata.to_dict()
+        attributes = metadata.get("target_attributes", {})
+        projection = attributes.get("projection", {})
+        if not isinstance(projection, dict):
+            raise ValueError("La projection de région doit être un objet")
+        transition_id = str(projection.get("transition_id", ""))
+        target_clip_id = str(projection.get("target_clip_id", ""))
+        try:
+            transition = next(
+                item for item in self.project.transitions
+                if item.transition_id == transition_id
+            )
+            target_clip = next(
+                clip
+                for track in self.project.tracks
+                for clip in track.clips
+                if clip.clip_id == target_clip_id
+            )
+        except StopIteration as exc:
+            raise ValueError("La région référence un raccord spatial introuvable") from exc
+        settings = SpatialMatchSettings.from_transition(transition)
+        asset = next(
+            (
+                item for item in self.project.assets
+                if item.asset_id == target_clip.asset_id
+            ),
+            None,
+        )
+        if asset is None or asset.width is None or asset.height is None:
+            raise ValueError("Le média réel de projection ne possède pas de dimensions")
+        reference_frame = int(projection.get("reference_camera_frame", 0))
+        current_frame = project_frame - target_clip.start_frame
+        return project_canonical_mask(
+            rendered.alpha,
+            settings.solution.homography,
+            output_width=self.width,
+            output_height=self.height,
+            camera=target_clip.camera,
+            reference_camera_frame=reference_frame,
+            current_camera_frame=current_frame,
+            camera_source_width=asset.width,
+            camera_source_height=asset.height,
+        )
+
     def _content_state(
         self,
         background: np.ndarray,
@@ -330,6 +385,7 @@ class SemanticPlanCompositor:
         background: np.ndarray,
         rendered,
         fit: FitMode,
+        project_frame: int,
     ) -> np.ndarray:
         metadata = rendered.metadata.to_dict()
         parameters = metadata["parameters"]
@@ -372,6 +428,17 @@ class SemanticPlanCompositor:
                 int(round(dy)),
             )
             return alpha_composite_rgb(cleared, shifted, shifted_alpha)
+        if blend_mode == "semantic.region-blink":
+            alpha = self._projected_region_resource(rendered, project_frame)
+            amount = blink_amount(
+                int(metadata["local_frame"]),
+                close_frames=int(parameters["close_frames"]),
+                hold_frames=int(parameters["hold_frames"]),
+                open_frames=int(parameters["open_frames"]),
+                easing=str(parameters["easing"]),
+                intensity=float(parameters["intensity"]),
+            )
+            return compose_blink(background, alpha, amount)
         if blend_mode == "semantic.scene-parallax":
             depth = self._fitted_semantic_resource(rendered, fit)
             return _depth_warp(
@@ -492,6 +559,7 @@ class SemanticPlanCompositor:
                 stage = {
                     "object.move": 20,
                     "object.exit_frame": 20,
+                    "region.blink": 25,
                     "environment.particles": 30,
                     "scene.parallax": 40,
                     "camera.inspect": 50,
@@ -551,5 +619,10 @@ class SemanticPlanCompositor:
             semantic_actions,
             key=lambda item: (item[0], item[1], item[2]),
         ):
-            background = self._semantic_action(background, rendered, artwork_fit)
+            background = self._semantic_action(
+                background,
+                rendered,
+                artwork_fit,
+                frame_index,
+            )
         return background

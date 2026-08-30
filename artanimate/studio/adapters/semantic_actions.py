@@ -22,6 +22,7 @@ from ..sources import validate_frame_index
 _BLEND_MODES = {
     "object.move": "semantic.object-move",
     "object.exit_frame": "semantic.object-exit-frame",
+    "region.blink": "semantic.region-blink",
     "scene.parallax": "semantic.scene-parallax",
     "camera.inspect": "semantic.camera-inspect",
     "camera.zoom_out": "semantic.camera-zoom-out",
@@ -81,6 +82,11 @@ class SemanticActionPreparedRender:
         events: list[str] = []
         if local == 0:
             events.append("started")
+        if (
+            self.request.invocation.capability_id == "region.blink"
+            and local == int(values["close_frames"]) - 1
+        ):
+            events.append("blink-closed")
         if local == self.frame_count - 1:
             if self.request.invocation.capability_id == "object.exit_frame":
                 events.append("object-exited")
@@ -100,11 +106,18 @@ class SemanticActionPreparedRender:
             "target_id": self.request.invocation.target_id,
             "progress": progress,
             "raw_progress": raw,
+            "local_frame": local,
+            "frame_count": self.frame_count,
             "events": events,
             "parameters": values,
             "seed": int(values.get("seed", 0)),
             "resource_kind": self.resource_kind,
             "target_bounds": bounds,
+            "target_attributes": (
+                self.request.target.attributes.to_dict()
+                if self.request.target is not None
+                else {}
+            ),
         }
         if self.fallback is not None:
             metadata["fallback"] = self.fallback
@@ -173,7 +186,7 @@ class LocalSemanticActionRenderer:
         if capability_id not in SEMANTIC_ACTION_IDS:
             return RendererEvaluation(False, reasons=("capability non prise en charge",))
         reasons: list[str] = []
-        if capability_id in {"object.move", "object.exit_frame"}:
+        if capability_id in {"object.move", "object.exit_frame", "region.blink"}:
             problem = self._resource_problem(request, "mask")
             if problem:
                 reasons.append(problem)
@@ -194,6 +207,14 @@ class LocalSemanticActionRenderer:
             travel = values.get("travel", [0.0, 0.0])
             if any(abs(float(item)) > 0.25 for item in travel):
                 reasons.append("le déplacement parallax dépasse 25 % du cadre")
+        if capability_id == "region.blink":
+            duration = (
+                int(values.get("close_frames", 0))
+                + int(values.get("hold_frames", 0))
+                + int(values.get("open_frames", 0))
+            )
+            if duration != request.invocation.duration_frames:
+                reasons.append("la durée du blink doit être la somme fermeture + maintien + ouverture")
         if capability_id == "environment.particles":
             color = str(values.get("color", "#ffffff"))
             if len(color) not in {4, 7} or not color.startswith("#"):
@@ -228,7 +249,7 @@ class LocalSemanticActionRenderer:
         if not evaluation.compatible:
             raise ValueError("Action sémantique impossible : " + "; ".join(evaluation.reasons))
         capability_id = request.invocation.capability_id
-        if capability_id in {"object.move", "object.exit_frame"}:
+        if capability_id in {"object.move", "object.exit_frame", "region.blink"}:
             resource = self._load_resource(request, "mask")
             return SemanticActionPreparedRender(
                 request,

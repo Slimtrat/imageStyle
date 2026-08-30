@@ -27,6 +27,7 @@ mon-projet/
     artwork/               œuvre prête pour les plans 2D/3D
       *.rectification.json contour, confiance et résolution du redressement
     media/                 copies locales des photos, vidéos et sons
+    semantic/              masques canoniques des régions animables
   snapshots/               versions précédentes, créées seulement si le projet change
   headless-report.json     rapport structuré de la commande CLI
 ```
@@ -136,6 +137,7 @@ La compilation s’arrête sans remplacer le projet courant si la confiance est 
 
 Types de plan visuel :
 
+- `prologue` produit une scène typographique locale sans afficher l’œuvre ;
 - `artwork_2d` et `artwork_3d` utilisent l’œuvre centrale ;
 - `still` référence un média `image` ;
 - `video` référence un média `video` et accepte `source_in_frame` ;
@@ -144,13 +146,59 @@ Types de plan visuel :
 Transitions :
 
 - `cut` relie deux plans consécutifs sans recouvrement ;
+- `discover` révèle progressivement un plan d’œuvre depuis un `prologue` ;
 - `dissolve` crée un fondu temporel ;
 - `manual_match` raccorde un plan de l’œuvre à une photo ou une vidéo réelle et
   conserve tous ses réglages éditables dans le projet.
+- `spatial_match` résout l’homographie entre l’œuvre canonique et une photo réelle,
+  puis conserve cette transformation pour les raccords et les régions sémantiques.
 
 Le nombre total de frames est la somme des durées des plans. Une transition visuelle
 utilise des poignées autour de sa coupe sans modifier cette durée ; une coupe franche
-passe directement au plan suivant. L’exemple de référence dure 15 secondes à 30 FPS.
+passe directement au plan suivant. L’exemple de référence V3 dure 21 secondes à 30 FPS.
+
+Un prologue conserve son titre, sous-titre, placement, typographie, couleurs et mouvement
+dans la recette. La famille `builtin-sans` est embarquée par le renderer local et ne
+dépend d’aucun service externe.
+
+## Régions et actions sémantiques
+
+Une région manuelle peut être déclarée dans l’espace normalisé de l’œuvre. Son masque
+est copié ou généré dans `assets/semantic`, puis le raccord spatial le projette sur la
+photo réelle :
+
+```json
+{
+  "semantic_regions": [
+    {
+      "id": "profile-eye",
+      "type": "eye",
+      "label": "Œil du visage de profil",
+      "bounds": [0.118, 0.335, 0.050, 0.095],
+      "mask": {"shape": "ellipse", "feather": 0.045}
+    }
+  ],
+  "semantic_actions": [
+    {
+      "id": "final-blink",
+      "capability": "region.blink",
+      "target": "profile-eye",
+      "trigger": {"event": "shot_end", "shot": "mur3"},
+      "parameters": {
+        "close_frames": 6,
+        "hold_frames": 2,
+        "open_frames": 10,
+        "intensity": 1.0,
+        "easing": "ease-in-out"
+      }
+    }
+  ]
+}
+```
+
+Le projet persiste la région, son masque, la provenance de l’analyse, l’action et son
+trigger. Le compositeur ne modifie que les pixels couverts par la région projetée. La
+stratégie de détection automatique est décrite dans `studio-semantic-regions.md`.
 
 ## Reconstruction et sauvegardes
 

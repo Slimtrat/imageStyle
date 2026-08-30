@@ -104,9 +104,59 @@ class SpatialRevealStrategy:
         return np.ascontiguousarray(np.rint(composed).clip(0, 255).astype(np.uint8))
 
 
+@dataclass(frozen=True, slots=True)
+class DiscoveryRevealStrategy:
+    def compose(
+        self,
+        transition: Transition,
+        outgoing: np.ndarray,
+        incoming: np.ndarray,
+        progress: float,
+    ) -> np.ndarray:
+        first, second = _frames(outgoing, incoming)
+        if progress <= 0.0:
+            return first.copy()
+        if progress >= 1.0:
+            return second.copy()
+        from .prologue import DiscoverySettings
+
+        settings = DiscoverySettings.from_transition(transition)
+        height, width = first.shape[:2]
+        y_axis, x_axis = np.mgrid[0:height, 0:width].astype(np.float32)
+        x_axis /= max(1.0, width - 1.0)
+        y_axis /= max(1.0, height - 1.0)
+        if settings.direction == "center-out":
+            field = np.sqrt(
+                ((x_axis - 0.5) / 0.78) ** 2
+                + ((y_axis - 0.5) / 1.05) ** 2
+            )
+            field += np.sin(x_axis * 19.0 + y_axis * 7.0) * 0.012
+            threshold = progress * 0.82
+        elif settings.direction == "bottom-up":
+            field = 1.0 - y_axis + np.sin(x_axis * 21.0) * 0.015
+            threshold = progress * 1.04
+        else:
+            field = y_axis + np.sin(x_axis * 21.0) * 0.015
+            threshold = progress * 1.04
+        incoming_alpha = np.asarray(
+            _smoothstep(
+                (threshold - field + settings.softness)
+                / (settings.softness * 2.0)
+            ),
+            dtype=np.float32,
+        )
+        composed = (
+            first.astype(np.float32) * (1.0 - incoming_alpha[..., None])
+            + second.astype(np.float32) * incoming_alpha[..., None]
+        )
+        return np.ascontiguousarray(np.rint(composed).clip(0, 255).astype(np.uint8))
+
+
 _CROSS_DISSOLVE = CrossDissolveStrategy()
 _SPATIAL_REVEAL = SpatialRevealStrategy()
+_DISCOVERY_REVEAL = DiscoveryRevealStrategy()
 _STRATEGIES: dict[TransitionKind, TransitionFrameStrategy] = {
+    TransitionKind.DISCOVER: _DISCOVERY_REVEAL,
     TransitionKind.DISSOLVE: _CROSS_DISSOLVE,
     TransitionKind.MATCH: _CROSS_DISSOLVE,
     TransitionKind.SPATIAL_MATCH: _SPATIAL_REVEAL,
