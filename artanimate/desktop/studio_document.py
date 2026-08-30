@@ -20,6 +20,12 @@ from ..studio.assets import (
     stored_asset_path,
 )
 from ..studio.model import AssetKind, MediaAsset, StudioProject
+from ..studio.explore import (
+    ExplorePlanRole,
+    explore_clip_role,
+    mark_explore_music_attached,
+    replace_explore_real_placeholder,
+)
 from ..studio.video import add_video_clip
 from ..studio.media import add_still_clip
 from ..studio.persistence import (
@@ -352,6 +358,18 @@ class StudioDocumentController(QObject):
                 return False
             source = Path(selected)
         try:
+            selected = set(self.panel.timeline.selected_clip_ids)
+            placeholder_id = next(
+                (
+                    clip.clip_id
+                    for track in self.session.project.tracks
+                    for clip in track.clips
+                    if clip.clip_id in selected
+                    and explore_clip_role(clip)
+                    == ExplorePlanRole.REAL_PLACEHOLDER
+                ),
+                None,
+            )
             updated, asset, created = register_media_asset(
                 self.session.project,
                 source,
@@ -361,23 +379,42 @@ class StudioDocumentController(QObject):
             still_clip = None
             video_clip = None
             if asset.kind == AssetKind.AUDIO:
+                if placeholder_id is not None:
+                    raise ValueError(
+                        "Le plan Réel Explore attend une photo ou une vidéo"
+                    )
                 updated, audio_clip = add_audio_clip(
                     updated,
                     asset.asset_id,
                     start_frame=self.panel.transport.current_frame,
                 )
+                updated = mark_explore_music_attached(updated)
             elif asset.kind == AssetKind.IMAGE:
-                updated, still_clip = add_still_clip(
-                    updated,
-                    asset.asset_id,
-                    start_frame=self.panel.transport.current_frame,
-                )
+                if placeholder_id is not None:
+                    updated, still_clip = replace_explore_real_placeholder(
+                        updated,
+                        placeholder_id,
+                        asset.asset_id,
+                    )
+                else:
+                    updated, still_clip = add_still_clip(
+                        updated,
+                        asset.asset_id,
+                        start_frame=self.panel.transport.current_frame,
+                    )
             elif asset.kind == AssetKind.VIDEO:
-                updated, video_clip = add_video_clip(
-                    updated,
-                    asset.asset_id,
-                    start_frame=self.panel.transport.current_frame,
-                )
+                if placeholder_id is not None:
+                    updated, video_clip = replace_explore_real_placeholder(
+                        updated,
+                        placeholder_id,
+                        asset.asset_id,
+                    )
+                else:
+                    updated, video_clip = add_video_clip(
+                        updated,
+                        asset.asset_id,
+                        start_frame=self.panel.transport.current_frame,
+                    )
             if created or audio_clip is not None or still_clip is not None or video_clip is not None:
                 label = (
                     f"Importer et placer l’audio {source.name}"

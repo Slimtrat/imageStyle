@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from ..studio.audio import AudioClipSettings, AudioMixSettings, audio_envelope_gain
 from ..studio.clock import StudioClock
+from ..studio.explore import ExplorePlanRole, explore_clip_label, explore_clip_role
 from ..studio.model import (
     Clip,
     ClipKind,
@@ -68,9 +69,10 @@ class TimelineTrackLayout:
 def semantic_clip_label(project: StudioProject, clip: Clip) -> str:
     """Expose event graph participation without turning the timeline into a graph editor."""
 
+    base_label = explore_clip_label(clip) or clip.clip_id
     invocation_id = clip.invocation_id
     if invocation_id is None:
-        return clip.clip_id
+        return base_label
     emits = any(
         item.source_invocation_id == invocation_id for item in project.triggers
     )
@@ -78,7 +80,8 @@ def semantic_clip_label(project: StudioProject, clip: Clip) -> str:
         item.action_invocation_id == invocation_id for item in project.triggers
     )
     badges = ("⚡" if emits else "") + ("↳" if follows else "")
-    return f"{badges} {clip.clip_id}" if badges else clip.clip_id
+    return f"{badges} {base_label}" if badges else base_label
+
 
 def _clip_lanes(clips: tuple[Clip, ...]) -> dict[str, int]:
     """Assign deterministic sub-lanes so overlaps never paint ambiguously."""
@@ -465,10 +468,22 @@ class StudioTimelineScene(QWidget):
         }
         for layout in self._clip_layouts:
             selected = layout.clip.clip_id in self._selected
-            painter.setPen(
-                QPen(QColor("#ffd166") if selected else QColor("#0c1017"), 2 if selected else 1)
+            placeholder = (
+                explore_clip_role(layout.clip)
+                == ExplorePlanRole.REAL_PLACEHOLDER
             )
-            painter.setBrush(colors[layout.clip.kind])
+            pen = QPen(
+                QColor("#ffd166")
+                if selected
+                else QColor("#d7dde8" if placeholder else "#0c1017"),
+                2 if selected else 1,
+            )
+            if placeholder:
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(
+                QColor("#566070") if placeholder else colors[layout.clip.kind]
+            )
             painter.drawRoundedRect(layout.rect, 4, 4)
             if layout.clip.kind == ClipKind.AUDIO and layout.clip.asset_id is not None:
                 envelope = self._waveforms.get(layout.clip.asset_id)

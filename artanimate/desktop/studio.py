@@ -66,6 +66,11 @@ from ..studio.manual_match import (
     ManualMatchTransform,
     MatchPoint,
 )
+from ..studio.explore import (
+    ExplorePlanRole,
+    create_explore_project,
+    explore_clip,
+)
 from ..studio.semantic_actions import (
     add_semantic_action_clip,
     is_semantic_action_capability,
@@ -93,6 +98,7 @@ from .studio_audio_inspector import AudioInspectorEdit, StudioAudioInspector
 from .studio_media_inspector import StillInspectorEdit, StudioMediaInspector
 from .studio_match_inspector import StudioMatchInspector
 from .studio_video_inspector import StudioVideoInspector, VideoInspectorEdit
+from .studio_explore import StudioExplorePanel
 from .studio_transition_inspector import StudioTransitionInspector
 from .studio_waveform import StudioWaveformController
 from ..studio.timeline import add_track, delete_clips, set_track_state
@@ -780,6 +786,10 @@ class StudioPanel(QWidget):
         header.addWidget(self.undo_button)
         header.addWidget(self.redo_button)
         self.import_button = QPushButton("Importer une œuvre…")
+        self.explore_button = QPushButton("Parcours Explore")
+        self.explore_button.setObjectName("studioExploreButton")
+        self.explore_button.clicked.connect(self._open_explore)
+        header.addWidget(self.explore_button)
         self.import_button.setObjectName("studioImportArtworkButton")
         self.import_button.clicked.connect(self.choose_artwork_requested)
         header.addWidget(self.import_button)
@@ -879,6 +889,7 @@ class StudioPanel(QWidget):
         self.match_inspector = StudioMatchInspector()
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
         self.inspector_tabs.addTab(self.analysis_panel, "Analyse locale")
+        self.explore_panel = StudioExplorePanel()
         self.inspector_tabs.addTab(self.trigger_panel, "Déclencheurs")
         self.inspector_tabs.addTab(camera_page, "Caméra")
         self.inspector_tabs.addTab(self.effect_inspector, "Réglages 2D")
@@ -887,6 +898,7 @@ class StudioPanel(QWidget):
         self.inspector_tabs.addTab(self.audio_inspector, "Audio")
         self.inspector_tabs.addTab(self.transition_inspector, "Transition")
         self.inspector_tabs.addTab(self.match_inspector, "Match réel")
+        self.inspector_tabs.addTab(self.explore_panel, "Explore")
         inspector_layout.addWidget(self.inspector_tabs, 1)
         body.addWidget(inspector)
         page.addLayout(body, 1)
@@ -931,6 +943,10 @@ class StudioPanel(QWidget):
         self.match_inspector.previewRequested.connect(
             self._match_preview_requested
         )
+
+        self.explore_panel.createRequested.connect(self._create_explore)
+        self.explore_panel.realMediaRequested.connect(self._choose_explore_real)
+        self.explore_panel.musicRequested.connect(self._choose_explore_music)
 
         self.track_summary = StudioTrackSummary()
         self.asset_panel = StudioAssetPanel()
@@ -987,6 +1003,7 @@ class StudioPanel(QWidget):
             self._project,
             self.asset_panel.project_path,
         )
+        self.explore_panel.set_project(self._project)
         self.timeline.set_project(self._project)
         valid_audio_assets = (
             {asset.asset_id for asset in self._project.assets if asset.kind == AssetKind.AUDIO}
@@ -1060,6 +1077,7 @@ class StudioPanel(QWidget):
             validated,
             self.asset_panel.project_path,
         )
+        self.explore_panel.set_project(validated)
         self.timeline.set_project(validated)
         valid_audio_assets = {
             asset.asset_id for asset in validated.assets
@@ -2049,6 +2067,61 @@ class StudioPanel(QWidget):
             self.inspector_tabs.setCurrentWidget(self.media_inspector)
         elif self.effect_inspector.selected_clip_id is not None:
             self.inspector_tabs.setCurrentWidget(self.effect_inspector)
+
+    def _open_explore(self) -> None:
+        self.inspector_tabs.setCurrentWidget(self.explore_panel)
+
+    def _create_explore(self, macro_zone_id: str, inspection_zone_id: str) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            result = create_explore_project(
+                project,
+                macro_zone_id=macro_zone_id,
+                inspection_zone_id=inspection_zone_id,
+            )
+            self.commit_project(
+                result.project,
+                "Construire le parcours Explore",
+            )
+            self.timeline.scene.set_selection((result.macro_clip_id,))
+            self.transport.seek(0, force_signal=True)
+            self.editor_tabs.setCurrentWidget(self.timeline)
+            self.inspector_tabs.setCurrentWidget(self.explore_panel)
+            self.project_status.setText(
+                "Explore créé · Macro, Inspection, Reveal et Réel · "
+                "tout reste éditable"
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Explore inchangé · {exc}")
+
+    def _choose_explore_real(self) -> None:
+        project = self._project
+        if project is None:
+            return
+        placeholder = explore_clip(project, ExplorePlanRole.REAL_PLACEHOLDER)
+        if placeholder is None:
+            self.project_status.setText("Explore possède déjà un média réel")
+            return
+        self.timeline.scene.set_selection((placeholder.clip_id,))
+        self.transport.seek(placeholder.start_frame, force_signal=True)
+        self.editor_tabs.setCurrentWidget(self.asset_panel)
+        self.project_status.setText(
+            "Plan Réel sélectionné · choisissez une photo ou vidéo locale"
+        )
+        self.asset_panel.importRequested.emit()
+
+    def _choose_explore_music(self) -> None:
+        if self._project is None:
+            return
+        self.timeline.scene.set_selection(())
+        self.transport.seek(0, force_signal=True)
+        self.editor_tabs.setCurrentWidget(self.asset_panel)
+        self.project_status.setText(
+            "Musique Explore · choisissez un fichier audio local"
+        )
+        self.asset_panel.importRequested.emit()
 
     def _timeline_transition_changed(self, value: object) -> None:
         transition_id = str(value) if isinstance(value, str) and value else None
