@@ -2,6 +2,12 @@
   "schema_version": 1,
   "name": "Œuvre 3D vers mur réel",
   "artwork": "./artwork.jpg",
+  "artwork_preparation": {
+    "mode": "auto_rectify",
+    "minimum_confidence": 0.75,
+    "inset_ratio": 0.003,
+    "max_output_edge": 2048
+  },
   "project": {
     "width": 1080,
     "height": 1920,

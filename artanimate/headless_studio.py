@@ -308,6 +308,7 @@ def run_headless_studio(
             "changed": result.changed,
             "snapshot": str(result.snapshot_path) if result.snapshot_path is not None else None,
             "assets": assets,
+            "artwork_preparation": result.artwork_preparation,
             "duration_frames": result.project.settings.duration_frames,
             "fps": result.project.settings.fps,
             "resolution": [result.project.settings.width, result.project.settings.height],

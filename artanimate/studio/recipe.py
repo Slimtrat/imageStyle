@@ -19,6 +19,7 @@ from .assets import (
     import_artwork_asset,
     import_media_asset,
 )
+from .artwork_rectification import rectify_artwork
 from .audio import AudioClipSettings
 from .manual_match import ManualMatchTransform, add_manual_match, update_manual_match
 from .media import StillClipSettings
@@ -492,6 +493,54 @@ class RecipeOutputs:
 
 
 @dataclass(frozen=True, slots=True)
+class RecipeArtworkPreparation:
+    mode: str = "none"
+    minimum_confidence: float = 0.62
+    inset_ratio: float = 0.003
+    max_output_edge: int = 2048
+
+    @classmethod
+    def from_dict(cls, payload: Any) -> RecipeArtworkPreparation:
+        values = _object(payload, "recipe.artwork_preparation")
+        _known(
+            values,
+            {"mode", "minimum_confidence", "inset_ratio", "max_output_edge"},
+            "recipe.artwork_preparation",
+        )
+        result = cls(
+            mode=_text(values.get("mode", "none"), "recipe.artwork_preparation.mode"),
+            minimum_confidence=_number(
+                values.get("minimum_confidence", 0.62),
+                "recipe.artwork_preparation.minimum_confidence",
+            ),
+            inset_ratio=_number(
+                values.get("inset_ratio", 0.003),
+                "recipe.artwork_preparation.inset_ratio",
+            ),
+            max_output_edge=_integer(
+                values.get("max_output_edge", 2048),
+                "recipe.artwork_preparation.max_output_edge",
+                minimum=256,
+            ),
+        )
+        if result.mode not in {"none", "auto_rectify"}:
+            raise ValueError("recipe.artwork_preparation.mode doit être none ou auto_rectify")
+        if not 0.5 <= result.minimum_confidence <= 1.0:
+            raise ValueError("minimum_confidence doit être compris entre 0,5 et 1")
+        if not 0.0 <= result.inset_ratio <= 0.05:
+            raise ValueError("inset_ratio doit être compris entre 0 et 0,05")
+        return result
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "minimum_confidence": self.minimum_confidence,
+            "inset_ratio": self.inset_ratio,
+            "max_output_edge": self.max_output_edge,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class StudioRecipe:
     name: str
     artwork: str
@@ -501,6 +550,7 @@ class StudioRecipe:
     transitions: tuple[RecipeTransition, ...] = ()
     audio: tuple[RecipeAudio, ...] = ()
     outputs: RecipeOutputs = RecipeOutputs()
+    artwork_preparation: RecipeArtworkPreparation = RecipeArtworkPreparation()
     schema_version: int = RECIPE_SCHEMA_VERSION
 
     @classmethod
@@ -515,6 +565,7 @@ class StudioRecipe:
                 "project",
                 "media",
                 "shots",
+                "artwork_preparation",
                 "transitions",
                 "audio",
                 "outputs",
@@ -549,6 +600,7 @@ class StudioRecipe:
             ),
             tuple(RecipeAudio.from_dict(item, index) for index, item in enumerate(raw_audio)),
             RecipeOutputs.from_dict(values.get("outputs", {})),
+            RecipeArtworkPreparation.from_dict(values.get("artwork_preparation", {})),
             version,
         )
         result.validate()
@@ -617,6 +669,7 @@ class StudioRecipe:
             "project": self.project.to_dict(),
             "media": {item.media_id: item.to_dict() for item in self.media},
             "shots": [item.to_dict() for item in self.shots],
+            "artwork_preparation": self.artwork_preparation.to_dict(),
             "transitions": [item.to_dict() for item in self.transitions],
             "audio": [item.to_dict() for item in self.audio],
             "outputs": self.outputs.to_dict(),
@@ -631,6 +684,7 @@ class RecipeBuildResult:
     assets_directory: Path
     changed: bool
     snapshot_path: Path | None = None
+    artwork_preparation: dict[str, Any] | None = None
 
 
 def _resolved_media_path(stored: str, base: Path) -> Path:
@@ -675,18 +729,57 @@ def _portable_recipe(
     recipe: StudioRecipe,
     source_base: Path,
     candidate: Path,
-) -> tuple[StudioRecipe, dict[str, Path]]:
+) -> tuple[StudioRecipe, dict[str, Path], Path, dict[str, Any] | None]:
     assets = candidate / ASSETS_DIRECTORY
     artwork_source = _resolved_media_path(recipe.artwork, source_base)
     if asset_kind_for_path(artwork_source) != AssetKind.IMAGE:
         raise ValueError("L’œuvre centrale de la recette doit être une image")
-    artwork_relative = Path(ASSETS_DIRECTORY) / "artwork" / _safe_filename(
-        artwork_source, "artwork"
-    )
-    artwork_destination = candidate / artwork_relative
-    artwork_destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(artwork_source, artwork_destination)
-    copied: dict[str, Path] = {"artwork": artwork_destination}
+    preparation_record: dict[str, Any] | None = None
+    if recipe.artwork_preparation.mode == "auto_rectify":
+        source_relative = Path(ASSETS_DIRECTORY) / "source" / _safe_filename(
+            artwork_source, "artwork-source"
+        )
+        source_destination = candidate / source_relative
+        source_destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(artwork_source, source_destination)
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", artwork_source.stem).strip("-.")
+        artwork_relative = Path(ASSETS_DIRECTORY) / "artwork" / f"artwork-{stem}-rectified.png"
+        manifest_relative = artwork_relative.with_suffix(".rectification.json")
+        preview_relative = artwork_relative.with_name(f"{artwork_relative.stem}-detection.png")
+        artwork_destination = candidate / artwork_relative
+        record = rectify_artwork(
+            source_destination,
+            artwork_destination,
+            manifest_path=candidate / manifest_relative,
+            preview_path=candidate / preview_relative,
+            minimum_confidence=recipe.artwork_preparation.minimum_confidence,
+            inset_ratio=recipe.artwork_preparation.inset_ratio,
+            max_output_edge=recipe.artwork_preparation.max_output_edge,
+        )
+        copied: dict[str, Path] = {
+            "artwork-source": source_destination,
+            "artwork": artwork_destination,
+            "artwork-manifest": candidate / manifest_relative,
+            "artwork-preview": candidate / preview_relative,
+        }
+        portable_artwork = source_relative
+        preparation_record = {
+            "mode": "auto_rectify",
+            "source_path": source_relative.as_posix(),
+            "artwork_path": artwork_relative.as_posix(),
+            "manifest_path": manifest_relative.as_posix(),
+            "preview_path": preview_relative.as_posix(),
+            **record.to_dict(),
+        }
+    else:
+        artwork_relative = Path(ASSETS_DIRECTORY) / "artwork" / _safe_filename(
+            artwork_source, "artwork"
+        )
+        artwork_destination = candidate / artwork_relative
+        artwork_destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(artwork_source, artwork_destination)
+        copied = {"artwork": artwork_destination}
+        portable_artwork = artwork_relative
     portable_media: list[RecipeMedia] = []
     for media in recipe.media:
         source = _resolved_media_path(media.path, source_base)
@@ -705,12 +798,12 @@ def _portable_recipe(
         portable_media.append(replace(media, path=relative.as_posix()))
     portable = replace(
         recipe,
-        artwork=artwork_relative.as_posix(),
+        artwork=portable_artwork.as_posix(),
         media=tuple(portable_media),
     )
     portable.validate()
     assets.mkdir(parents=True, exist_ok=True)
-    return portable, copied
+    return portable, copied, artwork_destination, preparation_record
 
 
 def _build_identity(recipe: StudioRecipe, copied: Mapping[str, Path]) -> str:
@@ -773,10 +866,15 @@ def compile_studio_recipe(
     project_path: str | Path,
     *,
     build_identity: str,
+    artwork_path_override: str | Path | None = None,
 ) -> StudioProject:
     recipe.validate()
     path = Path(project_path)
-    artwork_path = _resolved_media_path(recipe.artwork, path.parent)
+    artwork_path = (
+        Path(artwork_path_override).resolve(strict=True)
+        if artwork_path_override is not None
+        else _resolved_media_path(recipe.artwork, path.parent)
+    )
     artwork = import_artwork_asset(artwork_path, path)
     media_assets = tuple(
         import_media_asset(
@@ -1074,13 +1172,14 @@ def build_portable_project(
         temporary = Path(temporary_value)
         candidate = temporary / "candidate"
         candidate.mkdir()
-        portable, copied = _portable_recipe(recipe, source.parent, candidate)
+        portable, copied, prepared_artwork, preparation_record = _portable_recipe(recipe, source.parent, candidate)
         identity = _build_identity(portable, copied)
         project_path = candidate / PROJECT_FILENAME
         project = compile_studio_recipe(
             portable,
             project_path,
             build_identity=identity,
+            artwork_path_override=prepared_artwork,
         )
         _atomic_text(candidate / RECIPE_FILENAME, _json_text(portable.to_dict()))
         save_project(project, project_path)
@@ -1102,6 +1201,7 @@ def build_portable_project(
                     output / RECIPE_FILENAME,
                     output / ASSETS_DIRECTORY,
                     changed=False,
+                    artwork_preparation=preparation_record,
                 )
 
         prepared = temporary / "prepared"
@@ -1133,6 +1233,7 @@ def build_portable_project(
         final_project_path,
         output / RECIPE_FILENAME,
         output / ASSETS_DIRECTORY,
+        artwork_preparation=preparation_record,
         changed=True,
         snapshot_path=(output / snapshot_relative if snapshot_relative is not None else None),
     )

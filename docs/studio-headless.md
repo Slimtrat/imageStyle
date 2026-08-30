@@ -23,7 +23,9 @@ mon-projet/
   project.artanimate       projet éditable et réouvrable dans le Studio
   recipe.json              recette canonique, avec chemins portables
   assets/
-    artwork/               copie locale de l’œuvre
+    source/                photo source intacte si une préparation est demandée
+    artwork/               œuvre prête pour les plans 2D/3D
+      *.rectification.json contour, confiance et résolution du redressement
     media/                 copies locales des photos, vidéos et sons
   snapshots/               versions précédentes, créées seulement si le projet change
   headless-report.json     rapport structuré de la commande CLI
@@ -39,6 +41,12 @@ absolus présents dans la recette source ne sont jamais conservés dans le proje
   "schema_version": 1,
   "name": "Œuvre vers réel",
   "artwork": "./artwork.jpg",
+  "artwork_preparation": {
+    "mode": "auto_rectify",
+    "minimum_confidence": 0.75,
+    "inset_ratio": 0.003,
+    "max_output_edge": 2048
+  },
   "project": {
     "width": 1080,
     "height": 1920,
@@ -112,6 +120,17 @@ absolus présents dans la recette source ne sont jamais conservés dans le proje
 
 Les médias sont résolus relativement au fichier de recette. Les identifiants acceptent
 les lettres ASCII, chiffres, points, tirets et underscores.
+
+## Préparation non destructive de l’œuvre
+
+`artwork_preparation.mode: "auto_rectify"` détecte les quatre arêtes franches de la
+toile, calcule une homographie et utilise l’image redressée dans tous les plans
+`artwork_2d` et `artwork_3d`. La photo originale est conservée dans `assets/source`.
+Le dossier `assets/artwork` contient l’image dérivée, un manifeste JSON avec les
+quatre coins, la confiance et la résolution, ainsi qu’un aperçu de détection.
+
+La compilation s’arrête sans remplacer le projet courant si la confiance est sous
+`minimum_confidence`. Le mode par défaut `none` conserve le comportement historique.
 
 ## Plans et transitions
 
