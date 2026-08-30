@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from threading import Event, Lock
 
@@ -28,13 +29,22 @@ class Studio3DCaptureBridge(QObject):
 
     captureRequested = Signal(object)
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None, *, max_surfaces: int = 3) -> None:
         super().__init__(parent)
+        if max_surfaces < 1:
+            raise ValueError("Le cache GPU doit conserver au moins une surface")
         self.captureRequested.connect(self._capture_on_ui_thread)
-        self._surfaces: dict[tuple[int, int], StandaloneStudio3DCapture] = {}
+        self.max_surfaces = int(max_surfaces)
+        self._surfaces: OrderedDict[
+            tuple[int, int], StandaloneStudio3DCapture
+        ] = OrderedDict()
         self._pending: dict[int, _CaptureRequest] = {}
         self._lock = Lock()
         self._closed = False
+
+    @property
+    def surface_count(self) -> int:
+        return len(self._surfaces)
 
     def _assert_open(self) -> None:
         if self._closed:
@@ -83,6 +93,11 @@ class Studio3DCaptureBridge(QObject):
             if surface is None:
                 surface = StandaloneStudio3DCapture(*key)
                 self._surfaces[key] = surface
+                while len(self._surfaces) > self.max_surfaces:
+                    _old_key, removed = self._surfaces.popitem(last=False)
+                    removed.close()
+            else:
+                self._surfaces.move_to_end(key)
             image = surface.capture_at(
                 request.prepared,
                 request.frame_index,

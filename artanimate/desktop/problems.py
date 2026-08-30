@@ -12,6 +12,7 @@ from PIL import Image, UnidentifiedImageError
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
+STUDIO_BOUNDARIES = {"preview", "analysis", "waveform", "export", "media"}
 MINIMUM_FREE_BYTES = 128 * 1024 * 1024
 WINDOWS_RESERVED_NAMES = {
     "CON",
@@ -316,10 +317,14 @@ def translate_exception(
         return exc.problem
     details = f"{type(exc).__name__}: {exc}"
     if isinstance(exc, (FileNotFoundError, NotADirectoryError)):
-        destination_problem = destination_reference_problem(destination)
+        destination_problem = (
+            destination_reference_problem(destination)
+            if destination is not None
+            else None
+        )
         if destination_problem is not None:
             return destination_problem
-        source_problem = source_reference_problem(source)
+        source_problem = source_reference_problem(source) if source is not None else None
         if source_problem is not None:
             return source_problem
         target = Path(exc.filename) if exc.filename else None
@@ -404,3 +409,108 @@ def translate_exception(
         "Vérifiez l’image et le dossier de destination, puis consultez les détails dans les Logs.",
         details,
     )
+
+
+def translate_studio_exception(
+    exc: BaseException,
+    boundary: Literal["preview", "analysis", "waveform", "export", "media"],
+    *,
+    source: Path | None = None,
+    destination: Path | None = None,
+) -> UserProblem:
+    """Translate every asynchronous Studio boundary into an actionable problem."""
+
+    if boundary not in STUDIO_BOUNDARIES:
+        raise ValueError(f"Frontière Studio inconnue : {boundary}")
+    if isinstance(exc, UserInputError):
+        return exc.problem
+    details = f"{type(exc).__name__}: {exc}"
+    message = str(exc).lower()
+    translated = translate_exception(
+        exc,
+        "preview" if boundary == "preview" else "render",
+        source=source,
+        destination=destination,
+    )
+    if translated.code in {
+        "source_missing",
+        "source_not_found",
+        "source_not_file",
+        "destination_missing",
+        "destination_not_found",
+        "destination_not_directory",
+        "file_not_found",
+        "permission_denied",
+        "disk_full",
+        "destination_unavailable",
+    }:
+        return translated
+    if any(token in message for token in ("ffmpeg", "codec", "encodeur", "mux")):
+        return UserProblem(
+            "studio_codec_unavailable",
+            "Codec local indisponible",
+            "Le moteur vidéo ou audio embarqué n’a pas pu traiter ce média.",
+            "Réessayez avec MP4/H.264 ou WAV. Si le problème persiste, ouvrez les Logs et réinstallez ArtAnimate.",
+            details,
+        )
+    if boundary in {"media", "waveform"} or any(
+        token in message
+        for token in (
+            "vidéo locale illisible",
+            "métadonnées vidéo",
+            "comptage des frames",
+            "audio local",
+            "waveform",
+        )
+    ):
+        return UserProblem(
+            "studio_media_unreadable",
+            "Média local illisible",
+            "Un média du projet existe, mais son contenu ne peut pas être décodé.",
+            "Reliez une nouvelle copie MP4, MOV, WebM, WAV ou MP3 depuis la banque de médias, puis relancez l’opération.",
+            details,
+        )
+    if "surface studio 3d" in message or "captures vides" in message:
+        return UserProblem(
+            "studio_3d_unavailable",
+            "Rendu 3D indisponible",
+            "La surface 3D locale n’a pas produit d’image exploitable.",
+            "Fermez les applications utilisant fortement le GPU, puis relancez l’aperçu ou l’export.",
+            details,
+        )
+    if translated.code not in {"preview_failed", "render_failed", "invalid_settings"}:
+        return translated
+    labels = {
+        "preview": (
+            "studio_preview_failed",
+            "Aperçu Studio impossible",
+            "Le Studio n’a pas pu calculer cette image de la timeline.",
+            "Vérifiez les médias signalés dans la banque, puis déplacez légèrement la tête de lecture pour réessayer.",
+        ),
+        "analysis": (
+            "studio_analysis_failed",
+            "Analyse locale impossible",
+            "L’œuvre n’a pas pu être analysée sur cette machine.",
+            "Vérifiez que l’œuvre est toujours lisible, puis relancez l’analyse. Le projet reste utilisable sans elle.",
+        ),
+        "waveform": (
+            "studio_waveform_failed",
+            "Waveform indisponible",
+            "La forme d’onde d’une piste audio n’a pas pu être calculée.",
+            "Reliez ou convertissez le fichier audio. Le montage reste utilisable sans waveform.",
+        ),
+        "export": (
+            "studio_export_failed",
+            "Export Studio impossible",
+            "Le Reel n’a pas pu être finalisé ; le fichier existant est resté intact.",
+            "Vérifiez les médias et l’espace du dossier de destination, puis relancez l’export.",
+        ),
+        "media": (
+            "studio_media_failed",
+            "Média local indisponible",
+            "Le média sélectionné n’a pas pu être ouvert.",
+            "Choisissez une nouvelle copie locale depuis la banque de médias.",
+        ),
+    }
+    code, title, user_message, action = labels[boundary]
+    return UserProblem(code, title, user_message, action, details)

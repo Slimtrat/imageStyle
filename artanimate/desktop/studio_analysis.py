@@ -28,13 +28,10 @@ from ..studio.analysis import (
 )
 from ..studio.model import StudioProject
 from ..studio.semantic import Bounds
+from .problems import translate_studio_exception
 
 
 logger = logging.getLogger(__name__)
-_ANALYSIS_EXECUTOR = ThreadPoolExecutor(
-    max_workers=1,
-    thread_name_prefix="ArtAnimateSceneAnalysis",
-)
 
 
 class StudioAnalysisWorker(QObject):
@@ -77,7 +74,7 @@ class StudioAnalysisWorker(QObject):
 class StudioAnalysisController(QObject):
     analysisReady = Signal(object)
     runningChanged = Signal(bool)
-    failed = Signal(str)
+    failed = Signal(object)
     cancelled = Signal()
 
     def __init__(
@@ -93,6 +90,11 @@ class StudioAnalysisController(QObject):
         self._revision = 0
         self._jobs: dict[int, tuple[Future[None], StudioAnalysisWorker]] = {}
         self._shutting_down = False
+        self.worker_thread_prefix = f"ArtAnimateSceneAnalysis-{id(self):x}"
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix=self.worker_thread_prefix,
+        )
 
     @property
     def active_job_count(self) -> int:
@@ -131,7 +133,7 @@ class StudioAnalysisController(QObject):
             gate.wait()
             worker.run()
 
-        future = _ANALYSIS_EXECUTOR.submit(run_after_registration)
+        future = self._executor.submit(run_after_registration)
         self._jobs[revision] = (future, worker)
         gate.set()
         self.runningChanged.emit(True)
@@ -145,7 +147,11 @@ class StudioAnalysisController(QObject):
     @Slot(int, object)
     def _failed(self, revision: int, exc: Exception) -> None:
         if not self._shutting_down and revision == self._revision:
-            self.failed.emit(str(exc))
+            job = self._jobs.get(revision)
+            source = job[1].request.artwork_path if job is not None else None
+            self.failed.emit(
+                translate_studio_exception(exc, "analysis", source=source)
+            )
 
     @Slot(int)
     def _cancelled(self, revision: int) -> None:
@@ -163,9 +169,10 @@ class StudioAnalysisController(QObject):
         if not jobs:
             return
         self._revision += 1
-        for future, worker in jobs:
+        for revision, (future, worker) in tuple(self._jobs.items()):
             worker.cancel()
-            future.cancel()
+            if future.cancel():
+                self._jobs.pop(revision, None)
         self.runningChanged.emit(False)
         if notify:
             self.cancelled.emit()
@@ -186,6 +193,7 @@ class StudioAnalysisController(QObject):
                 pass
             except Exception:
                 logger.exception("Arrêt du worker d’analyse locale en erreur")
+        self._executor.shutdown(wait=True, cancel_futures=True)
         self._jobs.clear()
         self.runningChanged.emit(False)
 

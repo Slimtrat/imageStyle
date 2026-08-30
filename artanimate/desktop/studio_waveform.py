@@ -12,13 +12,10 @@ from PySide6.QtCore import QObject, Qt, Signal, Slot
 from ..studio.assets import AssetAvailability, check_media_asset
 from ..studio.model import AssetKind, ClipKind, StudioProject
 from ..studio.waveform import WaveformCache, WaveformCancelled, WaveformEnvelope
+from .problems import translate_studio_exception
 
 
 logger = logging.getLogger(__name__)
-_WAVEFORM_EXECUTOR = ThreadPoolExecutor(
-    max_workers=1,
-    thread_name_prefix="ArtAnimateWaveform",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +74,7 @@ class StudioWaveformWorker(QObject):
 class StudioWaveformController(QObject):
     waveformsReady = Signal(object)
     runningChanged = Signal(bool)
-    failed = Signal(str)
+    failed = Signal(object)
     cancelled = Signal()
 
     def __init__(
@@ -92,6 +89,11 @@ class StudioWaveformController(QObject):
         self._revision = 0
         self._jobs: dict[int, tuple[Future[None], StudioWaveformWorker]] = {}
         self._shutting_down = False
+        self.worker_thread_prefix = f"ArtAnimateWaveform-{id(self):x}"
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix=self.worker_thread_prefix,
+        )
 
     @property
     def active_job_count(self) -> int:
@@ -139,7 +141,7 @@ class StudioWaveformController(QObject):
             gate.wait()
             worker.run()
 
-        future = _WAVEFORM_EXECUTOR.submit(run_after_registration)
+        future = self._executor.submit(run_after_registration)
         self._jobs[revision] = (future, worker)
         gate.set()
         self.runningChanged.emit(True)
@@ -153,7 +155,11 @@ class StudioWaveformController(QObject):
     @Slot(int, object)
     def _failed(self, revision: int, exc: Exception) -> None:
         if not self._shutting_down and revision == self._revision:
-            self.failed.emit(str(exc))
+            job = self._jobs.get(revision)
+            source = job[1].requests[0].path if job and job[1].requests else None
+            self.failed.emit(
+                translate_studio_exception(exc, "waveform", source=source)
+            )
 
     @Slot(int)
     def _cancelled(self, revision: int) -> None:
@@ -171,9 +177,10 @@ class StudioWaveformController(QObject):
         if not jobs:
             return
         self._revision += 1
-        for future, worker in jobs:
+        for revision, (future, worker) in tuple(self._jobs.items()):
             worker.cancel()
-            future.cancel()
+            if future.cancel():
+                self._jobs.pop(revision, None)
         self.runningChanged.emit(False)
         if notify:
             self.cancelled.emit()
@@ -194,5 +201,6 @@ class StudioWaveformController(QObject):
                 pass
             except Exception:
                 logger.exception("Arrêt du worker waveform en erreur")
+        self._executor.shutdown(wait=True, cancel_futures=True)
         self._jobs.clear()
         self.runningChanged.emit(False)

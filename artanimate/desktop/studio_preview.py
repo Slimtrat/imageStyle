@@ -18,15 +18,12 @@ from ..studio.preview import (
     StudioProxyCache,
     render_studio_preview_frame,
 )
+from .problems import translate_studio_exception
 from .studio3d_bridge import Studio3DCaptureBridge
 from .studio3d_renderer import ClassicStudio3DRenderer
 
 
 logger = logging.getLogger(__name__)
-_PREVIEW_EXECUTOR = ThreadPoolExecutor(
-    max_workers=2,
-    thread_name_prefix="ArtAnimateProxy",
-)
 
 
 def preview_qimage(frame: np.ndarray) -> QImage:
@@ -110,7 +107,7 @@ class StudioPreviewWorker(QObject):
 class StudioPreviewController(QObject):
     frameReady = Signal(int, object, bool)
     renderingChanged = Signal(bool)
-    failed = Signal(str)
+    failed = Signal(object)
 
     def __init__(
         self,
@@ -126,6 +123,11 @@ class StudioPreviewController(QObject):
         self.three_d_capture = Studio3DCaptureBridge(self)
         self._jobs: dict[int, tuple[Future[None], StudioPreviewWorker]] = {}
         self._shutting_down = False
+        self.worker_thread_prefix = f"ArtAnimateProxy-{id(self):x}"
+        self._executor = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix=self.worker_thread_prefix,
+        )
 
     @property
     def active_job_count(self) -> int:
@@ -149,9 +151,10 @@ class StudioPreviewController(QObject):
             return self._revision
         self._revision += 1
         revision = self._revision
-        for future, worker in tuple(self._jobs.values()):
+        for old_revision, (future, worker) in tuple(self._jobs.items()):
             worker.cancel()
-            future.cancel()
+            if future.cancel():
+                self._jobs.pop(old_revision, None)
         self.three_d_capture.cancel_pending()
         worker = StudioPreviewWorker(
             revision,
@@ -182,7 +185,7 @@ class StudioPreviewController(QObject):
             gate.wait()
             worker.run()
 
-        future = _PREVIEW_EXECUTOR.submit(run_after_registration)
+        future = self._executor.submit(run_after_registration)
         self._jobs[revision] = (future, worker)
         gate.set()
         self.renderingChanged.emit(True)
@@ -202,7 +205,13 @@ class StudioPreviewController(QObject):
     @Slot(int, object)
     def _failed(self, revision: int, exc: Exception) -> None:
         if not self._shutting_down and revision == self._revision:
-            self.failed.emit(str(exc))
+            job = self._jobs.get(revision)
+            source = job[1].artwork_path if job is not None else None
+            self.failed.emit(
+                translate_studio_exception(
+                    exc, "preview", source=source
+                )
+            )
 
     @Slot(int)
     def _job_finished(self, revision: int) -> None:
@@ -212,9 +221,10 @@ class StudioPreviewController(QObject):
 
     def cancel_pending(self) -> None:
         self._revision += 1
-        for future, worker in tuple(self._jobs.values()):
+        for revision, (future, worker) in tuple(self._jobs.items()):
             worker.cancel()
-            future.cancel()
+            if future.cancel():
+                self._jobs.pop(revision, None)
         self.three_d_capture.cancel_pending()
         self.renderingChanged.emit(False)
 
@@ -236,6 +246,7 @@ class StudioPreviewController(QObject):
                 pass
             except Exception:
                 logger.exception("Arrêt du worker proxy Studio en erreur")
+        self._executor.shutdown(wait=True, cancel_futures=True)
         self._jobs.clear()
         self.cache.clear()
         self.sources.clear()

@@ -108,17 +108,23 @@ def _cache_key(fingerprint: str) -> str:
 
 def _atomic_png(image: Image.Image, destination: Path) -> None:
     temporary = destination.with_name(destination.stem + ".tmp.png")
-    image.save(temporary, format="PNG", optimize=True)
-    os.replace(temporary, destination)
+    try:
+        image.save(temporary, format="PNG", optimize=True)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _atomic_json(payload: Mapping[str, object], destination: Path) -> None:
     temporary = destination.with_name(destination.name + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
-        encoding="utf-8",
-    )
-    os.replace(temporary, destination)
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _derived_asset(

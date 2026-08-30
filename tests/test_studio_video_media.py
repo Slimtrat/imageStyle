@@ -123,6 +123,33 @@ def test_video_source_is_frame_exact_seekable_cached_and_closable(tmp_path: Path
     assert moved.is_file()
 
 
+def test_repeated_random_seeks_stay_inside_byte_and_frame_budgets(
+    tmp_path: Path,
+) -> None:
+    project, _artwork, video, asset, _clip, _frames = make_video_project(tmp_path)
+    source = VideoFrameSource(
+        asset,
+        video,
+        project.settings.fps,
+        VideoClipSettings(),
+        max_cache_bytes=2 * 48 * 64 * 3,
+        max_cache_frames=2,
+    )
+    try:
+        sequence = tuple(
+            (index * 7) % source.frame_count
+            for index in range(300)
+        )
+        for frame in sequence:
+            decoded = source.frame_at(frame)
+            assert decoded.shape == (48, 64, 3)
+            assert source.cache_frame_count <= 2
+            assert source.cache_bytes <= source.max_cache_bytes
+    finally:
+        source.close()
+    assert source.cache_bytes == 0
+
+
 def test_video_source_long_seek_stays_on_requested_native_frame(tmp_path: Path) -> None:
     video = tmp_path / "long.mp4"
     native_frames = encode_test_video(video, fps=24, frame_count=120)

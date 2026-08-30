@@ -112,8 +112,8 @@ actions synchronisées, reproduites à l'identique en preview et à l'export.
 - [x] **REAL-04** Construire le parcours éditable Explore.
 - [x] **EXP-01** Exporter 1080×1920 à 30/60 FPS par le RenderPlan commun.
 - [x] **EXP-02** Intégrer historique, annulation, reprise d'erreur et nettoyage atomique.
-- [ ] **EXP-03** Borner caches CPU/GPU et fermer tous les workers.
-- [ ] **PKG-01** Embarquer les dépendances locales dans le gros EXE Windows accepté.
+- [x] **EXP-03** Borner caches CPU/GPU et fermer tous les workers.
+- [x] **PKG-01** Embarquer les dépendances locales dans le gros EXE Windows accepté.
 - [ ] **PKG-02** Valider un Reel complet dans l'EXE packagé.
 
 Critère de fin P7 : œuvre → mise en scène sémantique + 2D + 3D → transition réelle

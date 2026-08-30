@@ -102,6 +102,7 @@ from .studio_video_inspector import StudioVideoInspector, VideoInspectorEdit
 from .studio_explore import StudioExplorePanel
 from .studio_transition_inspector import StudioTransitionInspector
 from .studio_waveform import StudioWaveformController
+from .problems import UserProblem, translate_studio_exception
 from ..studio.timeline import add_track, delete_clips, set_track_state
 from ..studio.transitions import (
     transition_by_id,
@@ -1268,8 +1269,14 @@ class StudioPanel(QWidget):
         if running:
             self.asset_panel.set_feedback("Calcul local de la waveform…")
 
-    def _waveform_failed(self, message: str) -> None:
-        self.asset_panel.set_feedback(f"Waveform indisponible · {message}")
+    @staticmethod
+    def _problem_text(problem: UserProblem | str) -> str:
+        if isinstance(problem, UserProblem):
+            return f"{problem.title} · {problem.display_text}"
+        return str(problem)
+
+    def _waveform_failed(self, problem: UserProblem | str) -> None:
+        self.asset_panel.set_feedback(self._problem_text(problem))
 
     def _audio_monitor_failed(self, message: str) -> None:
         self.asset_panel.set_feedback(message)
@@ -1321,8 +1328,8 @@ class StudioPanel(QWidget):
         except (OSError, TypeError, ValueError) as exc:
             self.analysis_panel.set_feedback(f"Analyse non appliquée · {exc}")
 
-    def _analysis_failed(self, message: str) -> None:
-        self.analysis_panel.set_feedback(f"Analyse locale impossible · {message}")
+    def _analysis_failed(self, problem: UserProblem | str) -> None:
+        self.analysis_panel.set_feedback(self._problem_text(problem))
 
     def _analysis_cancelled(self) -> None:
         self.analysis_panel.set_feedback(
@@ -1466,9 +1473,9 @@ class StudioPanel(QWidget):
         elif self.canvas.preview_pending:
             self.canvas.set_preview_pending(False)
 
-    def _preview_failed(self, message: str) -> None:
+    def _preview_failed(self, problem: UserProblem | str) -> None:
         self.canvas.set_preview_pending(False)
-        self.preview_status.setText(f"Proxy indisponible · {message}")
+        self.preview_status.setText(self._problem_text(problem))
 
     def _proxy_resolution_changed(self, index: int) -> None:
         width = int(self.proxy_resolution.itemData(index))
@@ -2180,7 +2187,16 @@ class StudioPanel(QWidget):
                 ),
             )
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            self.export_panel.show_error(str(exc))
+            self.export_panel.show_error(
+                self._problem_text(
+                    translate_studio_exception(
+                        exc,
+                        "export",
+                        source=artwork_path,
+                        destination=output.parent,
+                    )
+                )
+            )
             return False
         return True
 
@@ -2199,8 +2215,8 @@ class StudioPanel(QWidget):
         self.project_status.setText(f"Reel exporté · {result.path.name}")
         self.export_succeeded.emit(result)
 
-    def _export_failed(self, message: str) -> None:
-        self.export_panel.show_error(message)
+    def _export_failed(self, problem: UserProblem | str) -> None:
+        self.export_panel.show_error(self._problem_text(problem))
 
     def _export_cancelled(self) -> None:
         self.export_panel.show_cancelled()

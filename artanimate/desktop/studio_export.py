@@ -23,12 +23,12 @@ from PySide6.QtWidgets import (
 from ..core.video import RenderCancelled
 from ..studio.export import StudioExportResult, export_studio_project
 from ..studio.model import AudioExportMode, ExportSettings, StudioProject
+from .problems import translate_studio_exception
 from .studio3d_bridge import Studio3DCaptureBridge
 from .studio3d_renderer import ClassicStudio3DRenderer
 
 
 logger = logging.getLogger(__name__)
-_EXPORT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="studio-export")
 
 
 class StudioExportWorker(QObject):
@@ -95,7 +95,7 @@ class StudioExportController(QObject):
     phaseChanged = Signal(str)
     runningChanged = Signal(bool)
     succeeded = Signal(object)
-    failed = Signal(str)
+    failed = Signal(object)
     cancelled = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -104,6 +104,11 @@ class StudioExportController(QObject):
         self._job_id = 0
         self._job: tuple[Future[None], StudioExportWorker] | None = None
         self._shutting_down = False
+        self.worker_thread_prefix = f"ArtAnimateExport-{id(self):x}"
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix=self.worker_thread_prefix,
+        )
 
     @property
     def running(self) -> bool:
@@ -142,7 +147,7 @@ class StudioExportController(QObject):
             gate.wait()
             worker.run()
 
-        future = _EXPORT_EXECUTOR.submit(run_after_registration)
+        future = self._executor.submit(run_after_registration)
         self._job = (future, worker)
         gate.set()
         self.runningChanged.emit(True)
@@ -166,7 +171,15 @@ class StudioExportController(QObject):
     @Slot(int, object)
     def _failed(self, job_id: int, exc: Exception) -> None:
         if not self._shutting_down and job_id == self._job_id:
-            self.failed.emit(str(exc))
+            worker = self._job[1] if self._job is not None else None
+            self.failed.emit(
+                translate_studio_exception(
+                    exc,
+                    "export",
+                    source=worker.artwork_path if worker is not None else None,
+                    destination=worker.destination.parent if worker is not None else None,
+                )
+            )
 
     @Slot(int)
     def _cancelled(self, job_id: int) -> None:
@@ -184,9 +197,14 @@ class StudioExportController(QObject):
     def cancel(self) -> None:
         if self._job is None:
             return
-        _future, worker = self._job
+        future, worker = self._job
         worker.cancel()
         self.three_d_capture.cancel_pending()
+        if future.cancel():
+            self._job = None
+            if not self._shutting_down:
+                self.runningChanged.emit(False)
+                self.cancelled.emit()
 
     def shutdown(self, wait_ms: int = 5000) -> None:
         if self._shutting_down:
@@ -197,6 +215,7 @@ class StudioExportController(QObject):
             future, worker = job
             worker.cancel()
             self.three_d_capture.cancel_pending()
+            future.cancel()
             deadline = monotonic() + max(0, int(wait_ms)) / 1000
             try:
                 future.result(timeout=max(0.0, deadline - monotonic()))
@@ -204,6 +223,7 @@ class StudioExportController(QObject):
                 pass
             except Exception:
                 logger.exception("Arrêt du worker d’export Studio en erreur")
+        self._executor.shutdown(wait=True, cancel_futures=True)
         self._job = None
         self.three_d_capture.close()
 

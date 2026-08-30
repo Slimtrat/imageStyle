@@ -85,6 +85,13 @@ python -m pip install -e ".[desktop,build]"
 Le résultat est créé dans `dist\ArtAnimate.exe`. Il s’agit d’un exécutable unique,
 sans fenêtre de console, avec l’icône et les métadonnées de version ArtAnimate.
 
+Le build utilise un `PATH` isolé puis lance l’auto-diagnostic du one-file : chargement
+de la fenêtre et du Studio, FFmpeg issu du bundle, présence des encodeurs H.264, VP9,
+AAC et Opus, puis round-trip H.264. Les rapports `ArtAnimate-build.json` et
+`ArtAnimate-self-test.json` consignent la taille, la durée, le hash et le résultat.
+Le détail des budgets et de la validation est dans
+[docs/studio-production-hardening.md](docs/studio-production-hardening.md).
+
 ## Premier film en ligne de commande
 
 ```powershell
