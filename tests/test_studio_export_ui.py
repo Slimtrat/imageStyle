@@ -121,3 +121,29 @@ def test_desktop_cancel_preserves_existing_destination(app, tmp_path: Path) -> N
     assert not (tmp_path / "existing.part.mp4").exists()
     assert "fichier existant est resté intact" in panel.export_panel.status.text()
     panel.close()
+
+
+def test_desktop_export_can_retry_after_a_recoverable_error(app, tmp_path: Path) -> None:
+    project, artwork = _project(tmp_path, frames=4)
+    panel = StudioPanel()
+    panel.canvas.set_artwork(artwork)
+    panel.set_project(project, reset_history=True)
+    destination = tmp_path / "missing-folder" / "retry.mp4"
+    successes: list[Path] = []
+    panel.export_succeeded.connect(lambda result: successes.append(result.path))
+
+    assert panel.export_video(destination)
+    _wait_for_export(app, panel)
+
+    assert not destination.exists()
+    assert "Dossier de destination introuvable" in panel.export_panel.status.text()
+    assert successes == []
+
+    destination.parent.mkdir()
+    assert panel.export_video(destination)
+    _wait_for_export(app, panel)
+
+    assert destination.is_file()
+    assert successes == [destination.resolve()]
+    assert "Export terminé" in panel.export_panel.progress.format()
+    panel.close()

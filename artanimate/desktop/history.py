@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from enum import StrEnum
 import json
 import logging
 from pathlib import Path
@@ -17,8 +18,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-HISTORY_SCHEMA_VERSION = 1
+HISTORY_SCHEMA_VERSION = 2
+LEGACY_HISTORY_SCHEMA_VERSION = 1
 DEFAULT_HISTORY_LIMIT = 40
+
+
+class GenerationType(StrEnum):
+    ATELIER_2D = "atelier_2d"
+    STUDIO_3D = "studio_3d"
+    STUDIO = "studio"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +41,9 @@ class GenerationRecord:
     effect_label: str
     config: dict[str, Any]
     thumbnail: str | None = None
+    generation_type: str = GenerationType.ATELIER_2D.value
+    project: str | None = None
+    project_id: str | None = None
 
     @property
     def output_path(self) -> Path:
@@ -45,6 +56,19 @@ class GenerationRecord:
     @property
     def thumbnail_path(self) -> Path | None:
         return Path(self.thumbnail) if self.thumbnail else None
+
+    @property
+    def project_path(self) -> Path | None:
+        return Path(self.project) if self.project else None
+
+    @property
+    def project_available(self) -> bool:
+        path = self.project_path
+        return path is not None and path.is_file()
+
+    @property
+    def is_studio_project(self) -> bool:
+        return self.generation_type == GenerationType.STUDIO.value
 
     @property
     def available(self) -> bool:
@@ -71,6 +95,13 @@ class GenerationRecord:
         missing = required - payload.keys()
         if missing or not isinstance(payload.get("config"), dict):
             raise ValueError(f"Entrée d’historique invalide, champs manquants : {sorted(missing)}")
+        generation_type = payload.get("generation_type")
+        if generation_type is None:
+            generation_type = (
+                GenerationType.STUDIO_3D.value
+                if str(payload["effect_label"]).startswith("Studio 3D")
+                else GenerationType.ATELIER_2D.value
+            )
         return cls(
             id=str(payload["id"]),
             created_at=str(payload["created_at"]),
@@ -80,6 +111,11 @@ class GenerationRecord:
             effect_label=str(payload["effect_label"]),
             config=dict(payload["config"]),
             thumbnail=str(payload["thumbnail"]) if payload.get("thumbnail") else None,
+            generation_type=str(generation_type),
+            project=(
+                str(payload["project"]) if payload.get("project") else None
+            ),
+            project_id=str(payload["project_id"]) if payload.get("project_id") else None,
         )
 
 
@@ -102,8 +138,17 @@ class GenerationHistory:
         except (OSError, json.JSONDecodeError) as exc:
             logger.error("Historique illisible : %s", exc)
             return ()
-        if payload.get("schema_version") != HISTORY_SCHEMA_VERSION:
-            logger.warning("Version d’historique non prise en charge")
+        if not isinstance(payload, dict):
+            logger.warning("Historique invalide : objet racine absent")
+            return ()
+        if payload.get("schema_version") not in {
+            LEGACY_HISTORY_SCHEMA_VERSION,
+            HISTORY_SCHEMA_VERSION,
+        }:
+            logger.warning(
+                "Version d’historique non prise en charge : %s",
+                payload.get("schema_version"),
+            )
             return ()
         raw_records = payload.get("generations")
         if not isinstance(raw_records, list):
@@ -131,14 +176,8 @@ class GenerationHistory:
         output = output.resolve()
         source = source.resolve()
         record_id = uuid4().hex
-        thumbnail_path: Path | None = None
         self.root.mkdir(parents=True, exist_ok=True)
-        if thumbnail is not None and not thumbnail.isNull():
-            self.thumbnail_root.mkdir(parents=True, exist_ok=True)
-            thumbnail_path = self.thumbnail_root / f"{record_id}.jpg"
-            if not thumbnail.save(str(thumbnail_path), "JPG", 84):
-                logger.warning("Vignette d’historique non enregistrée : %s", thumbnail_path)
-                thumbnail_path = None
+        thumbnail_path = self._save_thumbnail(record_id, thumbnail)
 
         record = GenerationRecord(
             id=record_id,
@@ -149,14 +188,75 @@ class GenerationHistory:
             effect_label=effect_label,
             config=config.to_dict(),
             thumbnail=str(thumbnail_path) if thumbnail_path else None,
+            generation_type=(
+                GenerationType.STUDIO_3D.value
+                if effect_label.startswith("Studio 3D")
+                else GenerationType.ATELIER_2D.value
+            ),
         )
+        return self._store(record)
+
+    def add_studio(
+        self,
+        output: Path,
+        source: Path,
+        *,
+        project_id: str,
+        export_config: dict[str, Any],
+        project_path: Path | None = None,
+        thumbnail: "QImage | None" = None,
+    ) -> GenerationRecord:
+        """Add one successful Studio Reel, linked to but independent from its project."""
+
+        output = output.resolve()
+        source = source.resolve()
+        saved_project = project_path.resolve() if project_path is not None else None
+        record_id = uuid4().hex
+        self.root.mkdir(parents=True, exist_ok=True)
+        thumbnail_path = self._save_thumbnail(record_id, thumbnail)
+        record = GenerationRecord(
+            id=record_id,
+            created_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+            output=str(output),
+            source=str(source),
+            effect="studio.reel",
+            effect_label="Studio · Reel final",
+            config=dict(export_config),
+            thumbnail=str(thumbnail_path) if thumbnail_path else None,
+            generation_type=GenerationType.STUDIO.value,
+            project=str(saved_project) if saved_project is not None else None,
+            project_id=str(project_id),
+        )
+        return self._store(record)
+
+    def _save_thumbnail(
+        self,
+        record_id: str,
+        thumbnail: "QImage | None",
+    ) -> Path | None:
+        if thumbnail is None or thumbnail.isNull():
+            return None
+        self.thumbnail_root.mkdir(parents=True, exist_ok=True)
+        thumbnail_path = self.thumbnail_root / f"{record_id}.jpg"
+        if not thumbnail.save(str(thumbnail_path), "JPG", 84):
+            logger.warning("Vignette d’historique non enregistrée : %s", thumbnail_path)
+            thumbnail_path.unlink(missing_ok=True)
+            return None
+        return thumbnail_path
+
+    def _store(self, record: GenerationRecord) -> GenerationRecord:
+        output = record.output_path
         previous = self.load()
         replaced = [item for item in previous if item.output_path == output]
         deduplicated = [item for item in previous if item.output_path != output]
         records = [record, *deduplicated]
         discarded = records[self.limit :]
         records = records[: self.limit]
-        self._write(records)
+        try:
+            self._write(records)
+        except (OSError, TypeError, ValueError):
+            self._remove_thumbnail(record)
+            raise
         for item in [*replaced, *discarded]:
             self._remove_thumbnail(item)
         logger.info("Génération ajoutée à l’historique : %s", output)

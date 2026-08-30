@@ -690,6 +690,7 @@ class StudioTrackSummary(QFrame):
 class StudioPanel(QWidget):
     choose_artwork_requested = Signal()
     project_changed = Signal(object)
+    export_succeeded = Signal(object)
     frame_requested = Signal(int)
     history_changed = Signal(bool, str, bool, str)
 
@@ -2196,6 +2197,7 @@ class StudioPanel(QWidget):
     def _export_succeeded(self, result) -> None:
         self.export_panel.show_success(result)
         self.project_status.setText(f"Reel exporté · {result.path.name}")
+        self.export_succeeded.emit(result)
 
     def _export_failed(self, message: str) -> None:
         self.export_panel.show_error(message)

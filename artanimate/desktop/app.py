@@ -34,6 +34,8 @@ from ..core.config import RenderConfig
 from ..core.effects import EffectCapability, EffectDescriptor, effect_descriptors
 from ..core.video import VideoFrameEncoder
 from ..observability import attach_handler, configure_file_logging, detach_handler
+from ..studio.assets import resolve_asset_path
+from ..studio.export import StudioExportResult
 from .controls import ChromaticSequenceWheel, ParameterSlider
 from .history import GenerationHistory
 from .history_widgets import HistoryPanel
@@ -45,6 +47,7 @@ from .studio3d_wave import OrganicWaveSettings
 from .studio3d_export import Studio3DFrameWorker, capture_requires_retry, qimage_to_rgb
 from .studio import StudioPanel
 from .studio_document import StudioDocumentController
+from .studio_history_thumbnail import representative_video_thumbnail
 from .studio_recent import StudioRecentMenu
 from .problems import (
     UserInputError,
@@ -299,6 +302,7 @@ class MainWindow(QMainWindow):
         self.studio_document.artwork_loaded.connect(self._studio_document_artwork_loaded)
         self.studio_document.dirty_changed.connect(self.setWindowModified)
         self.studio_v3.choose_artwork_requested.connect(self.studio_document.choose_artwork)
+        self.studio_v3.export_succeeded.connect(self._studio_v3_export_succeeded)
         return self.studio_v3
 
     def _studio_document_artwork_loaded(self, path: Path) -> None:
@@ -817,6 +821,7 @@ class MainWindow(QMainWindow):
         self.history_panel.play_requested.connect(self._play_history)
         self.history_panel.reveal_requested.connect(self._reveal_history_file)
         self.history_panel.delete_requested.connect(self._delete_history_video)
+        self.history_panel.project_requested.connect(self._open_history_project)
         self.history_panel.directory_requested.connect(self._open_destination_folder)
         self.workspace_tabs.currentChanged.connect(self._workspace_tab_changed)
 
@@ -1195,6 +1200,48 @@ class MainWindow(QMainWindow):
         self.history_panel.set_directory(self.destination_zone.path)
         logger.info("Banque de générations actualisée")
 
+    def _studio_v3_export_succeeded(self, result: StudioExportResult) -> None:
+        project = self.studio_v3.project
+        source = self.studio_v3.canvas.artwork_path
+        if project is None or source is None:
+            logger.warning("Export Studio terminé sans contexte pour l’historique")
+            return
+        session = self.studio_document.session
+        project_path = session.path if session is not None else None
+        context_path = self.studio_v3.asset_panel.project_path
+        protected_paths = [str(source.resolve(strict=False))]
+        if context_path is not None:
+            protected_paths.extend(
+                str(resolve_asset_path(asset.path, context_path))
+                for asset in project.assets
+            )
+        if project_path is not None:
+            protected_paths.append(str(project_path.resolve(strict=False)))
+        config = {
+            "width": result.width,
+            "height": result.height,
+            "fps": result.fps,
+            "frame_count": result.frame_count,
+            "container": project.export.container,
+            "quality": project.export.quality,
+            "crf": project.export.crf,
+            "audio_mode": result.audio_mode.value,
+            "protected_paths": sorted(set(protected_paths)),
+        }
+        thumbnail = representative_video_thumbnail(result.path, result.frame_count)
+        try:
+            self.history_store.add_studio(
+                result.path,
+                source,
+                project_id=project.project_id,
+                export_config=config,
+                project_path=project_path,
+                thumbnail=thumbnail,
+            )
+            self._refresh_history()
+        except (OSError, TypeError, ValueError):
+            logger.exception("Impossible d’enregistrer le Reel Studio dans l’historique")
+
     def _open_destination_folder(self) -> None:
         folder = self.destination_zone.path
         if folder is None or not folder.is_dir():
@@ -1415,14 +1462,53 @@ class MainWindow(QMainWindow):
         if path.parent.is_dir():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
+    def _open_history_project(self, project: str) -> None:
+        path = Path(project)
+        if not path.is_file():
+            QMessageBox.warning(
+                self,
+                "Projet Studio introuvable",
+                "Le projet source a été déplacé ou supprimé.",
+            )
+            return
+        if self.studio_document.open_project(path):
+            self.workspace_tabs.setCurrentIndex(2)
+            self.status_label.setText(f"Projet Studio ouvert : {path.name}")
+
     def _delete_history_video(self, output: str) -> None:
         path = Path(output).resolve()
+        record = next(
+            (
+                item
+                for item in self._history_records
+                if item.output_path.resolve() == path
+            ),
+            None,
+        )
+        protected: set[Path] = set()
+        if record is not None:
+            protected.add(record.source_path.resolve(strict=False))
+            if record.project_path is not None:
+                protected.add(record.project_path.resolve(strict=False))
+            for value in record.config.get("protected_paths", ()):
+                if isinstance(value, str):
+                    protected.add(Path(value).resolve(strict=False))
+        if path in protected:
+            logger.error("Suppression refusée pour un chemin Studio protégé : %s", path)
+            self.history_store.remove(path)
+            self._refresh_history()
+            return
         if path.is_file():
             answer = QMessageBox.warning(
                 self,
                 "Supprimer définitivement la vidéo ?",
                 f"{path.name} sera supprimée du disque et de l’historique. "
-                "Cette action est irréversible.",
+                "Cette action est irréversible."
+                + (
+                    "\n\nLe projet Studio et ses médias resteront intacts."
+                    if record is not None and record.is_studio_project
+                    else ""
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

@@ -21,6 +21,7 @@ from .history import GenerationRecord
 
 class GenerationCard(QFrame):
     play_requested = Signal(str)
+    project_requested = Signal(str)
     reveal_requested = Signal(str)
     delete_requested = Signal(str)
 
@@ -57,7 +58,10 @@ class GenerationCard(QFrame):
         title.setObjectName("historyTitle")
         title.setToolTip(str(record.output_path))
         details.addWidget(title)
-        metadata = QLabel(f"{record.display_date} · {record.output_path.name}")
+        type_label = "Studio" if record.is_studio_project else "Vidéo"
+        metadata = QLabel(
+            f"{record.display_date} · {type_label} · {record.output_path.name}"
+        )
         metadata.setObjectName("historyMetadata")
         metadata.setToolTip(str(record.output_path))
         details.addWidget(metadata)
@@ -83,6 +87,15 @@ class GenerationCard(QFrame):
         play_action.triggered.connect(lambda: self.play_requested.emit(record.output))
         reveal_action = menu.addAction("Afficher dans l’Explorateur Windows")
         reveal_action.setEnabled(record.output_path.parent.is_dir())
+        if record.project_path is not None:
+            project_action = menu.addAction("Ouvrir le projet Studio")
+            project_action.setEnabled(record.project_available)
+            if record.project_available:
+                project_action.triggered.connect(
+                    lambda: self.project_requested.emit(record.project or "")
+                )
+            else:
+                project_action.setToolTip("Le projet source a été déplacé ou supprimé")
         reveal_action.triggered.connect(lambda: self.reveal_requested.emit(record.output))
         menu.addSeparator()
         delete_label = (
@@ -118,6 +131,7 @@ class HistoryPanel(QFrame):
     play_requested = Signal(str)
     reveal_requested = Signal(str)
     delete_requested = Signal(str)
+    project_requested = Signal(str)
     directory_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None):
@@ -177,6 +191,7 @@ class HistoryPanel(QFrame):
                 card.play_requested.connect(self.play_requested)
                 card.reveal_requested.connect(self.reveal_requested)
                 card.delete_requested.connect(self.delete_requested)
+                card.project_requested.connect(self.project_requested)
                 self.row.addWidget(card)
             self.row.addStretch(1)
         count = len(records)
