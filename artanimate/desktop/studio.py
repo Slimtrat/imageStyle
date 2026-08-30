@@ -7,7 +7,15 @@ from uuid import uuid4
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QStandardPaths, Qt, Signal
 from PySide6.QtGui import (
-    QAction, QColor, QCloseEvent, QFont, QImage, QKeySequence, QPainter, QPen,
+    QAction,
+    QColor,
+    QCloseEvent,
+    QFont,
+    QImage,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QPolygonF,
 )
 from PySide6.QtWidgets import (
     QComboBox,
@@ -53,6 +61,11 @@ from ..studio.effect_2d import (
     update_effect_clip,
 )
 from ..studio.media import update_still_clip
+from ..studio.manual_match import (
+    ManualMatchSettings,
+    ManualMatchTransform,
+    MatchPoint,
+)
 from ..studio.semantic_actions import (
     add_semantic_action_clip,
     is_semantic_action_capability,
@@ -73,14 +86,22 @@ from ..studio.model import (
     Easing,
     StudioProject,
     TrackKind,
+    TransitionKind,
 )
 from .studio_audio import StudioAudioMonitor
 from .studio_audio_inspector import AudioInspectorEdit, StudioAudioInspector
 from .studio_media_inspector import StillInspectorEdit, StudioMediaInspector
+from .studio_match_inspector import StudioMatchInspector
 from .studio_video_inspector import StudioVideoInspector, VideoInspectorEdit
 from .studio_transition_inspector import StudioTransitionInspector
 from .studio_waveform import StudioWaveformController
 from ..studio.timeline import add_track, delete_clips, set_track_state
+from ..studio.transitions import (
+    transition_by_id,
+    transition_end_frame,
+    transition_clip_pair,
+    transition_progress,
+)
 from .studio_camera import StudioCameraInspector
 from .studio_analysis import StudioAnalysisController, StudioAnalysisPanel
 from .studio_camera_presets import StudioCameraPresetPanel
@@ -101,6 +122,7 @@ class StudioCanvas(QWidget):
     cameraPoseChanged = Signal(object)
     artworkChanged = Signal(object)
     semanticTargetSelected = Signal(str)
+    matchTransformChanged = Signal(object)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -121,6 +143,13 @@ class StudioCanvas(QWidget):
         self._last_pointer = None
         self._semantic_scene: SemanticScene | None = None
         self._semantic_target_id: str | None = None
+        self._match_transition_id: str | None = None
+        self._match_transform: ManualMatchTransform | None = None
+        self._match_output_width = 1080
+        self._match_output_height = 1920
+        self._dragging_match_handle: int | None = None
+        self._dragging_match_body = False
+        self._match_last_pointer: QPointF | None = None
 
     def sizeHint(self) -> QSize:
         return QSize(360, 640)
@@ -152,6 +181,54 @@ class StudioCanvas(QWidget):
     @property
     def semantic_target_id(self) -> str | None:
         return self._semantic_target_id
+
+
+    @property
+    def match_transition_id(self) -> str | None:
+        return self._match_transition_id
+
+    @property
+    def match_transform(self) -> ManualMatchTransform | None:
+        return self._match_transform
+
+    def set_match_editor(
+        self,
+        transition_id: str | None,
+        transform: ManualMatchTransform | None,
+        *,
+        output_width: int = 1080,
+        output_height: int = 1920,
+    ) -> None:
+        if transition_id is None or transform is None:
+            self._match_transition_id = None
+            self._match_transform = None
+        else:
+            self._match_transition_id = str(transition_id)
+            self._match_transform = transform.validate()
+            self._match_output_width = max(1, int(output_width))
+            self._match_output_height = max(1, int(output_height))
+        self.update()
+
+    def _match_widget_points(self) -> tuple[QPointF, ...]:
+        transform = self._match_transform
+        if transform is None:
+            return ()
+        frame = self.frame_rect()
+        width = max(1, self._match_output_width - 1)
+        height = max(1, self._match_output_height - 1)
+        return tuple(
+            QPointF(
+                frame.left() + x / width * frame.width(),
+                frame.top() + y / height * frame.height(),
+            )
+            for x, y in transform.target_quad(
+                self._match_output_width,
+                self._match_output_height,
+            )
+        )
+
+    def _match_polygon(self) -> QPolygonF:
+        return QPolygonF(self._match_widget_points())
 
     def set_semantic_scene(self, scene: SemanticScene | None) -> None:
         self._semantic_scene = scene
@@ -356,6 +433,29 @@ class StudioCanvas(QWidget):
                     )
 
         guide_pen = QPen(QColor(255, 255, 255, 55), 1, Qt.PenStyle.DashLine)
+        match_points = self._match_widget_points()
+        if match_points:
+            polygon = QPolygonF(match_points)
+            painter.setBrush(QColor(76, 210, 196, 35))
+            painter.setPen(QPen(QColor("#4cd2c4"), 2))
+            painter.drawPolygon(polygon)
+            for index, point in enumerate(match_points, start=1):
+                painter.setBrush(QColor("#d8fffb"))
+                painter.setPen(QPen(QColor("#167e75"), 2))
+                painter.drawEllipse(point, 7, 7)
+                painter.setPen(QColor("#102522"))
+                painter.drawText(
+                    QRectF(point.x() - 7, point.y() - 7, 14, 14),
+                    Qt.AlignmentFlag.AlignCenter,
+                    str(index),
+                )
+            painter.setPen(QColor("#bffff8"))
+            painter.drawText(
+                polygon.boundingRect().adjusted(6, 6, -6, -6),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                "MATCH RÉEL · glisser les coins ou la surface",
+            )
+
         painter.setPen(guide_pen)
         safe = frame.adjusted(
             int(frame.width() * 0.08),
@@ -381,6 +481,28 @@ class StudioCanvas(QWidget):
         )
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton and self._match_transform is not None:
+            point = event.position()
+            points = self._match_widget_points()
+            handle = next(
+                (
+                    index
+                    for index, candidate in enumerate(points)
+                    if (candidate - point).manhattanLength() <= 14
+                ),
+                None,
+            )
+            if handle is not None or self._match_polygon().containsPoint(
+                point,
+                Qt.FillRule.OddEvenFill,
+            ):
+                self._dragging_match_handle = handle
+                self._dragging_match_body = handle is None
+                self._match_last_pointer = point
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                event.accept()
+                return
+
         if (
             event.button() == Qt.MouseButton.LeftButton
             and self.frame_rect().contains(event.position().toPoint())
@@ -397,6 +519,46 @@ class StudioCanvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if (
+            self._match_transform is not None
+            and self._match_last_pointer is not None
+            and (self._dragging_match_handle is not None or self._dragging_match_body)
+        ):
+            frame = self.frame_rect()
+            if frame.width() <= 0 or frame.height() <= 0:
+                return
+            delta = event.position() - self._match_last_pointer
+            self._match_last_pointer = event.position()
+            dx = delta.x() / frame.width()
+            dy = delta.y() / frame.height()
+            transform = self._match_transform
+            if self._dragging_match_handle is not None:
+                offsets = list(transform.target_corner_offsets)
+                index = self._dragging_match_handle
+                offsets[index] = MatchPoint(
+                    offsets[index].x + dx,
+                    offsets[index].y + dy,
+                )
+                candidate = replace(
+                    transform,
+                    target_corner_offsets=tuple(offsets),
+                )
+            else:
+                candidate = replace(
+                    transform,
+                    position_x=transform.position_x + dx,
+                    position_y=transform.position_y + dy,
+                )
+            try:
+                candidate.validate()
+            except (TypeError, ValueError):
+                event.accept()
+                return
+            self._match_transform = candidate
+            self.matchTransformChanged.emit(candidate)
+            self.update()
+            event.accept()
+            return
         if self._dragging_camera and self._last_pointer is not None:
             delta = event.position() - self._last_pointer
             self._last_pointer = event.position()
@@ -404,8 +566,22 @@ class StudioCanvas(QWidget):
             if base.width() > 0 and base.height() > 0:
                 pose = replace(
                     self._camera_pose,
-                    x=min(2.0, max(-1.0, self._camera_pose.x - delta.x() / (base.width() * self._camera_pose.zoom))),
-                    y=min(2.0, max(-1.0, self._camera_pose.y - delta.y() / (base.height() * self._camera_pose.zoom))),
+                    x=min(
+                        2.0,
+                        max(
+                            -1.0,
+                            self._camera_pose.x
+                            - delta.x() / (base.width() * self._camera_pose.zoom),
+                        ),
+                    ),
+                    y=min(
+                        2.0,
+                        max(
+                            -1.0,
+                            self._camera_pose.y
+                            - delta.y() / (base.height() * self._camera_pose.zoom),
+                        ),
+                    ),
                 )
                 self.set_camera_pose(pose, emit=True)
             event.accept()
@@ -413,6 +589,16 @@ class StudioCanvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton and (
+            self._dragging_match_handle is not None or self._dragging_match_body
+        ):
+            self._dragging_match_handle = None
+            self._dragging_match_body = False
+            self._match_last_pointer = None
+            self.unsetCursor()
+            event.accept()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton and self._dragging_camera:
             self._dragging_camera = False
             self._last_pointer = None
@@ -422,13 +608,35 @@ class StudioCanvas(QWidget):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event) -> None:  # type: ignore[override]
-        if self.frame_rect().contains(event.position().toPoint()) and not self._artwork.isNull():
+        if (
+            self._match_transform is not None
+            and self._match_polygon().containsPoint(
+                event.position(),
+                Qt.FillRule.OddEvenFill,
+            )
+        ):
+            factor = 2.0 ** (event.angleDelta().y() / 600.0)
+            candidate = replace(
+                self._match_transform,
+                scale=min(20.0, max(0.05, self._match_transform.scale * factor)),
+            ).validate()
+            self._match_transform = candidate
+            self.matchTransformChanged.emit(candidate)
+            self.update()
+            event.accept()
+            return
+
+        if (
+            self.frame_rect().contains(event.position().toPoint())
+            and not self._artwork.isNull()
+        ):
             factor = 2.0 ** (event.angleDelta().y() / 600.0)
             zoom = min(20.0, max(0.25, self._camera_pose.zoom * factor))
             self.set_camera_pose(replace(self._camera_pose, zoom=zoom), emit=True)
             event.accept()
             return
         super().wheelEvent(event)
+
 
 class StudioTrackSummary(QFrame):
     """Live summary of the artwork-specific tracks present in StudioProject."""
@@ -668,6 +876,7 @@ class StudioPanel(QWidget):
         self.audio_inspector = StudioAudioInspector()
         self.audio_inspector.applyRequested.connect(self._apply_audio_edit)
         self.transition_inspector = StudioTransitionInspector()
+        self.match_inspector = StudioMatchInspector()
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
         self.inspector_tabs.addTab(self.analysis_panel, "Analyse locale")
         self.inspector_tabs.addTab(self.trigger_panel, "Déclencheurs")
@@ -677,6 +886,7 @@ class StudioPanel(QWidget):
         self.inspector_tabs.addTab(self.video_inspector, "Vidéo réelle")
         self.inspector_tabs.addTab(self.audio_inspector, "Audio")
         self.inspector_tabs.addTab(self.transition_inspector, "Transition")
+        self.inspector_tabs.addTab(self.match_inspector, "Match réel")
         inspector_layout.addWidget(self.inspector_tabs, 1)
         body.addWidget(inspector)
         page.addLayout(body, 1)
@@ -688,6 +898,7 @@ class StudioPanel(QWidget):
 
         self.transport.frameChanged.connect(self._frame_changed)
         self.canvas.cameraPoseChanged.connect(self._camera_pose_edited)
+        self.canvas.matchTransformChanged.connect(self._canvas_match_transform_changed)
         page.addWidget(self.transport)
 
         self.keyframe_strip = StudioKeyframeStrip()
@@ -713,6 +924,12 @@ class StudioPanel(QWidget):
         )
         self.transition_inspector.deleteRequested.connect(
             self.timeline_actions.delete_transition
+        )
+        self.match_inspector.applyRequested.connect(
+            self.timeline_actions.apply_match_edit
+        )
+        self.match_inspector.previewRequested.connect(
+            self._match_preview_requested
         )
 
         self.track_summary = StudioTrackSummary()
@@ -792,9 +1009,7 @@ class StudioPanel(QWidget):
         self.audio_inspector.set_selection(
             self._project, self.timeline.selected_clip_ids
         )
-        self.transition_inspector.set_selection(
-            self._project, self.timeline.selected_transition_id
-        )
+        self._sync_match_editor(self.timeline.selected_transition_id)
         if self._project is None:
             self.transport.set_project(30, 1)
             self.canvas.set_artwork(None)
@@ -867,9 +1082,7 @@ class StudioPanel(QWidget):
         self.audio_inspector.set_selection(
             validated, self.timeline.selected_clip_ids
         )
-        self.transition_inspector.set_selection(
-            validated, self.timeline.selected_transition_id
-        )
+        self._sync_match_editor(self.timeline.selected_transition_id)
         if timing_changed:
             self.transport.set_project(
                 validated.settings.fps,
@@ -1839,9 +2052,74 @@ class StudioPanel(QWidget):
 
     def _timeline_transition_changed(self, value: object) -> None:
         transition_id = str(value) if isinstance(value, str) and value else None
-        self.transition_inspector.set_selection(self._project, transition_id)
-        if self.transition_inspector.selected_transition_id is not None:
+        self._sync_match_editor(transition_id)
+        if self.match_inspector.selected_transition_id is not None:
+            self.inspector_tabs.setCurrentWidget(self.match_inspector)
+        elif self.transition_inspector.selected_transition_id is not None:
             self.inspector_tabs.setCurrentWidget(self.transition_inspector)
+
+    def _sync_match_editor(self, transition_id: str | None) -> None:
+        self.transition_inspector.set_selection(self._project, transition_id)
+        self.match_inspector.set_selection(self._project, transition_id)
+        project = self._project
+        if project is not None and transition_id is not None:
+            try:
+                transition = transition_by_id(project, transition_id)
+            except KeyError:
+                transition = None
+            if transition is not None and transition.kind == TransitionKind.MATCH:
+                settings = ManualMatchSettings.from_transition(transition)
+                self.canvas.set_match_editor(
+                    transition.transition_id,
+                    settings.transform,
+                    output_width=project.settings.width,
+                    output_height=project.settings.height,
+                )
+                return
+        self.canvas.set_match_editor(None, None)
+
+    def _canvas_match_transform_changed(self, value: object) -> None:
+        transition_id = self.canvas.match_transition_id
+        if transition_id is None or not isinstance(value, ManualMatchTransform):
+            return
+        self.match_inspector.set_transform(value)
+        self.timeline_actions.apply_match_transform(transition_id, value)
+
+    def _match_preview_requested(self, mode: str, opacity: float) -> None:
+        project = self._project
+        transition_id = self.match_inspector.selected_transition_id
+        if project is None or transition_id is None:
+            return
+        try:
+            transition = transition_by_id(project, transition_id)
+        except KeyError:
+            return
+        if transition.kind != TransitionKind.MATCH:
+            return
+        settings = ManualMatchSettings.from_transition(transition)
+        pair = transition_clip_pair(project, transition)
+        if mode == "before":
+            frame = transition.start_frame
+        elif mode == "after" and pair.to_clip.kind == ClipKind.VIDEO:
+            frame = (
+                pair.to_clip.start_frame
+                + settings.reference_source_frame
+                - pair.to_clip.source_in_frame
+            )
+        elif mode == "after":
+            frame = transition_end_frame(transition) - 1
+        else:
+            requested = min(1.0, max(0.0, float(opacity)))
+            frame = min(
+                range(
+                    transition.start_frame,
+                    transition_end_frame(transition),
+                ),
+                key=lambda candidate: abs(
+                    transition_progress(transition, candidate) - requested
+                ),
+            )
+        self.transport.seek(frame, force_signal=True)
 
     def _add_effect_layer(
         self,

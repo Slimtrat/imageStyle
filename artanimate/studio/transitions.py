@@ -55,19 +55,35 @@ def transition_end_frame(transition: Transition) -> int:
     return transition.start_frame + transition.duration_frames
 
 
-def dissolve_progress(transition: Transition, project_frame: int) -> float:
+def _transition_easing(transition: Transition) -> Easing:
+    if transition.kind == TransitionKind.DISSOLVE:
+        return DissolveSettings.from_transition(transition).easing
+    if transition.kind == TransitionKind.MATCH:
+        from .manual_match import ManualMatchSettings
+
+        return ManualMatchSettings.from_transition(transition).easing
+    raise ValueError("La progression exige une transition visuelle")
+
+
+def transition_progress(transition: Transition, project_frame: int) -> float:
     """Return B's exact weight, including exact zero/one endpoint frames."""
 
-    if transition.kind != TransitionKind.DISSOLVE:
-        raise ValueError("La progression n’est définie que pour un fondu")
+    if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH}:
+        raise ValueError("La progression exige un fondu ou un match manuel")
     if not transition.start_frame <= project_frame < transition_end_frame(transition):
         raise ValueError("La frame demandée est hors de la transition")
     if transition.duration_frames < 2:
-        raise ValueError("Un fondu doit contenir au moins deux frames")
+        raise ValueError("Une transition visuelle doit contenir au moins deux frames")
     linear = (project_frame - transition.start_frame) / (
         transition.duration_frames - 1
     )
-    return eased_progress(linear, DissolveSettings.from_transition(transition).easing)
+    return eased_progress(linear, _transition_easing(transition))
+
+
+def dissolve_progress(transition: Transition, project_frame: int) -> float:
+    if transition.kind != TransitionKind.DISSOLVE:
+        raise ValueError("La progression demandée ne concerne pas un fondu")
+    return transition_progress(transition, project_frame)
 
 
 def dissolve_weights(transition: Transition, project_frame: int) -> tuple[float, float]:
@@ -169,21 +185,28 @@ def _validate_source_handles(
             )
 
 
-def _validate_dissolve_topology(
+def _validate_visual_transition_topology(
     project: StudioProject,
     transition: Transition,
     *,
     validate_sources: bool,
 ) -> TransitionClipPair:
     if transition.duration_frames < 2:
-        raise ValueError("Un fondu doit durer au moins deux frames")
-    DissolveSettings.from_transition(transition)
+        raise ValueError("Une transition visuelle doit durer au moins deux frames")
+    if transition.kind == TransitionKind.DISSOLVE:
+        DissolveSettings.from_transition(transition)
+    elif transition.kind == TransitionKind.MATCH:
+        from .manual_match import validate_manual_match_transition
+
+        validate_manual_match_transition(project, transition)
+    else:
+        raise ValueError("Cette transition n’est ni un fondu ni un match manuel")
     pair = _clip_pair(project, transition)
     if pair.track.kind != TrackKind.VIDEO:
-        raise ValueError("Un fondu visuel doit être placé sur une piste image")
+        raise ValueError("Une transition visuelle doit être placée sur une piste image")
     if pair.from_clip.end_frame != pair.to_clip.start_frame:
         raise ValueError(
-            "Les deux plans d’un fondu doivent partager le même point de cut"
+            "Les deux plans d’une transition doivent partager le même point de cut"
         )
     cut = pair.from_clip.end_frame
     end = transition_end_frame(transition)
@@ -200,7 +223,7 @@ def _validate_dissolve_topology(
         from_index + 1 >= len(ordered)
         or ordered[from_index + 1].clip_id != pair.to_clip.clip_id
     ):
-        raise ValueError("Un fondu doit relier deux plans consécutifs")
+        raise ValueError("Une transition doit relier deux plans consécutifs")
     for clip in pair.track.clips:
         if clip.clip_id in {pair.from_clip.clip_id, pair.to_clip.clip_id}:
             continue
@@ -213,7 +236,7 @@ def _validate_dissolve_topology(
         and cut < end <= pair.to_clip.end_frame
     ):
         raise ValueError(
-            "La fenêtre du fondu doit entourer le cut et rester dans les deux plans"
+            "La fenêtre de transition doit entourer le cut et rester dans les deux plans"
         )
     if validate_sources:
         _validate_source_handles(project, transition, pair)
@@ -228,16 +251,16 @@ def validate_project_transitions(
     windows_by_track: dict[str, list[tuple[int, int, str]]] = {}
     endpoints: set[tuple[str, str]] = set()
     for transition in project.transitions:
-        if transition.kind != TransitionKind.DISSOLVE:
+        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH}:
             continue
-        pair = _validate_dissolve_topology(
+        pair = _validate_visual_transition_topology(
             project,
             transition,
             validate_sources=validate_sources,
         )
         endpoint = (transition.from_clip_id, transition.to_clip_id)
         if endpoint in endpoints:
-            raise ValueError("Deux fondus relient les mêmes plans")
+            raise ValueError("Deux transitions visuelles relient les mêmes plans")
         endpoints.add(endpoint)
         start = transition.start_frame
         end = transition_end_frame(transition)
@@ -432,7 +455,7 @@ def render_window_for_clip(project: StudioProject, clip: Clip) -> tuple[int, int
     start = clip.start_frame
     end = clip.end_frame
     for transition in project.transitions:
-        if transition.kind != TransitionKind.DISSOLVE:
+        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH}:
             continue
         if transition.from_clip_id == clip.clip_id:
             end = max(end, transition_end_frame(transition))
@@ -447,19 +470,32 @@ def render_source_in_frame(project: StudioProject, clip: Clip, render_start: int
     return clip.source_in_frame + render_start - clip.start_frame
 
 
-def active_dissolve(
+def active_visual_transition(
     project: StudioProject,
     track_id: str,
     project_frame: int,
 ) -> Transition | None:
     matches = []
     for transition in project.transitions:
-        if transition.kind != TransitionKind.DISSOLVE:
+        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH}:
             continue
         if not transition.start_frame <= project_frame < transition_end_frame(transition):
             continue
         if _clip_pair(project, transition).track.track_id == track_id:
             matches.append(transition)
     if len(matches) > 1:
-        raise ValueError("Deux fondus sont actifs simultanément sur la même piste")
+        raise ValueError("Deux transitions sont actives simultanément sur la même piste")
     return matches[0] if matches else None
+
+
+def active_dissolve(
+    project: StudioProject,
+    track_id: str,
+    project_frame: int,
+) -> Transition | None:
+    transition = active_visual_transition(project, track_id, project_frame)
+    return (
+        transition
+        if transition is not None and transition.kind == TransitionKind.DISSOLVE
+        else None
+    )

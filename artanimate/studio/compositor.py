@@ -8,10 +8,15 @@ from PIL import Image
 from .camera import render_camera_frame, resolve_camera_pose
 from .effect_2d import Effect2DClipSettings, settings_for_effect_clip
 from .model import Clip, ClipKind, FitMode, StudioProject, TrackKind
+from .manual_match import (
+    ManualMatchSettings,
+    incoming_manual_match,
+    warp_matched_frame,
+)
 from .sources import TimedFrameSource, validate_frame_index, validate_timed_frame
 from .transitions import (
-    active_dissolve,
-    dissolve_progress,
+    active_visual_transition,
+    transition_progress,
     transition_clip_pair,
     validate_project_transitions,
 )
@@ -193,6 +198,14 @@ class StudioCompositor:
         clip: Clip,
         project_frame: int,
     ) -> tuple[np.ndarray, np.ndarray]:
+        match = incoming_manual_match(self.project, clip.clip_id)
+        if match is not None:
+            return warp_matched_frame(
+                raw,
+                self.width,
+                self.height,
+                ManualMatchSettings.from_transition(match),
+            )
         if clip.camera is not None:
             camera_frame = project_frame - clip.start_frame
             pose = resolve_camera_pose(clip.camera, camera_frame)
@@ -293,7 +306,11 @@ class StudioCompositor:
         for track in self.project.tracks:
             if track.kind == TrackKind.AUDIO or track.hidden or track.muted:
                 continue
-            transition = active_dissolve(self.project, track.track_id, frame_index)
+            transition = active_visual_transition(
+                self.project,
+                track.track_id,
+                frame_index,
+            )
             transitioned_clip_ids: set[str] = set()
             if transition is not None:
                 pair = transition_clip_pair(self.project, transition)
@@ -313,7 +330,7 @@ class StudioCompositor:
                     background = blend_rgb_frames(
                         from_state,
                         to_state,
-                        dissolve_progress(transition, frame_index),
+                        transition_progress(transition, frame_index),
                     )
                     transitioned_clip_ids = {
                         pair.from_clip.clip_id,

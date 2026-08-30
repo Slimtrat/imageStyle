@@ -4,6 +4,11 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject
 
+from ..studio.manual_match import (
+    add_manual_match as create_manual_match,
+    update_manual_match,
+)
+from ..studio.model import TransitionKind
 from ..studio.audio import set_audio_clip_fades
 from ..studio.timeline import (
     OVERLAP_POLICY,
@@ -21,6 +26,7 @@ from ..studio.timeline import (
 from ..studio.transitions import (
     add_dissolve as create_dissolve,
     delete_transition,
+    transition_by_id,
     update_dissolve,
 )
 
@@ -46,6 +52,7 @@ class StudioTimelineActions(QObject):
         timeline.dissolveRequested.connect(self.add_dissolve)
         timeline.transitionResizeRequested.connect(self.resize_transition)
         timeline.transitionDeleteRequested.connect(self.delete_transition)
+        timeline.matchRequested.connect(self.add_manual_match)
 
     @staticmethod
     def _ids(value: object) -> tuple[str, ...]:
@@ -237,6 +244,36 @@ class StudioTimelineActions(QObject):
         except (KeyError, TypeError, ValueError, PermissionError) as exc:
             self._error(exc)
 
+    def add_manual_match(self, clip_ids: object) -> None:
+        project = self.panel.project
+        selected = self._ids(clip_ids)
+        if project is None:
+            return
+        if len(selected) != 2:
+            self._error(
+                ValueError("Sélectionnez un plan d’œuvre puis un plan photo ou vidéo")
+            )
+            return
+        try:
+            updated, transition = create_manual_match(
+                project,
+                selected[0],
+                selected[1],
+            )
+            self.panel._commit_timeline_project(
+                updated,
+                "Créer le match manuel virtuel → réel",
+            )
+            self.panel.timeline.scene.set_transition_selection(
+                transition.transition_id
+            )
+            self.panel.project_status.setText(
+                f"Match réel créé · {transition.duration_frames} frames · "
+                "quatre coins éditables"
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self._error(exc)
+
     def resize_transition(
         self,
         transition_id: str,
@@ -247,15 +284,24 @@ class StudioTimelineActions(QObject):
         if project is None:
             return
         try:
-            updated = update_dissolve(
-                project,
-                transition_id,
-                start_frame=int(start_frame),
-                end_frame=int(end_frame),
-            )
+            transition = transition_by_id(project, transition_id)
+            if transition.kind == TransitionKind.MATCH:
+                updated = update_manual_match(
+                    project,
+                    transition_id,
+                    start_frame=int(start_frame),
+                    end_frame=int(end_frame),
+                )
+            else:
+                updated = update_dissolve(
+                    project,
+                    transition_id,
+                    start_frame=int(start_frame),
+                    end_frame=int(end_frame),
+                )
             self.panel._commit_timeline_project(
                 updated,
-                "Régler la fenêtre du fondu",
+                "Régler la fenêtre de transition",
                 merge_key=f"transition-window:{transition_id}",
             )
             self.panel.timeline.scene.set_transition_selection(transition_id)
@@ -283,6 +329,50 @@ class StudioTimelineActions(QObject):
         except (KeyError, TypeError, ValueError, PermissionError) as exc:
             self._error(exc)
 
+    def apply_match_edit(self, edit: object) -> None:
+        project = self.panel.project
+        if project is None:
+            return
+        try:
+            transition_id = str(getattr(edit, "transition_id"))
+            updated = update_manual_match(
+                project,
+                transition_id,
+                duration_frames=int(getattr(edit, "duration_frames")),
+                reference_source_frame=int(
+                    getattr(edit, "reference_source_frame")
+                ),
+                overlay_opacity=float(getattr(edit, "overlay_opacity")),
+                easing=getattr(edit, "easing"),
+                transform=getattr(edit, "transform"),
+            )
+            self.panel._commit_timeline_project(
+                updated,
+                "Régler le match manuel",
+                merge_key=f"match-settings:{transition_id}",
+            )
+            self.panel.timeline.scene.set_transition_selection(transition_id)
+            self.panel.project_status.setText(
+                "Match réel réglé · transformation sérialisée"
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self._error(exc)
+
+    def apply_match_transform(self, transition_id: str, transform: object) -> None:
+        project = self.panel.project
+        if project is None:
+            return
+        try:
+            updated = update_manual_match(project, transition_id, transform=transform)
+            self.panel._commit_timeline_project(
+                updated,
+                "Manipuler le match dans le canvas",
+                merge_key=f"match-canvas:{transition_id}",
+            )
+            self.panel.timeline.scene.set_transition_selection(transition_id)
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self._error(exc)
+
     def delete_transition(self, transition_id: str) -> None:
         project = self.panel.project
         if project is None or not transition_id:
@@ -292,7 +382,7 @@ class StudioTimelineActions(QObject):
             self.panel._commit_timeline_project(updated, "Retrouver le cut")
             self.panel.timeline.scene.set_transition_selection(None)
             self.panel.project_status.setText(
-                "Fondu retiré · cut frame-exact restauré"
+                "Transition retirée · cut frame-exact restauré"
             )
         except (KeyError, TypeError, ValueError, PermissionError) as exc:
             self._error(exc)

@@ -31,6 +31,7 @@ from ..studio.model import (
     StudioProject,
     Track,
     TrackKind,
+    TransitionKind,
     Transition,
 )
 from ..studio.waveform import WaveformEnvelope, waveform_peaks_for_clip
@@ -535,26 +536,31 @@ class StudioTimelineScene(QWidget):
         for layout in self._transition_layouts:
             rect = self._display_transition_rect(layout)
             selected = layout.transition.transition_id == self._selected_transition_id
-            painter.setBrush(QColor(246, 184, 80, 115))
+            is_match = layout.transition.kind == TransitionKind.MATCH
+            fill = QColor(76, 210, 196, 125) if is_match else QColor(246, 184, 80, 115)
+            border = QColor("#c5fff8") if is_match else QColor("#fff2b3")
+            idle_border = QColor("#3bc7b8") if is_match else QColor("#dca33e")
+            painter.setBrush(fill)
             painter.setPen(
-                QPen(QColor("#fff2b3") if selected else QColor("#dca33e"), 2)
+                QPen(border if selected else idle_border, 2)
             )
             painter.drawRoundedRect(rect, 3, 3)
             painter.drawLine(rect.topLeft(), rect.bottomRight())
             painter.drawLine(rect.bottomLeft(), rect.topRight())
             painter.fillRect(
                 QRectF(rect.left() - 2, rect.top(), 5, rect.height()),
-                QColor("#fff2b3"),
+                border,
             )
             painter.fillRect(
                 QRectF(rect.right() - 2, rect.top(), 5, rect.height()),
-                QColor("#fff2b3"),
+                border,
             )
             painter.setPen(QColor("#17130b"))
+            label = "MATCH RÉEL" if is_match else "FONDU"
             painter.drawText(
                 rect.adjusted(7, 0, -7, 0),
                 Qt.AlignmentFlag.AlignCenter,
-                f"FONDU · {layout.transition.duration_frames}f",
+                f"{label} · {layout.transition.duration_frames}f",
             )
 
         if self._drag_clip is not None and self._drag_started:
@@ -858,6 +864,7 @@ class StudioTimeline(QWidget):
     dissolveRequested = Signal(object)
     transitionSelectionChanged = Signal(object)
     transitionResizeRequested = Signal(str, int, int)
+    matchRequested = Signal(object)
     transitionDeleteRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
@@ -890,6 +897,7 @@ class StudioTimeline(QWidget):
         self.dissolve_button = QPushButton("Fondu")
         self.cut_button = QPushButton("Retrouver le cut")
         self.track_down = QPushButton("Piste ↓")
+        self.match_button = QPushButton("Match réel")
         self.track_up = QPushButton("Piste ↑")
         self.snap_button = QPushButton("Aimant")
         self.snap_button.setCheckable(True)
@@ -901,6 +909,7 @@ class StudioTimeline(QWidget):
             self.dissolve_button,
             self.cut_button,
             self.track_down,
+            self.match_button,
             self.track_up,
             self.snap_button,
         ):
@@ -915,6 +924,9 @@ class StudioTimeline(QWidget):
         self.track_down.clicked.connect(lambda: self._request_track_reorder(-1))
         self.dissolve_button.clicked.connect(
             lambda: self.dissolveRequested.emit(self.selected_clip_ids)
+        )
+        self.match_button.clicked.connect(
+            lambda: self.matchRequested.emit(self.selected_clip_ids)
         )
         self.cut_button.clicked.connect(
             lambda: self.transitionDeleteRequested.emit(

@@ -10,9 +10,14 @@ from ..compositor import (
     fit_frame,
 )
 from ..model import CameraPose, FitMode, StudioProject
+from ..manual_match import (
+    ManualMatchSettings,
+    incoming_manual_match,
+    warp_matched_frame,
+)
 from ..sources import validate_frame_index
 from ..semantic_actions import SEMANTIC_ACTION_IDS
-from ..transitions import active_dissolve, dissolve_progress, transition_clip_pair
+from ..transitions import active_visual_transition, transition_clip_pair, transition_progress
 from .classic_2d import PreparedRenderPlan, PreparedRenderPlanEntry
 from .legacy_project import LegacySemanticProject
 
@@ -237,6 +242,16 @@ class SemanticPlanCompositor:
     ) -> tuple[np.ndarray, np.ndarray]:
         invocation = content_entry.plan_entry.request.invocation
         camera = self._camera_entry(invocation.invocation_id, project_frame)
+        binding = self._binding_by_invocation.get(invocation.invocation_id)
+        if binding is not None:
+            match = incoming_manual_match(self.project, binding.clip_id)
+            if match is not None:
+                return warp_matched_frame(
+                    image,
+                    self.width,
+                    self.height,
+                    ManualMatchSettings.from_transition(match),
+                )
         if camera is not None:
             local = project_frame - camera.plan_entry.request.invocation.start_frame
             camera_frame = camera.prepared.frame_at(local)
@@ -426,7 +441,11 @@ class SemanticPlanCompositor:
                 continue
             binding = self._binding_by_invocation.get(invocation.invocation_id)
             transition = (
-                active_dissolve(self.project, binding.track_id, frame_index)
+                active_visual_transition(
+                    self.project,
+                    binding.track_id,
+                    frame_index,
+                )
                 if binding is not None and binding.role == "content"
                 else None
             )
@@ -452,7 +471,7 @@ class SemanticPlanCompositor:
                 background = blend_rgb_frames(
                     from_state,
                     to_state,
-                    dissolve_progress(transition, frame_index),
+                    transition_progress(transition, frame_index),
                 )
                 processed_transitions.add(transition.transition_id)
                 for content_entry in (from_entry, to_entry):
