@@ -984,6 +984,78 @@ def _swap_directory(prepared: Path, destination: Path) -> None:
         raise
     shutil.rmtree(backup)
 
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _install_managed_files(
+    prepared: Path,
+    destination: Path,
+    snapshot_relative: Path | None,
+) -> None:
+    """Replace product-owned files without renaming the user-visible project folder."""
+
+    token = uuid4().hex
+    incoming = destination / f".headless-incoming-{token}"
+    backup = destination / f".headless-backup-{token}"
+    incoming.mkdir()
+    backup.mkdir()
+    managed = (ASSETS_DIRECTORY, RECIPE_FILENAME, PROJECT_FILENAME)
+    moved_existing: list[str] = []
+    installed: list[str] = []
+    installed_snapshot: Path | None = None
+    try:
+        for name in managed:
+            source = prepared / name
+            target = incoming / name
+            if source.is_dir():
+                shutil.copytree(source, target)
+            else:
+                shutil.copy2(source, target)
+
+        if snapshot_relative is not None:
+            snapshot_source = prepared / snapshot_relative
+            installed_snapshot = destination / snapshot_relative
+            installed_snapshot.parent.mkdir(parents=True, exist_ok=True)
+            temporary_snapshot = installed_snapshot.with_name(
+                f".{installed_snapshot.name}.{token}.tmp"
+            )
+            try:
+                shutil.copy2(snapshot_source, temporary_snapshot)
+                os.replace(temporary_snapshot, installed_snapshot)
+            finally:
+                temporary_snapshot.unlink(missing_ok=True)
+
+        for name in managed:
+            current = destination / name
+            if current.exists():
+                current.replace(backup / name)
+                moved_existing.append(name)
+        for name in managed:
+            (incoming / name).replace(destination / name)
+            installed.append(name)
+    except BaseException:
+        for name in reversed(installed):
+            current = destination / name
+            if current.exists():
+                _remove_path(current)
+        for name in reversed(moved_existing):
+            saved = backup / name
+            if saved.exists():
+                saved.replace(destination / name)
+        if installed_snapshot is not None:
+            installed_snapshot.unlink(missing_ok=True)
+        raise
+    finally:
+        if incoming.exists():
+            _remove_path(incoming)
+        if backup.exists():
+            _remove_path(backup)
+
+
 
 def build_portable_project(
     recipe_path: str | Path,
@@ -1049,7 +1121,10 @@ def build_portable_project(
         shutil.copy2(candidate / RECIPE_FILENAME, prepared / RECIPE_FILENAME)
         shutil.copy2(candidate / PROJECT_FILENAME, prepared / PROJECT_FILENAME)
         snapshot_relative = snapshot.relative_to(prepared) if snapshot is not None else None
-        _swap_directory(prepared, output)
+        if output.exists():
+            _install_managed_files(prepared, output, snapshot_relative)
+        else:
+            _swap_directory(prepared, output)
 
     final_project_path = output / PROJECT_FILENAME
     final_project = load_project(final_project_path)

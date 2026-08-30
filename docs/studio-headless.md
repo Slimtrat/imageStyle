@@ -55,28 +55,51 @@ absolus présents dans la recette source ne sont jamais conservés dans le proje
     {
       "id": "virtual",
       "kind": "artwork_3d",
-      "duration_frames": 90,
+      "duration_frames": 240,
       "settings": {
         "render_config": {"effect": "sand", "seed": 31},
         "camera": {"motion": "top_drift", "motion_strength": 0.55}
       }
     },
-    {"id": "mur3", "kind": "still", "asset": "mur3", "duration_frames": 45},
-    {"id": "mur2", "kind": "still", "asset": "mur2", "duration_frames": 60}
+    {
+      "id": "mur3",
+      "kind": "still",
+      "asset": "mur3",
+      "duration_frames": 90,
+      "camera": {
+        "keyframes": [
+          {"frame": 0, "x": 0.49, "y": 0.5, "zoom": 1.0},
+          {"frame": 89, "x": 0.51, "y": 0.49, "zoom": 1.08,
+           "easing": "ease_in_out"}
+        ]
+      }
+    },
+    {
+      "id": "mur2",
+      "kind": "still",
+      "asset": "mur2",
+      "duration_frames": 120,
+      "camera": {
+        "keyframes": [
+          {"frame": 0, "x": 0.52, "y": 0.5, "zoom": 1.08},
+          {"frame": 119, "x": 0.5, "y": 0.5, "zoom": 1.0,
+           "easing": "ease_out"}
+        ]
+      }
+    }
   ],
   "transitions": [
     {
-      "kind": "manual_match",
+      "kind": "cut",
       "from": "virtual",
       "to": "mur3",
-      "duration_frames": 18,
-      "settings": {"overlay_opacity": 0.58}
+      "duration_frames": 1
     },
     {
-      "kind": "dissolve",
+      "kind": "cut",
       "from": "mur3",
       "to": "mur2",
-      "duration_frames": 15
+      "duration_frames": 1
     }
   ],
   "outputs": {
@@ -106,8 +129,9 @@ Transitions :
 - `manual_match` raccorde un plan de l’œuvre à une photo ou une vidéo réelle et
   conserve tous ses réglages éditables dans le projet.
 
-Le nombre total de frames est la somme des durées des plans. Une transition utilise
-des poignées autour de leur coupe sans modifier cette durée.
+Le nombre total de frames est la somme des durées des plans. Une transition visuelle
+utilise des poignées autour de sa coupe sans modifier cette durée ; une coupe franche
+passe directement au plan suivant. L’exemple de référence dure 15 secondes à 30 FPS.
 
 ## Reconstruction et sauvegardes
 
