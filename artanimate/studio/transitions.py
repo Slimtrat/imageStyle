@@ -62,14 +62,18 @@ def _transition_easing(transition: Transition) -> Easing:
         from .manual_match import ManualMatchSettings
 
         return ManualMatchSettings.from_transition(transition).easing
-    raise ValueError("La progression exige une transition visuelle")
+    if transition.kind == TransitionKind.SPATIAL_MATCH:
+        from .spatial_match import SpatialMatchSettings
 
+        return SpatialMatchSettings.from_transition(transition).easing
+
+    raise ValueError("La progression exige une transition visuelle")
 
 def transition_progress(transition: Transition, project_frame: int) -> float:
     """Return B's exact weight, including exact zero/one endpoint frames."""
 
-    if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH}:
-        raise ValueError("La progression exige un fondu ou un match manuel")
+    if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
+        raise ValueError("La progression exige une transition visuelle")
     if not transition.start_frame <= project_frame < transition_end_frame(transition):
         raise ValueError("La frame demandée est hors de la transition")
     if transition.duration_frames < 2:
@@ -199,8 +203,12 @@ def _validate_visual_transition_topology(
         from .manual_match import validate_manual_match_transition
 
         validate_manual_match_transition(project, transition)
+    elif transition.kind == TransitionKind.SPATIAL_MATCH:
+        from .spatial_match import validate_spatial_match_transition
+
+        validate_spatial_match_transition(project, transition)
     else:
-        raise ValueError("Cette transition n’est ni un fondu ni un match manuel")
+        raise ValueError("Type de transition visuelle inconnu")
     pair = _clip_pair(project, transition)
     if pair.track.kind != TrackKind.VIDEO:
         raise ValueError("Une transition visuelle doit être placée sur une piste image")
@@ -251,7 +259,7 @@ def validate_project_transitions(
     windows_by_track: dict[str, list[tuple[int, int, str]]] = {}
     endpoints: set[tuple[str, str]] = set()
     for transition in project.transitions:
-        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH}:
+        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
             continue
         pair = _validate_visual_transition_topology(
             project,
@@ -455,7 +463,7 @@ def render_window_for_clip(project: StudioProject, clip: Clip) -> tuple[int, int
     start = clip.start_frame
     end = clip.end_frame
     for transition in project.transitions:
-        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH}:
+        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
             continue
         if transition.from_clip_id == clip.clip_id:
             end = max(end, transition_end_frame(transition))
@@ -477,7 +485,7 @@ def active_visual_transition(
 ) -> Transition | None:
     matches = []
     for transition in project.transitions:
-        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH}:
+        if transition.kind not in {TransitionKind.DISSOLVE, TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
             continue
         if not transition.start_frame <= project_frame < transition_end_frame(transition):
             continue

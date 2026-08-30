@@ -311,6 +311,16 @@ def run_headless_studio(
             "artwork_preparation": result.artwork_preparation,
             "duration_frames": result.project.settings.duration_frames,
             "fps": result.project.settings.fps,
+            "transitions": [
+                {
+                    "id": transition.transition_id,
+                    "kind": transition.kind.value,
+                    "start_frame": transition.start_frame,
+                    "duration_frames": transition.duration_frames,
+                    "parameters": transition.parameters,
+                }
+                for transition in result.project.transitions
+            ],
             "resolution": [result.project.settings.width, result.project.settings.height],
         },
         "controls": controls_record,

@@ -67,7 +67,7 @@ def _render_config_for(request: RenderRequest) -> RenderConfig:
     return config
 
 
-def _camera_settings_for(request: RenderRequest) -> dict[str, float | str]:
+def _camera_settings_for(request: RenderRequest) -> dict[str, Any]:
     settings = _mapping(
         request.invocation.parameters.get("settings", FrozenJsonObject()),
         "settings 3D",
@@ -98,8 +98,10 @@ def _state_metadata(state: Studio3DSceneState) -> FrozenJsonObject:
                 "z": state.camera_pose.z,
                 "pitch": state.camera_pose.pitch,
                 "yaw": state.camera_pose.yaw,
+                "roll": state.camera_pose.roll,
                 "distance": state.camera_pose.distance,
                 "field_of_view": state.camera_pose.field_of_view,
+                "match_weight": state.camera_pose.match_weight,
             },
             "tool": {
                 "stage": state.tool.stage,

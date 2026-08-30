@@ -10,15 +10,21 @@ import re
 import shutil
 import tempfile
 from typing import Any, Mapping
+import numpy as np
+
 from uuid import uuid4
 import zipfile
 
 from ..core.config import RenderConfig
+from ..desktop.studio3d_camera_match import solve_studio3d_camera_match
 from .assets import (
     asset_kind_for_path,
     import_artwork_asset,
     import_media_asset,
 )
+from .camera import render_camera_frame, resolve_camera_pose
+from .compositor import fit_frame
+from .image_io import load_normalized_image
 from .artwork_rectification import rectify_artwork
 from .audio import AudioClipSettings
 from .manual_match import ManualMatchTransform, add_manual_match, update_manual_match
@@ -39,12 +45,18 @@ from .model import (
     Track,
     TrackKind,
 )
+from .spatial_match import add_spatial_match
+from .transition_matching import (
+    AkazeArtworkMatchSolver,
+    AkazeMatchSettings,
+)
 from .persistence import load_project, project_digest, save_project
 from .transitions import add_dissolve
 from .video import VideoClipSettings
 
 
 RECIPE_SCHEMA_VERSION = 1
+RECIPE_COMPILER_VERSION = 3
 PROJECT_FILENAME = "project.artanimate"
 RECIPE_FILENAME = "recipe.json"
 ASSETS_DIRECTORY = "assets"
@@ -361,8 +373,8 @@ class RecipeTransition:
             where,
         )
         kind = _text(values.get("kind"), f"{where}.kind")
-        if kind not in {"cut", "dissolve", "manual_match"}:
-            raise ValueError(f"{where}.kind doit être cut, dissolve ou manual_match")
+        if kind not in {"cut", "dissolve", "manual_match", "spatial_match"}:
+            raise ValueError(f"{where}.kind doit être cut, dissolve, manual_match ou spatial_match")
         duration = _integer(
             values.get("duration_frames", 1 if kind == "cut" else 12),
             f"{where}.duration_frames",
@@ -653,6 +665,16 @@ class StudioRecipe:
             asset = media.get(audio.asset)
             if asset is None or asset.kind != AssetKind.AUDIO:
                 raise ValueError(f"L’audio {audio.audio_id} référence un média audio absent")
+            if transition.kind == "spatial_match":
+                first = self.shots[positions[transition.from_shot]]
+                second = self.shots[positions[transition.to_shot]]
+                if first.kind not in {ClipKind.ARTWORK_2D, ClipKind.ARTWORK_3D}:
+                    raise ValueError("Le raccord spatial doit partir de l’œuvre")
+                if second.kind != ClipKind.STILL:
+                    raise ValueError("Le raccord spatial doit arriver sur une photo")
+                settings = transition.settings or {}
+                _known(settings, {"solver"}, "recipe.transition.spatial_match.settings")
+                AkazeMatchSettings.from_dict(settings.get("solver"))
             if audio.start_frame + audio.duration_frames > duration:
                 raise ValueError(f"L’audio {audio.audio_id} dépasse la durée du projet")
         return self
@@ -808,7 +830,8 @@ def _portable_recipe(
 
 def _build_identity(recipe: StudioRecipe, copied: Mapping[str, Path]) -> str:
     digest = sha256(
-        json.dumps(
+        f"artanimate-recipe-compiler:{RECIPE_COMPILER_VERSION}\n".encode("ascii")
+        + json.dumps(
             recipe.to_dict(),
             ensure_ascii=False,
             sort_keys=True,
@@ -826,6 +849,7 @@ def _three_d_parameters(
     shot: RecipeShot,
     recipe: StudioRecipe,
     outgoing_handle_frames: int,
+    camera_match: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     values = deepcopy(shot.settings or {})
     allowed = {"render_config", "camera", "lamp_brightness", "lamp_motion"}
@@ -843,22 +867,69 @@ def _three_d_parameters(
     camera = _object(values.get("camera", {}), "recipe.3d.camera")
     _known(
         camera,
-        {"yaw", "pitch", "distance", "motion", "motion_strength"},
+        {"yaw", "pitch", "roll", "distance", "motion", "motion_strength"},
         "recipe.3d.camera",
     )
+    compiled_camera: dict[str, Any] = {
+        "yaw": float(camera.get("yaw", 4.0)),
+        "pitch": float(camera.get("pitch", -73.0)),
+        "roll": float(camera.get("roll", 0.0)),
+        "distance": float(camera.get("distance", 610.0)),
+        "motion": str(camera.get("motion", "top_drift")),
+        "motion_strength": float(camera.get("motion_strength", 0.65)),
+    }
+    if camera_match is not None:
+        compiled_camera["match"] = deepcopy(dict(camera_match))
     return {
         "schema_version": 1,
         "render_config": config.to_dict(),
-        "camera": {
-            "yaw": float(camera.get("yaw", 4.0)),
-            "pitch": float(camera.get("pitch", -73.0)),
-            "distance": float(camera.get("distance", 610.0)),
-            "motion": str(camera.get("motion", "top_drift")),
-            "motion_strength": float(camera.get("motion_strength", 0.65)),
-        },
+        "camera": compiled_camera,
         "lamp_brightness": float(values.get("lamp_brightness", 2.7)),
         "lamp_motion": float(values.get("lamp_motion", 0.35)),
     }
+
+
+def _solve_spatial_match(
+    recipe: StudioRecipe,
+    transition: RecipeTransition,
+    artwork_path: Path,
+    project_path: Path,
+) -> Any:
+    target_shot = next(
+        shot for shot in recipe.shots if shot.shot_id == transition.to_shot
+    )
+    target_media = next(
+        media for media in recipe.media if media.media_id == target_shot.asset
+    )
+    target_path = _resolved_media_path(target_media.path, project_path.parent)
+    artwork_image, _artwork_inspection = load_normalized_image(artwork_path)
+    target_image, _target_inspection = load_normalized_image(target_path)
+    target_rgb = np.asarray(target_image, dtype=np.uint8)
+    output_width = recipe.project.width
+    output_height = recipe.project.height
+    # The last transition frame is the exact geometry visible immediately before the cut.
+    target_local_frame = transition.duration_frames - transition.duration_frames // 2 - 1
+    camera = target_shot.camera()
+    if camera is not None:
+        target_canvas = render_camera_frame(
+            target_rgb,
+            output_width,
+            output_height,
+            resolve_camera_pose(camera, target_local_frame),
+            background=recipe.project.background,
+        )
+    else:
+        target_canvas, _coverage = fit_frame(
+            target_rgb,
+            output_width,
+            output_height,
+            target_shot.fit,
+        )
+    settings = transition.settings or {}
+    solver = AkazeArtworkMatchSolver(
+        AkazeMatchSettings.from_dict(settings.get("solver"))
+    )
+    return solver.solve(artwork_image, target_canvas)
 
 
 def compile_studio_recipe(
@@ -889,6 +960,41 @@ def compile_studio_recipe(
         media.media_id: asset
         for media, asset in zip(recipe.media, media_assets, strict=True)
     }
+    spatial_solutions: dict[tuple[str, str], Any] = {}
+    camera_matches: dict[str, Mapping[str, Any]] = {}
+    artwork_aspect = (artwork.width or 1) / (artwork.height or 1)
+    shots_by_id = {shot.shot_id: shot for shot in recipe.shots}
+    for transition in recipe.transitions:
+        if transition.kind != "spatial_match":
+            continue
+        solution = _solve_spatial_match(
+            recipe,
+            transition,
+            artwork_path,
+            path,
+        )
+        spatial_solutions[(transition.from_shot, transition.to_shot)] = solution
+        source_shot = shots_by_id[transition.from_shot]
+        if source_shot.kind != ClipKind.ARTWORK_3D:
+            continue
+        pose = solve_studio3d_camera_match(
+            solution.target_quad,
+            artwork_aspect=artwork_aspect,
+            output_width=recipe.project.width,
+            output_height=recipe.project.height,
+        )
+        transition_start = source_shot.duration_frames - transition.duration_frames // 2
+        source_end = source_shot.duration_frames + (
+            transition.duration_frames - transition.duration_frames // 2
+        ) - 1
+        settle_end = transition_start + max(
+            1,
+            round((source_end - transition_start) * 0.62),
+        )
+        camera_matches[source_shot.shot_id] = pose.to_dict(
+            start_frame=transition_start,
+            end_frame=settle_end,
+        )
     outgoing_handles: dict[str, int] = {}
     for transition in recipe.transitions:
         if transition.kind != "cut":
@@ -905,6 +1011,7 @@ def compile_studio_recipe(
                 shot,
                 recipe,
                 outgoing_handles.get(shot.shot_id, 0),
+                camera_matches.get(shot.shot_id),
             )
         elif shot.kind == ClipKind.STILL:
             settings = StillClipSettings.from_mapping(shot.settings)
@@ -985,7 +1092,7 @@ def compile_studio_recipe(
                 duration_frames=transition_recipe.duration_frames,
                 easing=transition_recipe.easing,
             )
-        else:
+        elif transition_recipe.kind == "manual_match":
             project, transition = add_manual_match(
                 project,
                 clip_ids[transition_recipe.from_shot],
@@ -1023,6 +1130,18 @@ def compile_studio_recipe(
                 for item in project.transitions
                 if item.from_clip_id == clip_ids[transition_recipe.from_shot]
                 and item.to_clip_id == clip_ids[transition_recipe.to_shot]
+            )
+        else:
+            solution = spatial_solutions[
+                (transition_recipe.from_shot, transition_recipe.to_shot)
+            ]
+            project, transition = add_spatial_match(
+                project,
+                clip_ids[transition_recipe.from_shot],
+                clip_ids[transition_recipe.to_shot],
+                solution,
+                duration_frames=transition_recipe.duration_frames,
+                easing=transition_recipe.easing,
             )
         stable_id = f"transition-{transition_recipe.from_shot}-{transition_recipe.to_shot}"
         project = replace(
@@ -1094,25 +1213,38 @@ def _install_managed_files(
     destination: Path,
     snapshot_relative: Path | None,
 ) -> None:
-    """Replace product-owned files without renaming the user-visible project folder."""
+    """Replace changed product files without renaming folders containing open assets."""
 
     token = uuid4().hex
     incoming = destination / f".headless-incoming-{token}"
     backup = destination / f".headless-backup-{token}"
     incoming.mkdir()
     backup.mkdir()
-    managed = (ASSETS_DIRECTORY, RECIPE_FILENAME, PROJECT_FILENAME)
-    moved_existing: list[str] = []
-    installed: list[str] = []
+    desired = {
+        path.relative_to(prepared)
+        for path in _snapshot_files(prepared)
+        if SNAPSHOTS_DIRECTORY not in path.relative_to(prepared).parts
+    }
+    existing = {
+        path.relative_to(destination)
+        for path in _snapshot_files(destination)
+        if SNAPSHOTS_DIRECTORY not in path.relative_to(destination).parts
+    }
+    changed = {
+        relative
+        for relative in desired
+        if relative not in existing
+        or _file_digest(prepared / relative) != _file_digest(destination / relative)
+    }
+    obsolete = existing - desired
+    moved_existing: list[Path] = []
+    installed: list[Path] = []
     installed_snapshot: Path | None = None
     try:
-        for name in managed:
-            source = prepared / name
-            target = incoming / name
-            if source.is_dir():
-                shutil.copytree(source, target)
-            else:
-                shutil.copy2(source, target)
+        for relative in sorted(changed, key=lambda item: item.as_posix()):
+            target = incoming / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(prepared / relative, target)
 
         if snapshot_relative is not None:
             snapshot_source = prepared / snapshot_relative
@@ -1127,23 +1259,32 @@ def _install_managed_files(
             finally:
                 temporary_snapshot.unlink(missing_ok=True)
 
-        for name in managed:
-            current = destination / name
-            if current.exists():
-                current.replace(backup / name)
-                moved_existing.append(name)
-        for name in managed:
-            (incoming / name).replace(destination / name)
-            installed.append(name)
+        to_backup = sorted(
+            (changed & existing) | obsolete,
+            key=lambda item: item.as_posix(),
+        )
+        for relative in to_backup:
+            current = destination / relative
+            saved = backup / relative
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            current.replace(saved)
+            moved_existing.append(relative)
+        for relative in sorted(changed, key=lambda item: item.as_posix()):
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            (incoming / relative).replace(target)
+            installed.append(relative)
     except BaseException:
-        for name in reversed(installed):
-            current = destination / name
+        for relative in reversed(installed):
+            current = destination / relative
             if current.exists():
                 _remove_path(current)
-        for name in reversed(moved_existing):
-            saved = backup / name
+        for relative in reversed(moved_existing):
+            saved = backup / relative
             if saved.exists():
-                saved.replace(destination / name)
+                target = destination / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                saved.replace(target)
         if installed_snapshot is not None:
             installed_snapshot.unlink(missing_ok=True)
         raise

@@ -5,7 +5,6 @@ import numpy as np
 from ..camera import render_camera_frame
 from ..compositor import (
     alpha_composite_rgb,
-    blend_rgb_frames,
     composite_artwork_effect,
     fit_frame,
 )
@@ -18,6 +17,7 @@ from ..manual_match import (
 from ..sources import validate_frame_index
 from ..semantic_actions import SEMANTIC_ACTION_IDS
 from ..transitions import active_visual_transition, transition_clip_pair, transition_progress
+from ..transition_strategies import compose_transition_frames
 from .classic_2d import PreparedRenderPlan, PreparedRenderPlanEntry
 from .legacy_project import LegacySemanticProject
 
@@ -468,7 +468,8 @@ class SemanticPlanCompositor:
                 ]
                 from_state = self._content_state(background, from_entry, frame_index)
                 to_state = self._content_state(background, to_entry, frame_index)
-                background = blend_rgb_frames(
+                background = compose_transition_frames(
+                    transition,
                     from_state,
                     to_state,
                     transition_progress(transition, frame_index),

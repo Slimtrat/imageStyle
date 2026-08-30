@@ -20,6 +20,7 @@ from .transitions import (
     transition_clip_pair,
     validate_project_transitions,
 )
+from .transition_strategies import compose_transition_frames
 
 
 class MissingClipSourceError(KeyError):
@@ -178,7 +179,6 @@ class StudioCompositor:
             for clip in track.clips
             if clip.kind == ClipKind.EFFECT_2D
         }
-
     def _source_for(self, clip: Clip) -> TimedFrameSource:
         try:
             source = self.sources[clip.clip_id]
@@ -327,7 +327,8 @@ class StudioCompositor:
                         frame_index,
                         virtual_handle=True,
                     )
-                    background = blend_rgb_frames(
+                    background = compose_transition_frames(
+                        transition,
                         from_state,
                         to_state,
                         transition_progress(transition, frame_index),

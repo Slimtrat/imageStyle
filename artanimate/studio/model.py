@@ -52,6 +52,7 @@ class Easing(StrEnum):
 class TransitionKind(StrEnum):
     CUT = "cut"
     DISSOLVE = "dissolve"
+    SPATIAL_MATCH = "spatial_match"
     MATCH = "match"
 
 

@@ -7,11 +7,33 @@ Item {
     property real artworkAspect: 1.6
     property real cameraYaw: 0
     property real cameraPitch: -78
+    property real cameraRoll: 0
     property real cameraDistance: 560
     property real cameraPivotY: -8
+    property real cameraX: 0
+    property real cameraZ: 0
+    property real cameraFieldOfView: 39
     property real cameraOrbitTurns: 0
     property string cameraMotion: "flyover"
     property real cameraMotionStrength: 1.0
+    property real cameraMatchWeight: 0
+    property real cameraMatchX: 0
+    property real cameraMatchY: -8
+    property real cameraMatchZ: 0
+    property real cameraMatchPitch: -78
+    property real cameraMatchYaw: 0
+    property real cameraMatchRoll: 0
+    property real cameraMatchDistance: 560
+    property real cameraMatchFieldOfView: 39
+    property bool cameraResolvedPoseEnabled: false
+    property real cameraResolvedX: 0
+    property real cameraResolvedY: -8
+    property real cameraResolvedZ: 0
+    property real cameraResolvedPitch: -78
+    property real cameraResolvedYaw: 0
+    property real cameraResolvedRoll: 0
+    property real cameraResolvedDistance: 560
+    property real cameraResolvedFieldOfView: 39
     property real lampBrightness: 2.4
     property real lampMotion: 0.65
     property string effectKind: "sand"
@@ -64,6 +86,10 @@ Item {
     function smootherstep(value) {
         const t = Math.max(0, Math.min(1, value))
         return t * t * t * (t * (t * 6 - 15) + 10)
+    }
+
+    function lerp(first, second, weight) {
+        return first + (second - first) * weight
     }
 
     function wrapAngle(value) {
@@ -131,39 +157,68 @@ Item {
                     + Math.sin(flightProgress * Math.PI * 1.15) * 13
                 readonly property real railDistance: 330
                     - Math.sin(flightProgress * Math.PI) * 15
-                readonly property real fitTangent: Math.tan(39 * Math.PI / 360)
+                readonly property real fitTangent: Math.tan(
+                    root.cameraFieldOfView * Math.PI / 360)
                 readonly property real fitDistance: Math.max(
                     root.cameraDistance,
                     root.artworkWidth * 1.08
                         / (2 * fitTangent * Math.max(0.2, root.outputAspect)),
                     root.artworkDepth * 1.08 / (2 * fitTangent))
-                readonly property real animatedDistance: fitDistance
+                readonly property real baseDistance: fitDistance
                     + flyoverWeight * (railDistance - fitDistance)
                     - driftEnvelope * 26
-                x: railX * flyoverWeight
+                readonly property real baseX: root.cameraX + railX * flyoverWeight
                     + root.artworkWidth * 0.075
                         * Math.sin(root.effectProgress * Math.PI * 2) * driftEnvelope
-                y: root.cameraPivotY
+                readonly property real baseY: root.cameraPivotY
                     + flyoverWeight * (root.artworkSurfaceY + 3 - root.cameraPivotY)
-                z: railZ * flyoverWeight
+                readonly property real baseZ: root.cameraZ + railZ * flyoverWeight
                     + root.artworkDepth * 0.055
                         * Math.cos(root.effectProgress * Math.PI * 2) * driftEnvelope
-                eulerRotation.x: root.cameraPitch
+                readonly property real basePitch: root.cameraPitch
                     + flyoverWeight * (railPitch - root.cameraPitch)
                     - driftEnvelope * 2.5
                         * Math.sin(root.effectProgress * Math.PI * 2)
-                eulerRotation.y: root.cameraYaw
+                readonly property real baseYaw: root.cameraYaw
                     + flyoverWeight * (railYaw - root.cameraYaw)
                     + driftEnvelope * 4
                         * Math.sin(root.effectProgress * Math.PI * 2)
                     + root.cameraOrbitTurns * 360 * root.effectProgress
+                readonly property real baseFieldOfView: root.cameraFieldOfView
+                    + flyoverWeight * 7 + driftEnvelope * 1.5
+                readonly property real animatedDistance:
+                    root.cameraResolvedPoseEnabled
+                        ? root.cameraResolvedDistance
+                        : root.lerp(baseDistance, root.cameraMatchDistance, root.cameraMatchWeight)
+                x: root.cameraResolvedPoseEnabled
+                    ? root.cameraResolvedX
+                    : root.lerp(baseX, root.cameraMatchX, root.cameraMatchWeight)
+                y: root.cameraResolvedPoseEnabled
+                    ? root.cameraResolvedY
+                    : root.lerp(baseY, root.cameraMatchY, root.cameraMatchWeight)
+                z: root.cameraResolvedPoseEnabled
+                    ? root.cameraResolvedZ
+                    : root.lerp(baseZ, root.cameraMatchZ, root.cameraMatchWeight)
+                eulerRotation.x: root.cameraResolvedPoseEnabled
+                    ? root.cameraResolvedPitch
+                    : root.lerp(basePitch, root.cameraMatchPitch, root.cameraMatchWeight)
+                eulerRotation.y: root.cameraResolvedPoseEnabled
+                    ? root.cameraResolvedYaw
+                    : root.lerp(baseYaw, root.cameraMatchYaw, root.cameraMatchWeight)
+                eulerRotation.z: root.cameraResolvedPoseEnabled
+                    ? root.cameraResolvedRoll
+                    : root.lerp(root.cameraRoll, root.cameraMatchRoll, root.cameraMatchWeight)
                 PerspectiveCamera {
                     id: camera
                     z: cameraRig.animatedDistance
                     clipNear: 8
                     clipFar: 3000
-                    fieldOfView: 39 + cameraRig.flyoverWeight * 7
-                        + cameraRig.driftEnvelope * 1.5
+                    fieldOfView: root.cameraResolvedPoseEnabled
+                        ? root.cameraResolvedFieldOfView
+                        : root.lerp(
+                            cameraRig.baseFieldOfView,
+                            root.cameraMatchFieldOfView,
+                            root.cameraMatchWeight)
                 }
             }
 
