@@ -130,6 +130,8 @@ def test_camera_pose_accounts_for_vertical_output_framing() -> None:
 
     assert vertical.camera_pose.distance > horizontal.camera_pose.distance
     assert vertical.qml_properties()["outputAspect"] == pytest.approx(9 / 16)
+    assert vertical.qml_properties()["artworkColorMode"] == "faithful"
+    assert vertical.qml_properties()["artworkExposure"] == pytest.approx(1.0)
 
 
 def test_scene_state_rejects_frames_outside_the_shot() -> None:

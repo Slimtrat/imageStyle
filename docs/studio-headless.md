@@ -157,6 +157,11 @@ Le nombre total de frames est la somme des durées des plans. Une transition vis
 utilise des poignées autour de sa coupe sans modifier cette durée ; une coupe franche
 passe directement au plan suivant. L’exemple de référence V3 dure 21 secondes à 30 FPS.
 
+Un plan `artwork_3d` utilise par défaut `settings.color_policy.mode: "faithful"` :
+les lumières décoratives n’altèrent pas les couleurs de l’œuvre. Le mode volontaire
+`scene_integrated` et la planche de comparaison headless sont décrits dans
+[studio-color-fidelity.md](studio-color-fidelity.md).
+
 Un prologue conserve son titre, sous-titre, placement, typographie, couleurs et mouvement
 dans la recette. La famille `builtin-sans` est embarquée par le renderer local et ne
 dépend d’aucun service externe.

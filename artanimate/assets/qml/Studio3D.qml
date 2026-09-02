@@ -36,6 +36,10 @@ Item {
     property real cameraResolvedFieldOfView: 39
     property real lampBrightness: 2.4
     property real lampMotion: 0.65
+    property string artworkColorMode: 'faithful'
+    property string artworkTextureColorSpace: 'srgb'
+    property real artworkExposure: 1.0
+    property string artworkToneMapping: 'linear'
     property string effectKind: "sand"
     property string rgbMode: "channels"
     property string effectDirection: "left"
@@ -115,6 +119,8 @@ Item {
         environment: SceneEnvironment {
             backgroundMode: SceneEnvironment.Color
             clearColor: "#090a0c"
+            // Fixed by ArtworkColorPolicy for identical preview, headless and export.
+            tonemapMode: SceneEnvironment.TonemapModeLinear
             antialiasingMode: SceneEnvironment.MSAA
             antialiasingQuality: SceneEnvironment.VeryHigh
             temporalAAEnabled: true
@@ -433,7 +439,15 @@ Item {
                         1
                     )
                     materials: PrincipledMaterial {
-                        baseColor: "#ffffff"
+                        baseColor: Qt.rgba(
+                            root.artworkExposure,
+                            root.artworkExposure,
+                            root.artworkExposure,
+                            1.0
+                        )
+                        lighting: root.artworkColorMode === "faithful"
+                            ? PrincipledMaterial.NoLighting
+                            : PrincipledMaterial.FragmentLighting
                         roughness: 0.47
                         baseColorMap: Texture {
                             sourceItem: Image {
@@ -450,7 +464,8 @@ Item {
                 }
 
                 // The Wave is the artwork: Python updates a dense native mesh from
-                // the source-color density while PrincipledMaterial keeps texture fidelity.
+                // the source-color density. Faithful mode leaves the deformed mesh,
+                // depth and silhouette intact without recoloring its source pixels.
                 Model {
                     id: organicWaveArtwork
                     visible: root.effectKind === "wave"
@@ -460,7 +475,15 @@ Item {
                     receivesShadows: true
                     geometry: organicWaveGeometry
                     materials: PrincipledMaterial {
-                        baseColor: "#ffffff"
+                        baseColor: Qt.rgba(
+                            root.artworkExposure,
+                            root.artworkExposure,
+                            root.artworkExposure,
+                            1.0
+                        )
+                        lighting: root.artworkColorMode === "faithful"
+                            ? PrincipledMaterial.NoLighting
+                            : PrincipledMaterial.FragmentLighting
                         roughness: 0.47 - 0.25 * root.smootherstep(
                             root.effectProgress / 0.08
                         ) * (1 - root.smootherstep(

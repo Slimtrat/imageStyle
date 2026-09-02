@@ -54,6 +54,7 @@ from ..studio.camera import (
     upsert_camera_keyframe,
 )
 from ..studio.clock import StudioClock
+from ..studio.color_fidelity import ArtworkColorPolicy
 from ..studio.events import compile_timeline_triggers
 from ..studio.effect_2d import (
     add_effect_clip,
@@ -1855,7 +1856,11 @@ class StudioPanel(QWidget):
                     settings = values.get("settings")
                     if not isinstance(settings, dict):
                         settings = {}
-                    parameters = {"schema_version": 1, **settings}
+                    parameters = {
+                        "schema_version": 1,
+                        "color_policy": ArtworkColorPolicy().to_dict(),
+                        **settings,
+                    }
                     updated_clip = replace(
                         clip,
                         kind=ClipKind.ARTWORK_3D,

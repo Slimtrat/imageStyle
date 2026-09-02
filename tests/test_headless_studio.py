@@ -49,7 +49,9 @@ def test_headless_job_writes_controls_and_structured_report(tmp_path: Path) -> N
         "assets/artwork/artwork-artwork.png",
         "assets/media/wall-wall.jpg",
     ]
+    assert report["project"]["color_policies"] == []
     assert report["controls"]["execution_mode"] == "semantic"
+    assert report["controls"]["color_fidelity"] is None
     assert len(report["controls"]["frames"]) >= 4
     assert (output / "renders" / "controls.jpg").is_file()
 

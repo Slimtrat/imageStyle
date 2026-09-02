@@ -99,6 +99,7 @@ class StandaloneStudio3DCapture:
             return
         config = prepared.source.renderer.config
         initial = prepared.state_at(0)
+        self.panel.set_hud_visible(False)
         self.panel.set_scene_data(prepared.scene_data)
         self.panel.set_effect(
             config.effect,

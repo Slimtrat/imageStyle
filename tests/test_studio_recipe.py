@@ -84,6 +84,8 @@ def test_recipe_build_is_portable_deterministic_and_snapshotted(tmp_path: Path) 
     assert all(not Path(asset.path).is_absolute() for asset in first.project.assets)
     clips = first.project.tracks[0].clips
     assert [clip.kind for clip in clips] == [ClipKind.ARTWORK_3D, ClipKind.STILL]
+    assert clips[0].parameters["color_policy"]["mode"] == "faithful"
+    assert clips[0].parameters["color_policy"]["texture_color_space"] == "srgb"
     assert first.project.transitions[0].kind == TransitionKind.MATCH
     first_digest = project_digest(first.project)
 
@@ -128,3 +130,24 @@ def test_invalid_recipe_never_replaces_the_last_valid_project(tmp_path: Path) ->
         build_portable_project(recipe_path, destination)
 
     assert project_digest(load_project(destination / "project.artanimate")) == saved_digest
+
+
+def test_recipe_persists_an_explicit_scene_integrated_color_mode(
+    tmp_path: Path,
+) -> None:
+    artwork = tmp_path / "artwork.png"
+    wall = tmp_path / "wall.jpg"
+    _image(artwork, (200, 80, 60))
+    _image(wall, (70, 90, 140))
+    payload = _recipe(artwork, wall)
+    payload["shots"][0]["settings"]["color_policy"] = {
+        "mode": "scene_integrated"
+    }
+    recipe_path = tmp_path / "recipe.json"
+    recipe_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = build_portable_project(recipe_path, tmp_path / "portable")
+
+    policy = result.project.tracks[0].clips[0].parameters["color_policy"]
+    assert policy["mode"] == "scene_integrated"
+    assert policy["exposure"] == 1.0

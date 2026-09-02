@@ -13,6 +13,7 @@ from ..studio.artwork_source import (
     ArtworkTimedFrameSource,
     ArtworkTimedSourceFactory,
 )
+from ..studio.color_fidelity import ArtworkColorPolicy
 from ..studio.semantic import (
     FrozenJsonObject,
     RendererDescriptor,
@@ -81,6 +82,12 @@ def _camera_settings_for(request: RenderRequest) -> dict[str, Any]:
     if "lamp_motion" in settings:
         camera["lamp_motion"] = float(settings["lamp_motion"])
     return camera
+
+
+def _color_policy_for(request: RenderRequest) -> ArtworkColorPolicy:
+    parameters = request.invocation.parameters
+    settings = _mapping(parameters.get("settings", FrozenJsonObject()), "settings 3D")
+    return ArtworkColorPolicy.from_mapping(settings.get("color_policy"))
 
 
 def _state_metadata(state: Studio3DSceneState) -> FrozenJsonObject:
@@ -248,6 +255,7 @@ class ClassicStudio3DRenderer:
                 return RendererEvaluation(False, reasons=("fichier œuvre introuvable",))
             _render_config_for(request)
             _camera_settings_for(request)
+            _color_policy_for(request)
         except (OSError, TypeError, ValueError) as exc:
             return RendererEvaluation(False, reasons=(str(exc),))
         return RendererEvaluation(True, 100)
@@ -269,6 +277,7 @@ class ClassicStudio3DRenderer:
             config,
             camera=_camera_settings_for(request),
             output_aspect=request.constraints.width / request.constraints.height,
+            color_policy=_color_policy_for(request),
         )
         resolver = Studio3DSceneStateResolver(
             config,

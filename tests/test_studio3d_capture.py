@@ -98,6 +98,9 @@ class _FakeCapturePanel:
     def is_ready(self) -> bool:
         return True
 
+    def set_hud_visible(self, visible) -> None:
+        self.calls.append(("hud", visible))
+
     def set_scene_data(self, data) -> None:
         self.calls.append(("scene", data))
 
@@ -165,4 +168,5 @@ def test_standalone_capture_owns_an_offscreen_surface(app) -> None:
     assert image.size().toTuple() == (90, 160)
     assert (Qt.WidgetAttribute.WA_DontShowOnScreen, True) in panel.attributes
     assert ("capture", 90, 160) in panel.calls
+    assert ("hud", False) in panel.calls
     assert panel.calls[-2:] == ["close", "delete"]

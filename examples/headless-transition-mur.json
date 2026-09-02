@@ -42,7 +42,10 @@
           "motion_strength": 0.55
         },
         "lamp_brightness": 2.7,
-        "lamp_motion": 0.3
+        "lamp_motion": 0.3,
+        "color_policy": {
+          "mode": "faithful"
+        }
       }
     },
     {

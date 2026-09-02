@@ -70,6 +70,9 @@ def test_studio_scene_asset_contains_room_lamp_and_camera() -> None:
     assert "artworkSource" in scene
     assert "generateMipmaps: false" in scene
     assert "mipFilter: Texture.None" in scene
+    assert "property string artworkColorMode: 'faithful'" in scene
+    assert scene.count("PrincipledMaterial.NoLighting") == 2
+    assert "tonemapMode: SceneEnvironment.TonemapModeLinear" in scene
     assert "root.effectToolProgress / Math.max(root.paintFallRatio" in scene
     assert "brightness: 0.18 * (1.0 - paintDropDeck.impactProgress)" not in scene
     assert "MouseArea" in scene
@@ -101,6 +104,11 @@ def test_studio_panel_loads_scene_and_accepts_animated_frames(
 
         root = panel.view.rootObject()
         assert root is not None
+        assert root.property("artworkColorMode") == "faithful"
+        integrated_index = panel.color_policy_combo.findData("scene_integrated")
+        panel.color_policy_combo.setCurrentIndex(integrated_index)
+        app.processEvents()
+        assert root.property("artworkColorMode") == "scene_integrated"
         assert root.property("artworkSource").toString().startswith(
             "image://artanimate/"
         )

@@ -15,12 +15,14 @@ from PySide6.QtWidgets import QApplication
 
 from artanimate.core.config import RenderConfig
 from artanimate.desktop.studio3d_capture import StandaloneStudio3DCapture
+from artanimate.desktop.studio3d_export import qimage_to_rgb
 from artanimate.desktop.studio3d_renderer import (
     CapturedStudio3DRender,
     ClassicStudio3DRenderer,
 )
 from artanimate.studio.adapters.classic_2d import build_legacy_capability_registry
 from artanimate.studio.adapters.legacy_project import project_as_semantic
+from artanimate.studio.color_fidelity import measure_color_fidelity
 from artanimate.studio.model import ClipKind, StudioProject
 from artanimate.studio.semantic import RendererRegistry, RenderConstraints, RenderPlanner
 
@@ -45,7 +47,14 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def _semantic_3d_project(tmp_path):
+def _semantic_3d_project(
+    tmp_path,
+    color_mode: str | None = None,
+    *,
+    camera_overrides: dict | None = None,
+    lamp_brightness: float = 2.8,
+    lamp_motion: float = 0.4,
+):
     artwork = tmp_path / "artwork.png"
     pixels = np.zeros((64, 96, 3), dtype=np.uint8)
     pixels[:, :32] = (220, 50, 30)
@@ -63,22 +72,27 @@ def _semantic_3d_project(tmp_path):
     )
     project = StudioProject.new(artwork, fps=30, duration_seconds=1)
     video = project.tracks[0]
+    camera = {
+        "yaw": 3.0,
+        "pitch": -76.0,
+        "distance": 600.0,
+        "motion": "top_drift",
+        "motion_strength": 0.7,
+    }
+    camera.update(camera_overrides or {})
+    settings = {
+        "schema_version": 1,
+        "render_config": config.to_dict(),
+        "camera": camera,
+        "lamp_brightness": lamp_brightness,
+        "lamp_motion": lamp_motion,
+    }
+    if color_mode is not None:
+        settings["color_policy"] = {"mode": color_mode}
     clip = replace(
         video.clips[0],
         kind=ClipKind.ARTWORK_3D,
-        parameters={
-            "schema_version": 1,
-            "render_config": config.to_dict(),
-            "camera": {
-                "yaw": 3.0,
-                "pitch": -76.0,
-                "distance": 600.0,
-                "motion": "top_drift",
-                "motion_strength": 0.7,
-            },
-            "lamp_brightness": 2.8,
-            "lamp_motion": 0.4,
-        },
+        parameters=settings,
     )
     project = replace(
         project,
@@ -87,8 +101,12 @@ def _semantic_3d_project(tmp_path):
     return artwork, project
 
 
-def _prepared_3d(tmp_path):
-    artwork, project = _semantic_3d_project(tmp_path)
+def _prepared_3d(tmp_path, color_mode: str | None = None, **scene_settings):
+    artwork, project = _semantic_3d_project(
+        tmp_path,
+        color_mode,
+        **scene_settings,
+    )
     semantic = project_as_semantic(project)
     invocation = next(
         item
@@ -143,6 +161,7 @@ def test_studio3d_prepared_render_is_random_access_and_complete(tmp_path) -> Non
         assert metadata["frame_index"] == 4
         assert metadata["qml_properties"]["outputAspect"] == pytest.approx(9 / 16)
         assert metadata["qml_properties"]["cameraMotion"] == "top_drift"
+        assert metadata["qml_properties"]["artworkColorMode"] == "faithful"
         assert metadata["camera_pose"]["distance"] > 0
         start = prepared.frame_at(0)
         end = prepared.frame_at(prepared.frame_count - 1)
@@ -195,3 +214,79 @@ def test_real_offscreen_surface_captures_without_the_visible_workspace(
         )
     finally:
         prepared.close()
+
+
+@pytest.mark.skipif(
+    os.environ.get("ARTANIMATE_RUN_GPU_COLOR_TEST") != "1",
+    reason="qualification GPU Windows explicite",
+)
+def test_windows_gpu_faithful_material_meets_delta_e_budget(app, tmp_path) -> None:
+    faithful = _prepared_3d(tmp_path, "faithful")
+    faithful_angled = _prepared_3d(
+        tmp_path,
+        "faithful",
+        camera_overrides={
+            "yaw": -11.0,
+            "pitch": -70.0,
+            "distance": 650.0,
+            "motion": "fixed",
+            "motion_strength": 0.0,
+        },
+        lamp_brightness=0.75,
+        lamp_motion=0.0,
+    )
+    integrated = _prepared_3d(tmp_path, "scene_integrated")
+    source_colors = np.array(
+        ((220, 50, 30), (30, 180, 80), (35, 70, 220)),
+        dtype=np.uint8,
+    )
+    try:
+        with StandaloneStudio3DCapture(360, 640) as capture:
+            frame_index = faithful.frame_count - 1
+            faithful_rgb = qimage_to_rgb(capture.capture_at(faithful, frame_index))
+            faithful_angled_rgb = qimage_to_rgb(
+                capture.capture_at(faithful_angled, frame_index)
+            )
+            integrated_rgb = qimage_to_rgb(capture.capture_at(integrated, frame_index))
+
+        def reference_for(rendered):
+            pixels = rendered.reshape(-1, 3)
+            distances = np.linalg.norm(
+                pixels[:, None, :].astype(np.float64)
+                - source_colors[None, :, :].astype(np.float64),
+                axis=2,
+            )
+            labels = distances.argmin(axis=1)
+            interior = (distances.min(axis=1) < 12.0).reshape(rendered.shape[:2])
+            reference = source_colors[labels].reshape(rendered.shape)
+            return reference, interior
+
+        reference, interior = reference_for(faithful_rgb)
+        faithful_reports = [
+            measure_color_fidelity(reference, faithful_rgb, mask=interior)
+        ]
+        angled_reference, angled_interior = reference_for(faithful_angled_rgb)
+        faithful_reports.append(
+            measure_color_fidelity(
+                angled_reference,
+                faithful_angled_rgb,
+                mask=angled_interior,
+            )
+        )
+        integrated_report = measure_color_fidelity(
+            reference,
+            integrated_rgb,
+            mask=interior,
+        )
+
+        assert all(report.sample_count > 10_000 for report in faithful_reports)
+        assert all(report.passes for report in faithful_reports)
+        assert integrated_report.passes is False
+        assert all(
+            report.median_delta_e00 < integrated_report.median_delta_e00
+            for report in faithful_reports
+        )
+    finally:
+        faithful.close()
+        faithful_angled.close()
+        integrated.close()

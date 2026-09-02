@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from ..branding import LOGO_PATH
 from ..core.effects import EffectDescriptor, effect_descriptors
+from ..studio.color_fidelity import ArtworkColorMode, ArtworkColorPolicy
 from .controls import ParameterSlider
 from .studio3d_camera import CAMERA_MOTIONS, camera_motion
 from .studio3d_particles import (
@@ -136,6 +137,7 @@ class Studio3DPanel(QWidget):
         self._rgb_mode = "channels"
         self._effect_direction = "left"
         self._effect_progress = 0.0
+        self._color_policy = ArtworkColorPolicy()
         self._camera_motion = camera_motion("flyover")
         self._wave_settings = OrganicWaveSettings()
         self._wave_geometry = OrganicWaveGeometry()
@@ -243,6 +245,23 @@ class Studio3DPanel(QWidget):
         source_row.addWidget(choose)
         source_row.addWidget(refresh)
         layout.addLayout(source_row)
+
+        self.color_policy_combo = QComboBox()
+        self.color_policy_combo.addItem(
+            "Fidèle · couleurs originales",
+            ArtworkColorMode.FAITHFUL.value,
+        )
+        self.color_policy_combo.addItem(
+            "Intégré · lumière de la scène",
+            ArtworkColorMode.SCENE_INTEGRATED.value,
+        )
+        self.color_policy_combo.setToolTip(
+            "Le mode fidèle protège les couleurs de l’œuvre des lampes décoratives."
+        )
+        self.color_policy_combo.currentIndexChanged.connect(
+            self._color_policy_changed
+        )
+        layout.addWidget(self.color_policy_combo)
 
         effect_title = QLabel("Animation de l’œuvre")
         effect_title.setObjectName("sectionTitle")
@@ -427,6 +446,7 @@ class Studio3DPanel(QWidget):
         self._export_controls = (
             choose,
             refresh,
+            self.color_policy_combo,
             self.effect_combo,
             self.effect_settings_button,
             self.camera_preset,
@@ -460,6 +480,17 @@ class Studio3DPanel(QWidget):
         self.effect_selected.emit(effect)
         logger.info("Effet sélectionné depuis le Studio 3D : %s", effect)
 
+    def _color_policy_changed(self, *_args: object) -> None:
+        self._color_policy = ArtworkColorPolicy.from_mapping(
+            str(self.color_policy_combo.currentData())
+        )
+        for name, value in self._color_policy.qml_properties().items():
+            self._set_scene_property(name, value)
+        logger.info(
+            "Politique colorimétrique Studio 3D : %s",
+            self._color_policy.mode.value,
+        )
+
     def _scene_status_changed(self, status: QQuickWidget.Status) -> None:
         if status == QQuickWidget.Status.Ready:
             self._scene_errors = ()
@@ -478,6 +509,9 @@ class Studio3DPanel(QWidget):
         root = self.view.rootObject()
         if root is not None:
             root.setProperty(name, value)
+
+    def set_hud_visible(self, visible: bool) -> None:
+        self._set_scene_property("showHud", bool(visible))
 
     def _apply_selected_preset(self, *_args: object) -> None:
         key = str(self.camera_preset.currentData())
@@ -707,6 +741,8 @@ class Studio3DPanel(QWidget):
         self._set_scene_property("rgbMode", self._rgb_mode)
         self._set_scene_property("effectDirection", self._effect_direction)
         self._set_scene_property("effectProgress", self._effect_progress)
+        for name, value in self._color_policy.qml_properties().items():
+            self._set_scene_property(name, value)
         self._publish_laser_cursor()
         self._output_ratio_changed()
 
@@ -717,6 +753,14 @@ class Studio3DPanel(QWidget):
         self._effect_direction = state.settings.direction
         self._effect_progress = state.effect_progress
         self._wave_settings = state.settings.wave
+        self._color_policy = state.settings.color_policy
+        policy_index = self.color_policy_combo.findData(
+            self._color_policy.mode.value
+        )
+        if policy_index >= 0:
+            blocker = QSignalBlocker(self.color_policy_combo)
+            self.color_policy_combo.setCurrentIndex(policy_index)
+            del blocker
         for name, value in state.qml_properties().items():
             self._set_scene_property(name, value)
 

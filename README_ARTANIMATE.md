@@ -128,6 +128,9 @@ Le contrat, le schéma et l’exemple `3D → mur3 → mur2` sont décrits dans
 [docs/studio-headless.md](docs/studio-headless.md) et
 [examples/headless-transition-mur.json](examples/headless-transition-mur.json).
 
+La politique de restitution fidèle des couleurs de l’œuvre 3D et sa mesure ΔE00 sont
+décrites dans [docs/studio-color-fidelity.md](docs/studio-color-fidelity.md).
+
 ## Premier film en ligne de commande
 
 ```powershell

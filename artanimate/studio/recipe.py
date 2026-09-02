@@ -23,6 +23,7 @@ from .assets import (
     import_media_asset,
 )
 from .camera import render_camera_frame, resolve_camera_pose
+from .color_fidelity import ArtworkColorPolicy
 from .compositor import fit_frame
 from .image_io import load_normalized_image
 from .artwork_rectification import rectify_artwork
@@ -900,7 +901,13 @@ def _three_d_parameters(
     camera_match: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     values = deepcopy(shot.settings or {})
-    allowed = {"render_config", "camera", "lamp_brightness", "lamp_motion"}
+    allowed = {
+        "render_config",
+        "camera",
+        "lamp_brightness",
+        "lamp_motion",
+        "color_policy",
+    }
     _known(values, allowed, f"recipe.shot.{shot.shot_id}.settings")
     raw_config = _object(values.get("render_config", {}), "recipe.3d.render_config")
     required_duration = (shot.duration_frames + outgoing_handle_frames) / recipe.project.fps
@@ -928,12 +935,14 @@ def _three_d_parameters(
     }
     if camera_match is not None:
         compiled_camera["match"] = deepcopy(dict(camera_match))
+    color_policy = ArtworkColorPolicy.from_mapping(values.get("color_policy"))
     return {
         "schema_version": 1,
         "render_config": config.to_dict(),
         "camera": compiled_camera,
         "lamp_brightness": float(values.get("lamp_brightness", 2.7)),
         "lamp_motion": float(values.get("lamp_motion", 0.35)),
+        "color_policy": color_policy.to_dict(),
     }
 
 

@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from ..core.config import RenderConfig
 from ..studio.clock import StudioClock
+from ..studio.color_fidelity import ArtworkColorPolicy
 from .studio3d_camera import CameraMotionTiming, camera_motion_timing, smootherstep
 from .studio3d_particles import (
     StudioLaserCursor,
@@ -231,6 +232,7 @@ class Studio3DSceneSettings:
     lamp_motion: float
     output_aspect: float
     wave: OrganicWaveSettings
+    color_policy: ArtworkColorPolicy = ArtworkColorPolicy()
 
     def __post_init__(self) -> None:
         if not isinstance(self.effect, str) or not self.effect:
@@ -248,6 +250,8 @@ class Studio3DSceneSettings:
             raise ValueError("lamp_motion doit être compris entre 0 et 1")
         if _finite(self.output_aspect, "output_aspect") <= 0.0:
             raise ValueError("output_aspect doit être strictement positif")
+        if not isinstance(self.color_policy, ArtworkColorPolicy):
+            raise TypeError("La scène 3D doit contenir sa politique colorimétrique")
         if not isinstance(self.wave, OrganicWaveSettings):
             raise TypeError("La scène Studio 3D doit contenir ses réglages de vague")
 
@@ -258,6 +262,7 @@ class Studio3DSceneSettings:
         *,
         camera: Mapping[str, Any] | Studio3DCameraSettings,
         output_aspect: float,
+        color_policy: Mapping[str, Any] | str | ArtworkColorPolicy | None = None,
     ) -> "Studio3DSceneSettings":
         config.validate()
         camera_settings = (
@@ -274,6 +279,11 @@ class Studio3DSceneSettings:
             else config.direction
         )
         camera_values = camera if isinstance(camera, Mapping) else {}
+        resolved_color_policy = (
+            color_policy
+            if isinstance(color_policy, ArtworkColorPolicy)
+            else ArtworkColorPolicy.from_mapping(color_policy)
+        )
         return cls(
             effect=config.effect,
             rgb_mode=config.rgb_mode,
@@ -283,6 +293,7 @@ class Studio3DSceneSettings:
             lamp_motion=float(camera_values.get("lamp_motion", 0.65)),
             output_aspect=aspect,
             wave=OrganicWaveSettings.from_config(config),
+            color_policy=resolved_color_policy,
         )
 
 
@@ -378,6 +389,7 @@ class Studio3DSceneState:
             "laserCursorV": self.laser.target_v,
             "laserCursorOn": self.laser.beam_on,
             "outputAspect": self.settings.output_aspect,
+            **self.settings.color_policy.qml_properties(),
         }
 
 

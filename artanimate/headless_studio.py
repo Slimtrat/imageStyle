@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from hashlib import sha256
 import json
 import os
@@ -13,6 +13,11 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .studio.assets import resolve_asset_path
+from .studio.color_fidelity import (
+    ArtworkColorPolicy,
+    FAITHFUL_MEDIAN_DELTA_E00,
+    FAITHFUL_P95_DELTA_E00,
+)
 from .studio.export import StudioExportResult, export_studio_project, frame_digest
 from .studio.model import ClipKind, StudioProject, TrackKind
 from .studio.persistence import project_digest
@@ -146,6 +151,39 @@ def _has_3d(project: StudioProject) -> bool:
     )
 
 
+def _project_with_color_mode(
+    project: StudioProject,
+    mode: str,
+) -> tuple[StudioProject, int] | None:
+    tracks = list(project.tracks)
+    for track_index, track in enumerate(tracks):
+        for clip_index, clip in enumerate(track.clips):
+            if clip.kind != ClipKind.ARTWORK_3D:
+                continue
+            parameters = dict(clip.parameters or {})
+            parameters["color_policy"] = ArtworkColorPolicy.from_mapping(mode).to_dict()
+            clips = list(track.clips)
+            clips[clip_index] = replace(clip, parameters=parameters)
+            tracks[track_index] = replace(track, clips=tuple(clips))
+            return (
+                replace(project, tracks=tuple(tracks)).validate(),
+                clip.end_frame - 1,
+            )
+    return None
+
+
+def _project_color_policies(project: StudioProject) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for track in project.tracks:
+        for clip in track.clips:
+            if clip.kind != ClipKind.ARTWORK_3D:
+                continue
+            parameters = clip.parameters or {}
+            policy = ArtworkColorPolicy.from_mapping(parameters.get("color_policy"))
+            records.append({"clip_id": clip.clip_id, "policy": policy.to_dict()})
+    return records
+
+
 class _RenderEnvironment:
     def __init__(self, project: StudioProject, artwork_path: Path) -> None:
         self.project = project
@@ -213,6 +251,83 @@ def _contact_sheet(path: Path, frames: dict[int, np.ndarray], fps: int) -> None:
     sheet.save(path, **save_options)
 
 
+def _color_comparison_sheet(
+    path: Path,
+    integrated: np.ndarray,
+    faithful: np.ndarray,
+    frame_index: int,
+    fps: int,
+) -> None:
+    label_height = 48
+    height, width = faithful.shape[:2]
+    sheet = Image.new("RGB", (width * 2, height + label_height), (15, 16, 21))
+    sheet.paste(Image.fromarray(integrated), (0, label_height))
+    sheet.paste(Image.fromarray(faithful), (width, label_height))
+    draw = ImageDraw.Draw(sheet)
+    draw.text((10, 8), "AVANT · LUMIÈRE 3D", fill=(240, 208, 176))
+    draw.text((width + 10, 8), "APRÈS · COULEURS FIDÈLES", fill=(202, 246, 224))
+    draw.text(
+        (10, 28),
+        f"même œuvre · même caméra · f{frame_index:04d} · {frame_index / fps:05.2f}s",
+        fill=(176, 181, 193),
+    )
+    options = (
+        {"quality": 94}
+        if path.suffix.lower() in {".jpg", ".jpeg", ".webp"}
+        else {}
+    )
+    sheet.save(path, **options)
+
+
+def _render_color_comparison(
+    result: RecipeBuildResult,
+    path: Path,
+    *,
+    width: int,
+    height: int,
+    environment: _RenderEnvironment,
+) -> dict[str, Any] | None:
+    faithful = _project_with_color_mode(result.project, "faithful")
+    integrated = _project_with_color_mode(result.project, "scene_integrated")
+    if faithful is None or integrated is None:
+        return None
+    faithful_project, frame_index = faithful
+    integrated_project, _ = integrated
+    rendered: dict[str, np.ndarray] = {}
+    for mode, project in (
+        ("scene_integrated", integrated_project),
+        ("faithful", faithful_project),
+    ):
+        with StudioRenderSession(
+            project,
+            environment.artwork_path,
+            output_width=width,
+            output_height=height,
+            resource_base=result.project_path.parent,
+            extra_renderers=environment.renderers,
+        ) as session:
+            rendered[mode] = np.ascontiguousarray(session.frame_at(frame_index)).copy()
+    _color_comparison_sheet(
+        path,
+        rendered["scene_integrated"],
+        rendered["faithful"],
+        frame_index,
+        result.project.settings.fps,
+    )
+    return {
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "size_bytes": path.stat().st_size,
+        "frame_index": frame_index,
+        "modes": ["scene_integrated", "faithful"],
+        "acceptance": {
+            "median_delta_e00_max": FAITHFUL_MEDIAN_DELTA_E00,
+            "percentile_95_delta_e00_max": FAITHFUL_P95_DELTA_E00,
+            "artist_review": "pending",
+        },
+    }
+
+
 def render_control_sheet(
     result: RecipeBuildResult,
     destination: str | Path,
@@ -237,6 +352,13 @@ def render_control_sheet(
         }
         execution_mode = session.execution_mode
     _contact_sheet(path, frames, result.project.settings.fps)
+    color_comparison = _render_color_comparison(
+        result,
+        path.with_name(f"{path.stem}-color-fidelity{path.suffix}"),
+        width=proxy_width,
+        height=proxy_height,
+        environment=environment,
+    )
     return {
         "path": str(path),
         "sha256": _sha256_file(path),
@@ -247,6 +369,7 @@ def render_control_sheet(
             for index in indexes
         ],
         "execution_mode": execution_mode,
+        "color_fidelity": color_comparison,
     }
 
 
@@ -330,6 +453,7 @@ def run_headless_studio(
             "snapshot": str(result.snapshot_path) if result.snapshot_path is not None else None,
             "assets": assets,
             "artwork_preparation": result.artwork_preparation,
+            "color_policies": _project_color_policies(result.project),
             "duration_frames": result.project.settings.duration_frames,
             "fps": result.project.settings.fps,
             "transitions": [
