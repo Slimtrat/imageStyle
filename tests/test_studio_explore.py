@@ -8,11 +8,14 @@ from PIL import Image
 from artanimate.studio.camera import move_camera_keyframe, resolve_camera_pose
 from artanimate.studio.explore import (
     ExplorePlanRole,
+    SMART_MAX_ROTATION_DEGREES,
+    SMART_MAX_ZOOM,
     create_explore_project,
     explore_clip,
     explore_clip_role,
     is_explore_project,
     mark_explore_music_attached,
+    recommend_explore_zones,
     replace_explore_real_placeholder,
 )
 from artanimate.studio.model import (
@@ -25,7 +28,7 @@ from artanimate.studio.model import (
     TrackKind,
     TransitionKind,
 )
-from artanimate.studio.semantic import Bounds, SceneObject
+from artanimate.studio.semantic import Affordance, Bounds, SceneObject
 from artanimate.studio.timeline import delete_clips, move_clip, trim_clip
 
 
@@ -66,6 +69,43 @@ def _explore(tmp_path: Path, *, fps: int = 30) -> StudioProject:
         macro_zone_id="zone-left",
         inspection_zone_id="zone-right",
     ).project
+
+
+def _project_with_proposals(tmp_path: Path) -> StudioProject:
+    base = _project(tmp_path)
+    assert base.scene is not None
+    proposals = (
+        SceneObject(
+            "auto-interest-01",
+            "artwork.region.face",
+            "Visage",
+            confidence=0.8,
+            bounds=Bounds(0.08, 0.12, 0.16, 0.2),
+            attributes={
+                "proposal_status": "proposed",
+                "rank": 1,
+                "scores": {"global": 0.8},
+            },
+            affordances=(Affordance("camera-inspectable"),),
+        ),
+        SceneObject(
+            "auto-interest-02",
+            "artwork.region.lines",
+            "Motif droit",
+            confidence=0.72,
+            bounds=Bounds(0.72, 0.62, 0.18, 0.2),
+            attributes={
+                "proposal_status": "proposed",
+                "rank": 2,
+                "scores": {"global": 0.72},
+            },
+            affordances=(Affordance("camera-inspectable"),),
+        ),
+    )
+    return replace(
+        base,
+        scene=replace(base.scene, objects=(*base.scene.objects, *proposals)),
+    ).validate()
 
 
 def test_explore_is_a_standard_editable_twelve_second_project(
@@ -130,6 +170,36 @@ def test_explore_targets_selected_zones_and_reveal_finishes_on_whole_artwork(
     assert inspection.camera.keyframes[0].pose.x > 0.6
     final = resolve_camera_pose(reveal.camera, reveal.duration_frames - 1)
     assert final == final.__class__(x=0.5, y=0.5, zoom=1.0)
+
+
+def test_explore_recommends_diverse_regions_and_bounds_smart_camera(
+    tmp_path: Path,
+) -> None:
+    source = _project_with_proposals(tmp_path)
+
+    recommendation = recommend_explore_zones(source)
+    result = create_explore_project(source)
+    macro = explore_clip(result.project, ExplorePlanRole.MACRO)
+    inspection = explore_clip(result.project, ExplorePlanRole.INSPECTION)
+
+    assert recommendation.macro_zone_id == "auto-interest-01"
+    assert recommendation.inspection_zone_id == "auto-interest-02"
+    assert len(recommendation.rationale) == 2
+    assert macro is not None and macro.camera is not None
+    assert inspection is not None and inspection.camera is not None
+    assert len(macro.camera.keyframes) >= 5
+    for clip in (macro, inspection):
+        assert clip.camera is not None
+        assert max(item.pose.zoom for item in clip.camera.keyframes) <= SMART_MAX_ZOOM
+        assert max(
+            abs(item.pose.rotation_degrees)
+            for item in clip.camera.keyframes
+        ) <= SMART_MAX_ROTATION_DEGREES
+        assert all(
+            0.02 <= item.pose.x <= 0.98
+            and 0.02 <= item.pose.y <= 0.98
+            for item in clip.camera.keyframes
+        )
 
 
 def test_explore_keyframes_and_transitions_use_existing_edit_commands(

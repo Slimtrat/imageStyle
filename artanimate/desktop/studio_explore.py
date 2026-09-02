@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QVBoxLayout,
@@ -17,6 +18,7 @@ from ..studio.explore import (
     ExplorePlanRole,
     explore_clip,
     is_explore_project,
+    recommend_explore_zones,
 )
 from ..studio.model import StudioProject, TrackKind
 
@@ -25,6 +27,9 @@ class StudioExplorePanel(QWidget):
     """Guided entry point that only emits standard StudioProject edits."""
 
     createRequested = Signal(str, str)
+    acceptRequested = Signal()
+    rejectRequested = Signal()
+    proposalInvalidated = Signal()
     realMediaRequested = Signal()
     musicRequested = Signal()
 
@@ -32,6 +37,7 @@ class StudioExplorePanel(QWidget):
         super().__init__(parent)
         self.setObjectName("studioExplorePanel")
         self._project: StudioProject | None = None
+        self._proposal_ready = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -62,9 +68,17 @@ class StudioExplorePanel(QWidget):
         self.zone_help.setObjectName("studioExploreZoneHelp")
         layout.addWidget(self.zone_help)
 
-        self.create_button = QPushButton("Construire Explore")
+        self.create_button = QPushButton("Prévisualiser le parcours")
         self.create_button.setObjectName("studioExploreCreate")
         layout.addWidget(self.create_button)
+        decision_row = QHBoxLayout()
+        self.accept_button = QPushButton("Accepter")
+        self.accept_button.setObjectName("studioExploreAccept")
+        self.reject_button = QPushButton("Refuser")
+        self.reject_button.setObjectName("studioExploreReject")
+        decision_row.addWidget(self.accept_button)
+        decision_row.addWidget(self.reject_button)
+        layout.addLayout(decision_row)
 
         completion = QGroupBox("Compléter le Reel")
         completion_layout = QVBoxLayout(completion)
@@ -83,6 +97,10 @@ class StudioExplorePanel(QWidget):
         layout.addStretch(1)
 
         self.create_button.clicked.connect(self._emit_create)
+        self.accept_button.clicked.connect(self.acceptRequested)
+        self.reject_button.clicked.connect(self.rejectRequested)
+        self.macro_zone.currentIndexChanged.connect(self._selection_changed)
+        self.inspection_zone.currentIndexChanged.connect(self._selection_changed)
         self.real_button.clicked.connect(self.realMediaRequested)
         self.music_button.clicked.connect(self.musicRequested)
         self.set_project(None)
@@ -100,9 +118,10 @@ class StudioExplorePanel(QWidget):
         combo.setCurrentIndex(max(0, index))
 
     def set_project(self, project: StudioProject | None) -> None:
-        previous_macro = self.macro_zone.currentData()
-        previous_inspection = self.inspection_zone.currentData()
         self._project = project
+        self._proposal_ready = False
+        self.accept_button.setEnabled(False)
+        self.reject_button.setEnabled(False)
         self.macro_zone.clear()
         self.inspection_zone.clear()
         if project is None or project.scene is None:
@@ -130,15 +149,20 @@ class StudioExplorePanel(QWidget):
 
         macro = explore_clip(project, ExplorePlanRole.MACRO)
         inspection = explore_clip(project, ExplorePlanRole.INSPECTION)
+        recommendation = recommend_explore_zones(project)
         self._select(
             self.macro_zone,
-            self._zone_id(macro) if macro is not None else previous_macro,
+            (
+                self._zone_id(macro)
+                if macro is not None
+                else recommendation.macro_zone_id
+            ),
         )
         self._select(
             self.inspection_zone,
             self._zone_id(inspection)
             if inspection is not None
-            else previous_inspection,
+            else recommendation.inspection_zone_id,
         )
         self.create_button.setEnabled(bool(choices))
         explore_ready = is_explore_project(project)
@@ -151,7 +175,9 @@ class StudioExplorePanel(QWidget):
         self.real_button.setEnabled(explore_ready and placeholder is not None)
         self.music_button.setEnabled(explore_ready and not has_music)
         self.create_button.setText(
-            "Reconstruire Explore" if explore_ready else "Construire Explore"
+            "Prévisualiser une variante"
+            if explore_ready
+            else "Prévisualiser le parcours"
         )
         self.real_button.setText(
             "Média réel lié"
@@ -179,8 +205,8 @@ class StudioExplorePanel(QWidget):
             )
         else:
             self.summary.setText(
-                "La création remplace la timeline actuelle en une seule opération "
-                "annulable. Aucun effet 2D ou 3D n’est ajouté par défaut."
+                "Les zones ci-dessus sont suggérées automatiquement. Prévisualisez "
+                "le parcours avant de l’insérer en une seule opération annulable."
             )
 
     def _emit_create(self) -> None:
@@ -188,3 +214,32 @@ class StudioExplorePanel(QWidget):
         inspection = self.inspection_zone.currentData()
         if isinstance(macro, str) and isinstance(inspection, str):
             self.createRequested.emit(macro, inspection)
+
+    def _selection_changed(self, _index: int = -1) -> None:
+        if self._proposal_ready:
+            self.proposalInvalidated.emit()
+            self.clear_proposal_preview(
+                "Zones modifiées · générez un nouvel aperçu avant d’accepter."
+            )
+
+    def set_proposal_preview(
+        self,
+        *,
+        macro_label: str,
+        inspection_label: str,
+    ) -> None:
+        self._proposal_ready = True
+        self.accept_button.setEnabled(True)
+        self.reject_button.setEnabled(True)
+        self.summary.setText(
+            f"Aperçu actif · Macro sur {macro_label} · Inspection sur "
+            f"{inspection_label} · Reveal sur l’œuvre entière. "
+            "Lisez le parcours avec le transport, puis acceptez ou refusez."
+        )
+
+    def clear_proposal_preview(self, message: str | None = None) -> None:
+        self._proposal_ready = False
+        self.accept_button.setEnabled(False)
+        self.reject_button.setEnabled(False)
+        if message is not None:
+            self.summary.setText(message)

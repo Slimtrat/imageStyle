@@ -19,7 +19,7 @@ from .model import (
     Track,
     TrackKind,
 )
-from .semantic import Bounds
+from .semantic import Bounds, SceneObject
 from .transitions import add_dissolve
 from .video import VideoClipSettings, video_source_frame_count
 
@@ -40,12 +40,23 @@ class ExploreBuildResult:
     real_clip_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ExploreZoneRecommendation:
+    macro_zone_id: str
+    inspection_zone_id: str
+    rationale: tuple[str, ...]
+
+
 _ROLE_LABELS = {
     ExplorePlanRole.MACRO: "Macro",
     ExplorePlanRole.INSPECTION: "Inspection",
     ExplorePlanRole.REVEAL: "Reveal",
     ExplorePlanRole.REAL_PLACEHOLDER: "Réel · média à choisir",
 }
+
+SMART_MAX_ZOOM = 5.5
+SMART_MAX_ROTATION_DEGREES = 1.5
+SMART_BREATHING_RATIO = 0.08
 
 
 def explore_clip_role(clip: Clip) -> ExplorePlanRole | None:
@@ -93,6 +104,96 @@ def is_explore_project(project: StudioProject) -> bool:
     }.issubset(roles)
 
 
+def _proposal_score(scene_object: SceneObject) -> float:
+    scores = scene_object.attributes.get("scores", {})
+    if isinstance(scores, Mapping):
+        try:
+            return float(scores.get("global", scene_object.confidence))
+        except (TypeError, ValueError):
+            pass
+    return float(scene_object.confidence)
+
+
+def _proposal_rank(scene_object: SceneObject) -> int:
+    try:
+        return int(scene_object.attributes.get("rank", 10_000))
+    except (TypeError, ValueError):
+        return 10_000
+
+
+def _bounds_center(bounds: Bounds) -> tuple[float, float]:
+    return bounds.x + bounds.width / 2, bounds.y + bounds.height / 2
+
+
+def recommend_explore_zones(project: StudioProject) -> ExploreZoneRecommendation:
+    """Choose two explainable, spatially distinct details without editing the project."""
+
+    source = project.validate()
+    assert source.scene is not None
+    proposals = [
+        scene_object
+        for scene_object in source.scene.objects
+        if scene_object.bounds is not None
+        and scene_object.attributes.get("proposal_status") == "proposed"
+        and "camera-inspectable" in scene_object.affordance_ids
+    ]
+    proposals.sort(
+        key=lambda item: (
+            _proposal_rank(item),
+            -_proposal_score(item),
+            item.object_id,
+        )
+    )
+    if not proposals:
+        manual = [
+            scene_object
+            for scene_object in source.scene.objects
+            if scene_object.bounds is not None
+            and scene_object.attributes.get("manual") is True
+        ]
+        manual.sort(key=lambda item: item.object_id)
+        proposals = manual
+    if not proposals:
+        return ExploreZoneRecommendation(
+            "artwork",
+            "artwork",
+            (
+                "Aucune région locale validée : cadrage prudent sur l’œuvre entière.",
+            ),
+        )
+
+    macro = proposals[0]
+    macro_center = _bounds_center(macro.bounds)
+
+    def inspection_value(scene_object: SceneObject) -> tuple[float, float, str]:
+        center = _bounds_center(scene_object.bounds)
+        distance = (
+            (center[0] - macro_center[0]) ** 2
+            + (center[1] - macro_center[1]) ** 2
+        ) ** 0.5
+        return (
+            distance * 0.72 + _proposal_score(scene_object) * 0.28,
+            _proposal_score(scene_object),
+            scene_object.object_id,
+        )
+
+    alternatives = [item for item in proposals if item.object_id != macro.object_id]
+    inspection = max(alternatives, key=inspection_value) if alternatives else macro
+    return ExploreZoneRecommendation(
+        macro.object_id,
+        inspection.object_id,
+        (
+            f"Macro : {macro.label}, proposition la mieux classée.",
+            (
+                f"Inspection : {inspection.label}, choisie pour sa distance "
+                "visuelle et son score."
+                if inspection.object_id != macro.object_id
+                else "Inspection : même région, aucune seconde zone n’est disponible."
+            ),
+        ),
+    )
+
+
 def _frame_durations(total_frames: int) -> tuple[int, int, int, int]:
     total = int(total_frames)
     if total < 24:
@@ -136,21 +237,76 @@ def _focus_animation(
     )
     center_x = zone.x + zone.width / 2
     center_y = zone.y + zone.height / 2
-    zone_zoom = min(12.0, max(1.0, 0.82 / max(zone.width, zone.height)))
+    zone_zoom = min(
+        SMART_MAX_ZOOM,
+        max(1.15, 0.82 / max(zone.width, zone.height)),
+    )
     focused = tuple(
         replace(
             keyframe,
             pose=replace(
                 keyframe.pose,
-                x=center_x + (keyframe.pose.x - 0.5) * zone.width,
-                y=center_y + (keyframe.pose.y - 0.5) * zone.height,
-                zoom=max(keyframe.pose.zoom, zone_zoom),
+                x=min(
+                    0.98,
+                    max(0.02, center_x + (keyframe.pose.x - 0.5) * zone.width),
+                ),
+                y=min(
+                    0.98,
+                    max(0.02, center_y + (keyframe.pose.y - 0.5) * zone.height),
+                ),
+                zoom=min(
+                    SMART_MAX_ZOOM,
+                    max(keyframe.pose.zoom, zone_zoom),
+                ),
+                rotation_degrees=min(
+                    SMART_MAX_ROTATION_DEGREES,
+                    max(
+                        -SMART_MAX_ROTATION_DEGREES,
+                        keyframe.pose.rotation_degrees,
+                    ),
+                ),
             ).validate(),
         ).validate()
         for keyframe in keyframes
     )
+    focused = _with_breathing(focused, duration_frames)
     return CameraAnimation(focused).validate(
         clip_duration_frames=duration_frames
+    )
+
+
+def _with_breathing(
+    keyframes: tuple[CameraKeyframe, ...],
+    duration_frames: int,
+) -> tuple[CameraKeyframe, ...]:
+    if len(keyframes) < 2 or duration_frames < 8:
+        return keyframes
+    occupied = {item.frame for item in keyframes}
+    final_frame = duration_frames - 1
+    additions: list[CameraKeyframe] = []
+    entrance_hold = max(1, round(final_frame * SMART_BREATHING_RATIO))
+    exit_hold = min(
+        final_frame - 1,
+        round(final_frame * (1.0 - SMART_BREATHING_RATIO)),
+    )
+    if entrance_hold not in occupied and entrance_hold < keyframes[1].frame:
+        additions.append(
+            CameraKeyframe(
+                entrance_hold,
+                keyframes[0].pose,
+                Easing.EASE_IN_OUT,
+            )
+        )
+    if exit_hold not in occupied and exit_hold > keyframes[-2].frame:
+        additions.append(
+            CameraKeyframe(
+                exit_hold,
+                keyframes[-1].pose,
+                Easing.EASE_IN_OUT,
+            )
+        )
+    return tuple(
+        sorted((*keyframes, *additions), key=lambda item: item.frame)
     )
 
 
@@ -193,12 +349,15 @@ def _parameters(
 def create_explore_project(
     project: StudioProject,
     *,
-    macro_zone_id: str = "artwork",
-    inspection_zone_id: str = "artwork",
+    macro_zone_id: str | None = None,
+    inspection_zone_id: str | None = None,
 ) -> ExploreBuildResult:
     """Compose an editable 12-second narrative using only standard Studio fields."""
 
     source = project.validate()
+    recommendation = recommend_explore_zones(source)
+    macro_zone_id = macro_zone_id or recommendation.macro_zone_id
+    inspection_zone_id = inspection_zone_id or recommendation.inspection_zone_id
     target_frames = source.settings.fps * 12
     durations = _frame_durations(target_frames)
     macro_duration, inspection_duration, reveal_duration, real_duration = durations

@@ -68,6 +68,7 @@ from ..studio.manual_match import (
     MatchPoint,
 )
 from ..studio.explore import (
+    ExploreBuildResult,
     ExplorePlanRole,
     create_explore_project,
     explore_clip,
@@ -786,6 +787,8 @@ class StudioPanel(QWidget):
         self._waveforms = {}
 
         self._analysis_project_id: str | None = None
+        self._explore_proposal: ExploreBuildResult | None = None
+        self._preview_project_override: StudioProject | None = None
         page = QVBoxLayout(self)
         page.setContentsMargins(8, 10, 8, 4)
         page.setSpacing(12)
@@ -992,7 +995,10 @@ class StudioPanel(QWidget):
             self._match_preview_requested
         )
 
-        self.explore_panel.createRequested.connect(self._create_explore)
+        self.explore_panel.createRequested.connect(self._preview_explore)
+        self.explore_panel.acceptRequested.connect(self._accept_explore)
+        self.explore_panel.rejectRequested.connect(self._reject_explore)
+        self.explore_panel.proposalInvalidated.connect(self._reject_explore)
         self.explore_panel.realMediaRequested.connect(self._choose_explore_real)
         self.explore_panel.musicRequested.connect(self._choose_explore_music)
 
@@ -1027,6 +1033,8 @@ class StudioPanel(QWidget):
     ) -> None:
         self.preview_controller.cancel_pending()
         self.analysis_controller.cancel_pending(notify=False)
+        self._explore_proposal = None
+        self._preview_project_override = None
         validated = project.validate() if project is not None else None
         self.waveform_controller.cancel_pending(notify=False)
         if not self._replaying_history:
@@ -1219,7 +1227,8 @@ class StudioPanel(QWidget):
 
 
     def _frame_changed(self, frame: int) -> None:
-        fps = self._project.settings.fps if self._project is not None else 30
+        preview_project = self._preview_project_override or self._project
+        fps = preview_project.settings.fps if preview_project is not None else 30
         self.canvas.set_playhead(frame, fps)
         active = self._active_camera_clip(frame)
         if active is not None:
@@ -1478,11 +1487,12 @@ class StudioPanel(QWidget):
             self.analysis_panel.set_feedback(f"Détection conservée · {exc}")
 
     def _request_preview(self, frame: int) -> None:
-        if self._project is None or self.canvas.artwork_path is None:
+        preview_project = self._preview_project_override or self._project
+        if preview_project is None or self.canvas.artwork_path is None:
             return
         self.canvas.set_preview_pending(True)
         self.preview_controller.request(
-            self._project,
+            preview_project,
             self.canvas.artwork_path,
             frame,
             resource_base=(
@@ -2260,7 +2270,11 @@ class StudioPanel(QWidget):
     def _export_cancelled(self) -> None:
         self.export_panel.show_cancelled()
 
-    def _create_explore(self, macro_zone_id: str, inspection_zone_id: str) -> None:
+    def _preview_explore(
+        self,
+        macro_zone_id: str,
+        inspection_zone_id: str,
+    ) -> None:
         project = self._project
         if project is None:
             return
@@ -2270,20 +2284,82 @@ class StudioPanel(QWidget):
                 macro_zone_id=macro_zone_id,
                 inspection_zone_id=inspection_zone_id,
             )
-            self.commit_project(
-                result.project,
-                "Construire le parcours Explore",
+            self._explore_proposal = result
+            self._preview_project_override = result.project
+            self.transport.set_project(
+                result.project.settings.fps,
+                result.project.settings.duration_frames,
             )
-            self.timeline.scene.set_selection((result.macro_clip_id,))
             self.transport.seek(0, force_signal=True)
-            self.editor_tabs.setCurrentWidget(self.timeline)
-            self.inspector_tabs.setCurrentWidget(self.explore_panel)
+            assert project.scene is not None
+            macro = project.scene.object_by_id(macro_zone_id)
+            inspection = project.scene.object_by_id(inspection_zone_id)
+            self.explore_panel.set_proposal_preview(
+                macro_label=macro.label if macro is not None else macro_zone_id,
+                inspection_label=(
+                    inspection.label
+                    if inspection is not None
+                    else inspection_zone_id
+                ),
+            )
             self.project_status.setText(
-                "Explore créé · Macro, Inspection, Reveal et Réel · "
-                "tout reste éditable"
+                "Aperçu Explore · le projet courant reste intact jusqu’à "
+                "l’acceptation"
             )
         except (KeyError, TypeError, ValueError, PermissionError) as exc:
-            self.project_status.setText(f"Explore inchangé · {exc}")
+            self._explore_proposal = None
+            self._preview_project_override = None
+            self.project_status.setText(f"Aperçu Explore impossible · {exc}")
+
+    def _accept_explore(self) -> None:
+        result = self._explore_proposal
+        project = self._project
+        if result is None or project is None:
+            return
+        if result.project.project_id != project.project_id:
+            self._reject_explore()
+            self.project_status.setText(
+                "Proposition Explore périmée · générez un nouvel aperçu."
+            )
+            return
+        self._explore_proposal = None
+        self._preview_project_override = None
+        self.commit_project(
+            result.project,
+            "Construire le parcours Explore",
+        )
+        self.timeline.scene.set_selection((result.macro_clip_id,))
+        self.transport.seek(0, force_signal=True)
+        self.editor_tabs.setCurrentWidget(self.timeline)
+        self.inspector_tabs.setCurrentWidget(self.explore_panel)
+        self.project_status.setText(
+            "Explore créé · Macro, Inspection, Reveal et Réel · "
+            "tout reste éditable"
+        )
+
+    def _reject_explore(self) -> None:
+        project = self._project
+        if self._explore_proposal is None and self._preview_project_override is None:
+            return
+        current_frame = self.transport.current_frame
+        self._explore_proposal = None
+        self._preview_project_override = None
+        self.preview_controller.cancel_pending()
+        if project is not None:
+            self.transport.set_project(
+                project.settings.fps,
+                project.settings.duration_frames,
+            )
+            self.transport.seek(
+                min(current_frame, project.settings.duration_frames - 1),
+                force_signal=True,
+            )
+        self.explore_panel.clear_proposal_preview(
+            "Proposition refusée · le projet et son historique sont inchangés."
+        )
+        self.project_status.setText(
+            "Explore refusé · aucune modification appliquée"
+        )
 
     def _choose_explore_real(self) -> None:
         project = self._project
