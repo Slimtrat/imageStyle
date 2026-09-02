@@ -12,7 +12,14 @@ from PIL import Image, UnidentifiedImageError
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
-STUDIO_BOUNDARIES = {"preview", "analysis", "waveform", "export", "media"}
+STUDIO_BOUNDARIES = {
+    "preview",
+    "analysis",
+    "waveform",
+    "music_analysis",
+    "export",
+    "media",
+}
 MINIMUM_FREE_BYTES = 128 * 1024 * 1024
 WINDOWS_RESERVED_NAMES = {
     "CON",
@@ -413,7 +420,14 @@ def translate_exception(
 
 def translate_studio_exception(
     exc: BaseException,
-    boundary: Literal["preview", "analysis", "waveform", "export", "media"],
+    boundary: Literal[
+        "preview",
+        "analysis",
+        "waveform",
+        "music_analysis",
+        "export",
+        "media",
+    ],
     *,
     source: Path | None = None,
     destination: Path | None = None,
@@ -453,7 +467,7 @@ def translate_studio_exception(
             "Réessayez avec MP4/H.264 ou WAV. Si le problème persiste, ouvrez les Logs et réinstallez ArtAnimate.",
             details,
         )
-    if boundary in {"media", "waveform"} or any(
+    if boundary in {"media", "waveform", "music_analysis"} or any(
         token in message
         for token in (
             "vidéo locale illisible",
@@ -498,6 +512,12 @@ def translate_studio_exception(
             "Waveform indisponible",
             "La forme d’onde d’une piste audio n’a pas pu être calculée.",
             "Reliez ou convertissez le fichier audio. Le montage reste utilisable sans waveform.",
+        ),
+        "music_analysis": (
+            "studio_music_analysis_failed",
+            "Analyse musicale indisponible",
+            "Le rythme de cette piste audio n’a pas pu être analysé localement.",
+            "Reliez ou convertissez le fichier audio, puis relancez l’analyse. Le montage reste utilisable sans événements musicaux.",
         ),
         "export": (
             "studio_export_failed",

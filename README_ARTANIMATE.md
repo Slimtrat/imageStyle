@@ -24,6 +24,7 @@ Le moteur ne génère pas une approximation de l’œuvre. Il analyse sa palette
 - effet signature `screenprint_laser` : sérigraphie couleur sans coutures visibles, puis contours noirs au laser ;
 - contours au début, à la fin ou pendant toute l’animation ;
 - studio 3D cinématique avec pièce vide, meuble en noyer, œuvre couchée, ombre de contact et suspension oscillante ;
+- analyse musicale locale et annulable : tempo, beats, temps forts et drops avec confiance, sensibilité sauvegardée et cache par empreinte audio ;
 - export MP4 H.264, MOV ou WebM, sans installation manuelle de FFmpeg ;
 - analyse de palette en JSON et planche de contrôle PNG ;
 - presets JSON reproductibles et graine aléatoire configurable.

@@ -67,6 +67,11 @@ from ..studio.manual_match import (
     ManualMatchTransform,
     MatchPoint,
 )
+from ..studio.music_analysis import (
+    MusicAnalysis,
+    MusicAnalysisSettings,
+    set_music_analysis_settings,
+)
 from ..studio.explore import (
     ExploreBuildResult,
     ExplorePlanRole,
@@ -107,6 +112,10 @@ from .studio_audio import StudioAudioMonitor
 from .studio_audio_inspector import AudioInspectorEdit, StudioAudioInspector
 from .studio_media_inspector import StillInspectorEdit, StudioMediaInspector
 from .studio_match_inspector import StudioMatchInspector
+from .studio_music_analysis import (
+    StudioMusicAnalysisController,
+    StudioMusicAnalysisPanel,
+)
 from .studio_video_inspector import StudioVideoInspector, VideoInspectorEdit
 from .studio_explore import StudioExplorePanel
 from .studio_transition_inspector import StudioTransitionInspector
@@ -792,6 +801,22 @@ class StudioPanel(QWidget):
         self.waveform_controller.runningChanged.connect(self._waveform_running_changed)
         self.waveform_controller.failed.connect(self._waveform_failed)
         self._waveforms = {}
+        self.music_analysis_controller = StudioMusicAnalysisController(
+            self,
+            cache_dir=cache_root / "music-analysis",
+        )
+        self.music_analysis_controller.analysisReady.connect(
+            self._music_analysis_ready
+        )
+        self.music_analysis_controller.runningChanged.connect(
+            self._music_analysis_running_changed
+        )
+        self.music_analysis_controller.failed.connect(
+            self._music_analysis_failed
+        )
+        self.music_analysis_controller.cancelled.connect(
+            self._music_analysis_cancelled
+        )
 
         self._analysis_project_id: str | None = None
         self._explore_proposal: ExploreBuildResult | None = None
@@ -939,6 +964,13 @@ class StudioPanel(QWidget):
         self.video_inspector.applyRequested.connect(self._apply_media_edit)
         self.audio_inspector = StudioAudioInspector()
         self.audio_inspector.applyRequested.connect(self._apply_audio_edit)
+        self.music_analysis_panel = StudioMusicAnalysisPanel()
+        self.music_analysis_panel.analysisRequested.connect(
+            self._request_music_analysis
+        )
+        self.music_analysis_panel.cancelRequested.connect(
+            self.music_analysis_controller.cancel_pending
+        )
         self.transition_inspector = StudioTransitionInspector()
         self.match_inspector = StudioMatchInspector()
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
@@ -954,6 +986,7 @@ class StudioPanel(QWidget):
         self.inspector_tabs.addTab(self.media_inspector, "Plan réel")
         self.inspector_tabs.addTab(self.video_inspector, "Vidéo réelle")
         self.inspector_tabs.addTab(self.audio_inspector, "Audio")
+        self.inspector_tabs.addTab(self.music_analysis_panel, "Rythme")
         self.inspector_tabs.addTab(self.transition_inspector, "Transition")
         self.inspector_tabs.addTab(self.match_inspector, "Match réel")
         self.inspector_tabs.addTab(self.explore_panel, "Explore")
@@ -1046,6 +1079,7 @@ class StudioPanel(QWidget):
     ) -> None:
         self.preview_controller.cancel_pending()
         self.analysis_controller.cancel_pending(notify=False)
+        self.music_analysis_controller.cancel_pending(notify=False)
         self._explore_proposal = None
         self._match_proposal = None
         self._preview_project_override = None
@@ -1070,6 +1104,10 @@ class StudioPanel(QWidget):
         self.analysis_panel.set_project(self._project)
         self.trigger_panel.set_project(self._project)
         self.audio_monitor.set_project(
+            self._project,
+            self.asset_panel.project_path,
+        )
+        self.music_analysis_panel.set_context(
             self._project,
             self.asset_panel.project_path,
         )
@@ -1128,6 +1166,7 @@ class StudioPanel(QWidget):
         merge_key: str | None = None,
     ) -> bool:
         validated = project.validate()
+        self.music_analysis_controller.cancel_pending(notify=False)
         current = self._project
         if current is None or current.project_id != validated.project_id:
             self.set_project(validated, reset_history=True)
@@ -1146,6 +1185,10 @@ class StudioPanel(QWidget):
         self.analysis_panel.set_project(validated)
         self.trigger_panel.set_project(validated)
         self.audio_monitor.set_project(
+            validated,
+            self.asset_panel.project_path,
+        )
+        self.music_analysis_panel.set_context(
             validated,
             self.asset_panel.project_path,
         )
@@ -1295,6 +1338,8 @@ class StudioPanel(QWidget):
         project_path: Path | None,
     ) -> None:
         self.audio_monitor.set_project(project, project_path)
+        self.music_analysis_controller.cancel_pending(notify=False)
+        self.music_analysis_panel.set_context(project, project_path)
         if project is not None and project_path is not None:
             self.audio_monitor.sync_frame(
                 self.transport.current_frame,
@@ -1327,6 +1372,64 @@ class StudioPanel(QWidget):
 
     def _waveform_failed(self, problem: UserProblem | str) -> None:
         self.asset_panel.set_feedback(self._problem_text(problem))
+
+    def _request_music_analysis(
+        self,
+        asset_id: str,
+        settings: MusicAnalysisSettings,
+    ) -> None:
+        project = self._project
+        project_path = self.asset_panel.project_path
+        if project is None or project_path is None:
+            self.music_analysis_panel.set_feedback(
+                "Analyse impossible · sauvegardez d’abord le projet."
+            )
+            return
+        try:
+            current_settings = MusicAnalysisSettings.from_project(project)
+            if current_settings != settings:
+                updated = set_music_analysis_settings(project, settings)
+                self.commit_project(
+                    updated,
+                    "Régler la sensibilité musicale",
+                    merge_key="music-analysis-sensitivity",
+                )
+                project = self._project
+                assert project is not None
+            self.music_analysis_controller.request(
+                project,
+                project_path,
+                asset_id,
+                settings,
+            )
+        except Exception as exc:
+            problem = translate_studio_exception(
+                exc,
+                "music_analysis",
+            )
+            self._music_analysis_failed(problem)
+
+    def _music_analysis_ready(
+        self,
+        asset_id: str,
+        result: object,
+    ) -> None:
+        if not isinstance(result, MusicAnalysis):
+            return
+        self.music_analysis_panel.set_result(asset_id, result)
+
+    def _music_analysis_running_changed(self, running: bool) -> None:
+        self.music_analysis_panel.set_busy(running)
+
+    def _music_analysis_failed(self, problem: UserProblem | str) -> None:
+        self.music_analysis_panel.set_busy(False)
+        self.music_analysis_panel.set_feedback(self._problem_text(problem))
+
+    def _music_analysis_cancelled(self) -> None:
+        self.music_analysis_panel.set_busy(False)
+        self.music_analysis_panel.set_feedback(
+            "Analyse musicale annulée · aucun résultat partiel conservé."
+        )
 
     def _audio_monitor_failed(self, message: str) -> None:
         self.asset_panel.set_feedback(message)
@@ -2853,6 +2956,7 @@ class StudioPanel(QWidget):
         self.analysis_controller.shutdown()
         self.audio_monitor.shutdown()
         self.waveform_controller.shutdown()
+        self.music_analysis_controller.shutdown()
 
     def activate(self) -> None:
         self.canvas.update()

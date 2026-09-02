@@ -153,6 +153,18 @@ pipeline FFmpeg dépend de la décision sur les bibliothèques embarquées.
 La waveform, le trim et le mux doivent utiliser une même référence temporelle que la
 timeline. L'audio ne doit jamais piloter une horloge indépendante du projet.
 
+L’analyse musicale V3.1 respecte cette même frontière : le PCM mono est décodé en
+lecture seule, par blocs, depuis WAV ou le FFmpeg embarqué. Un algorithme local et
+versionné extrait flux spectral, énergie et présence des basses, puis propose tempo,
+beats, temps forts et drops. Chaque événement conserve sa position source et sa frame
+`StudioClock`, une confiance et un état explicite « à vérifier ».
+
+La sensibilité est un réglage du projet. Les résultats restent dans un cache atomique
+borné, indexé par version d’algorithme, fingerprint audio, sensibilité et FPS. Une
+annulation ne publie ni résultat partiel ni entrée de cache. Ces propositions ne
+deviennent des marqueurs persistants qu’après l’étape d’édition dédiée ; elles ne
+pilotent donc jamais automatiquement le montage ou les effets.
+
 ## Décisions encore ouvertes
 
 1. V3.0 s'arrête-t-elle au Studio complet avec audio et match manuel, les fonctions
@@ -160,4 +172,3 @@ timeline. L'audio ne doit jamais piloter une horloge indépendante du projet.
 2. La timeline structurée proposée est-elle retenue ?
 3. Les médias restent-ils référencés à leur emplacement avec relink ?
 4. De nouvelles dépendances Python locales peuvent-elles être embarquées ?
-

@@ -5,14 +5,12 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
-import subprocess
 from tempfile import NamedTemporaryFile
 from threading import Event
-import wave
 
-import imageio_ffmpeg
 import numpy as np
 
+from .audio_decode import AudioDecodeCancelled, decode_mono_audio
 from .model import Clip, ClipKind
 
 
@@ -131,85 +129,6 @@ class _PeakBuilder:
         ).validate()
 
 
-def _pcm_bytes(values: bytes, sample_width: int) -> np.ndarray:
-    if sample_width == 1:
-        return (np.frombuffer(values, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
-    if sample_width == 2:
-        return np.frombuffer(values, dtype="<i2").astype(np.float32) / 32768.0
-    if sample_width == 3:
-        raw = np.frombuffer(values, dtype=np.uint8).reshape(-1, 3)
-        integers = (
-            raw[:, 0].astype(np.int32)
-            | raw[:, 1].astype(np.int32) << 8
-            | raw[:, 2].astype(np.int32) << 16
-        )
-        integers = np.where(integers & 0x800000, integers - 0x1000000, integers)
-        return integers.astype(np.float32) / 8_388_608.0
-    if sample_width == 4:
-        return np.frombuffer(values, dtype="<i4").astype(np.float32) / 2_147_483_648.0
-    raise ValueError(f"Largeur PCM WAV non prise en charge : {sample_width} octets")
-
-
-def _decode_wav(path: Path, builder: _PeakBuilder, cancelled: Event) -> int:
-    with wave.open(str(path), "rb") as source:
-        sample_rate = source.getframerate()
-        channels = source.getnchannels()
-        sample_width = source.getsampwidth()
-        while True:
-            if cancelled.is_set():
-                raise WaveformCancelled("Calcul waveform annulé")
-            raw = source.readframes(16_384)
-            if not raw:
-                break
-            samples = _pcm_bytes(raw, sample_width)
-            if channels > 1:
-                samples = samples.reshape(-1, channels).mean(axis=1)
-            builder.consume(samples)
-    return sample_rate
-
-
-def _decode_ffmpeg(path: Path, builder: _PeakBuilder, cancelled: Event) -> int:
-    sample_rate = 48_000
-    command = [
-        imageio_ffmpeg.get_ffmpeg_exe(),
-        "-v", "error",
-        "-i", str(path),
-        "-vn",
-        "-f", "f32le",
-        "-acodec", "pcm_f32le",
-        "-ac", "1",
-        "-ar", str(sample_rate),
-        "pipe:1",
-    ]
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        creationflags=creationflags,
-    )
-    assert process.stdout is not None
-    try:
-        while True:
-            if cancelled.is_set():
-                process.terminate()
-                raise WaveformCancelled("Calcul waveform annulé")
-            raw = process.stdout.read(65_536)
-            if not raw:
-                break
-            builder.consume(np.frombuffer(raw, dtype="<f4"))
-        return_code = process.wait()
-        if return_code:
-            assert process.stderr is not None
-            message = process.stderr.read().decode("utf-8", errors="replace").strip()
-            raise ValueError(f"Décodage PCM local impossible : {message}")
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-    return sample_rate
-
-
 def extract_waveform(
     path: str | Path,
     source_fingerprint: str,
@@ -219,13 +138,13 @@ def extract_waveform(
     source = Path(os.path.abspath(path))
     cancellation = cancelled or Event()
     builder = _PeakBuilder()
-    if source.suffix.casefold() == ".wav":
-        sample_rate = _decode_wav(source, builder, cancellation)
-    else:
-        sample_rate = _decode_ffmpeg(source, builder, cancellation)
+    try:
+        info = decode_mono_audio(source, builder.consume, cancelled=cancellation)
+    except AudioDecodeCancelled as exc:
+        raise WaveformCancelled("Calcul waveform annulé") from exc
     if cancellation.is_set():
         raise WaveformCancelled("Calcul waveform annulé")
-    return builder.finish(source_fingerprint, sample_rate)
+    return builder.finish(source_fingerprint, info.sample_rate)
 
 
 def waveform_peaks_for_clip(
