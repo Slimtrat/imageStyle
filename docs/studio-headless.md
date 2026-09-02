@@ -150,8 +150,27 @@ Transitions :
 - `dissolve` crée un fondu temporel ;
 - `manual_match` raccorde un plan de l’œuvre à une photo ou une vidéo réelle et
   conserve tous ses réglages éditables dans le projet.
-- `spatial_match` résout l’homographie entre l’œuvre canonique et une photo réelle,
-  puis conserve cette transformation pour les raccords et les régions sémantiques.
+- `spatial_match` résout l’homographie entre l’œuvre canonique et une photo ou une
+  frame vidéo réelle, puis conserve cette transformation pour le raccord, la caméra 3D
+  et les régions sémantiques. Pour une vidéo, `settings.reference_source_frame` choisit
+  une frame comprise dans la plage source du plan :
+
+```json
+{
+  "kind": "spatial_match",
+  "from": "virtual",
+  "to": "real-video",
+  "duration_frames": 60,
+  "settings": {"reference_source_frame": 42}
+}
+```
+
+Dans le client, la solution AKAZE ouvre le même éditeur à quatre coins que le match
+manuel. Les déplacements, crops, rotations et changements d’échelle alimentent un
+projet d’aperçu temporaire. `Accepter` crée une seule entrée undo/redo ; `Refuser` ne
+modifie ni le projet ni son historique ; `Restaurer l’automatique` recharge la solution
+AKAZE d’origine. La solution courante, la solution automatique, la frame vidéo, le
+score et le diagnostic restent sérialisés dans `StudioProject`.
 
 Le nombre total de frames est la somme des durées des plans. Une transition visuelle
 utilise des poignées autour de sa coupe sans modifier cette durée ; une coupe franche

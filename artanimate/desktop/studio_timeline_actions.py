@@ -9,6 +9,12 @@ from ..studio.manual_match import (
     update_manual_match,
 )
 from ..studio.model import TransitionKind
+from ..studio.spatial_match import (
+    SpatialMatchSettings,
+    solve_spatial_match_reference,
+    spatial_transform_from_solution,
+    update_spatial_match,
+)
 from ..studio.audio import set_audio_clip_fades
 from ..studio.timeline import (
     OVERLAP_POLICY,
@@ -292,6 +298,13 @@ class StudioTimelineActions(QObject):
                     start_frame=int(start_frame),
                     end_frame=int(end_frame),
                 )
+            elif transition.kind == TransitionKind.SPATIAL_MATCH:
+                updated = update_spatial_match(
+                    project,
+                    transition_id,
+                    start_frame=int(start_frame),
+                    end_frame=int(end_frame),
+                )
             else:
                 updated = update_dissolve(
                     project,
@@ -335,20 +348,74 @@ class StudioTimelineActions(QObject):
             return
         try:
             transition_id = str(getattr(edit, "transition_id"))
-            updated = update_manual_match(
-                project,
-                transition_id,
-                duration_frames=int(getattr(edit, "duration_frames")),
-                reference_source_frame=int(
-                    getattr(edit, "reference_source_frame")
-                ),
-                overlay_opacity=float(getattr(edit, "overlay_opacity")),
-                easing=getattr(edit, "easing"),
-                transform=getattr(edit, "transform"),
-            )
+            transition = transition_by_id(project, transition_id)
+            if transition.kind == TransitionKind.SPATIAL_MATCH:
+                base = (
+                    self.panel._match_proposal[1]
+                    if self.panel._match_proposal is not None
+                    and self.panel._match_proposal[0] == transition_id
+                    else project
+                )
+                requested_reference = int(getattr(edit, "reference_source_frame"))
+                settings = SpatialMatchSettings.from_transition(
+                    transition_by_id(base, transition_id)
+                )
+                if requested_reference != settings.reference_source_frame:
+                    solution = solve_spatial_match_reference(
+                        project,
+                        transition_id,
+                        project_path=self.panel._match_context_path(),
+                        reference_source_frame=requested_reference,
+                    )
+                    base = update_spatial_match(
+                        project,
+                        transition_id,
+                        reference_source_frame=requested_reference,
+                        solution=solution,
+                        automatic_solution=solution,
+                        transform=spatial_transform_from_solution(solution),
+                    )
+                    settings = SpatialMatchSettings.from_transition(
+                        transition_by_id(base, transition_id)
+                    )
+                transform = getattr(edit, "transform")
+                status = (
+                    "accepted"
+                    if transform.to_dict()
+                    == spatial_transform_from_solution(
+                        settings.original_solution
+                    ).to_dict()
+                    else "adjusted"
+                )
+                updated = update_spatial_match(
+                    base,
+                    transition_id,
+                    duration_frames=int(getattr(edit, "duration_frames")),
+                    reference_source_frame=requested_reference,
+                    overlay_opacity=float(getattr(edit, "overlay_opacity")),
+                    easing=getattr(edit, "easing"),
+                    transform=transform,
+                    review_status=status,
+                    comparison_overlay=False,
+                )
+                self.panel._clear_spatial_match_proposal()
+            else:
+                updated = update_manual_match(
+                    project,
+                    transition_id,
+                    duration_frames=int(getattr(edit, "duration_frames")),
+                    reference_source_frame=int(
+                        getattr(edit, "reference_source_frame")
+                    ),
+                    overlay_opacity=float(getattr(edit, "overlay_opacity")),
+                    easing=getattr(edit, "easing"),
+                    transform=getattr(edit, "transform"),
+                )
             self.panel._commit_timeline_project(
                 updated,
-                "Régler le match manuel",
+                "Accepter le raccord spatial"
+                if transition.kind == TransitionKind.SPATIAL_MATCH
+                else "Régler le match manuel",
                 merge_key=f"match-settings:{transition_id}",
             )
             self.panel.timeline.scene.set_transition_selection(transition_id)
@@ -363,6 +430,10 @@ class StudioTimelineActions(QObject):
         if project is None:
             return
         try:
+            transition = transition_by_id(project, transition_id)
+            if transition.kind == TransitionKind.SPATIAL_MATCH:
+                self.panel._preview_spatial_match_transform(transition_id, transform)
+                return
             updated = update_manual_match(project, transition_id, transform=transform)
             self.panel._commit_timeline_project(
                 updated,

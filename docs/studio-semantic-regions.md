@@ -47,8 +47,10 @@ avec les mêmes critères sans modifier les recettes ou le compositeur :
 
 La V3 accepte une région manuelle fiable dans `semantic_regions`, génère ou importe son
 masque, enregistre la provenance `manual.recipe-regions`, puis reprojette ce même masque
-sur la photo réelle avec l’homographie du raccord spatial. `region.blink` peut ainsi
-s’exécuter à la fin du plan réel tout en suivant son animation de caméra.
+sur la photo réelle — ou depuis la frame vidéo de référence — avec l’homographie
+persistée du raccord spatial. Une correction par poignée remplace cette matrice pour le
+raccord et la projection dans le même commit. `region.blink` peut ainsi s’exécuter à la
+fin du plan réel tout en suivant son animation de caméra.
 
 Pour une région œil, le contrat conserve aussi une géométrie de paupière indépendante
 du timing de l’action : axe local, courbure, amplitude, zone de protection de la matière

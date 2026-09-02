@@ -25,6 +25,7 @@ from ..studio.manual_match import (
     MatchPoint,
 )
 from ..studio.model import ClipKind, Easing, StudioProject, TransitionKind
+from ..studio.spatial_match import SpatialMatchSettings
 from ..studio.transitions import transition_by_id, transition_clip_pair
 from ..studio.video import video_source_frame_count
 
@@ -44,12 +45,16 @@ class StudioMatchInspector(QWidget):
 
     applyRequested = Signal(object)
     previewRequested = Signal(str, float)
+    rejectRequested = Signal(str)
+    restoreRequested = Signal(str)
+    referenceFrameRequested = Signal(str, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("studioMatchInspector")
         self._project: StudioProject | None = None
         self._transition_id: str | None = None
+        self._transition_kind: TransitionKind | None = None
         self._loading = False
 
         layout = QVBoxLayout(self)
@@ -58,6 +63,11 @@ class StudioMatchInspector(QWidget):
         self.summary.setObjectName("studioMatchSummary")
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
+        self.diagnostic = QLabel("")
+        self.diagnostic.setObjectName("studioMatchDiagnostic")
+        self.diagnostic.setWordWrap(True)
+        self.diagnostic.hide()
+        layout.addWidget(self.diagnostic)
 
         preview_group = QGroupBox("Comparaison")
         preview_form = QFormLayout(preview_group)
@@ -143,12 +153,20 @@ class StudioMatchInspector(QWidget):
         )
         layout.addWidget(self.corner_tabs)
 
-        buttons = QHBoxLayout()
+        geometry_buttons = QHBoxLayout()
         self.reset_button = QPushButton("Réinitialiser la géométrie")
         self.reset_button.setObjectName("studioMatchReset")
+        self.restore_button = QPushButton("Restaurer l’automatique")
+        self.restore_button.setObjectName("studioMatchRestoreAutomatic")
+        geometry_buttons.addWidget(self.reset_button)
+        geometry_buttons.addWidget(self.restore_button)
+        layout.addLayout(geometry_buttons)
+        buttons = QHBoxLayout()
+        self.reject_button = QPushButton("Refuser")
+        self.reject_button.setObjectName("studioMatchReject")
         self.apply_button = QPushButton("Appliquer le match")
         self.apply_button.setObjectName("studioMatchApply")
-        buttons.addWidget(self.reset_button)
+        buttons.addWidget(self.reject_button)
         buttons.addWidget(self.apply_button)
         layout.addLayout(buttons)
         layout.addStretch(1)
@@ -157,8 +175,13 @@ class StudioMatchInspector(QWidget):
         self.reset_button.clicked.connect(
             lambda: self.set_transform(ManualMatchTransform())
         )
+        self.restore_button.clicked.connect(self._emit_restore)
+        self.reject_button.clicked.connect(self._emit_reject)
         self.preview_mode.currentIndexChanged.connect(self._emit_preview)
         self.overlay_opacity.valueChanged.connect(self._emit_preview)
+        self.reference_frame.valueChanged.connect(self._emit_reference_frame)
+        self.restore_button.hide()
+        self.reject_button.hide()
         self._set_enabled(False)
 
     @staticmethod
@@ -216,6 +239,10 @@ class StudioMatchInspector(QWidget):
     def selected_transition_id(self) -> str | None:
         return self._transition_id
 
+    @property
+    def selected_transition_kind(self) -> TransitionKind | None:
+        return self._transition_kind
+
     def _editable_widgets(self) -> tuple[QWidget, ...]:
         corners = tuple(
             widget
@@ -238,6 +265,8 @@ class StudioMatchInspector(QWidget):
             self.crop_height,
             self.corner_tabs,
             self.reset_button,
+            self.restore_button,
+            self.reject_button,
             self.apply_button,
             *corners,
         )
@@ -253,8 +282,10 @@ class StudioMatchInspector(QWidget):
     ) -> None:
         self._project = project
         self._transition_id = None
+        self._transition_kind = None
         if project is None or transition_id is None:
             self.summary.setText("Sélectionnez un match virtuel → réel.")
+            self.diagnostic.hide()
             self._set_enabled(False)
             return
         try:
@@ -263,19 +294,59 @@ class StudioMatchInspector(QWidget):
             self.summary.setText("Le match sélectionné n’existe plus.")
             self._set_enabled(False)
             return
-        if transition.kind != TransitionKind.MATCH:
-            self.summary.setText("Cette transition n’est pas un match manuel.")
+        if transition.kind not in {TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
+            self.summary.setText("Cette transition n’est pas un raccord éditable.")
+            self.diagnostic.hide()
             self._set_enabled(False)
             return
-        settings = ManualMatchSettings.from_transition(transition)
         pair = transition_clip_pair(project, transition)
+        if transition.kind == TransitionKind.SPATIAL_MATCH:
+            spatial = SpatialMatchSettings.from_transition(transition)
+            reference_source_frame = spatial.reference_source_frame
+            overlay_opacity = spatial.overlay_opacity
+            easing = spatial.easing
+            transform = spatial.editor_transform
+        else:
+            manual = ManualMatchSettings.from_transition(transition)
+            reference_source_frame = manual.reference_source_frame
+            overlay_opacity = manual.overlay_opacity
+            easing = manual.easing
+            transform = manual.transform
         self._loading = True
         try:
             self._transition_id = transition.transition_id
-            self.summary.setText(
-                f"{pair.from_clip.clip_id} → {pair.to_clip.clip_id}\n"
-                "Le réel reste transformé après la fin du blend."
-            )
+            self._transition_kind = transition.kind
+            if transition.kind == TransitionKind.SPATIAL_MATCH:
+                solution = spatial.solution
+                partial = any(
+                    x < 0.0 or x > 1.0 or y < 0.0 or y > 1.0
+                    for x, y in solution.target_quad
+                )
+                confidence = "faible" if solution.confidence < 0.65 else "solide"
+                warning = " · cadrage partiel" if partial else ""
+                self.summary.setText(
+                    f"{pair.from_clip.clip_id} → {pair.to_clip.clip_id}\n"
+                    "La proposition reste temporaire jusqu’à son acceptation."
+                )
+                self.diagnostic.setText(
+                    f"AKAZE {confidence}{warning} · confiance "
+                    f"{solution.confidence:.0%} · {solution.inliers} inliers · "
+                    f"erreur {solution.reprojection_error:.2f} px · "
+                    f"état {spatial.review_status}"
+                )
+                self.diagnostic.show()
+                self.restore_button.show()
+                self.reject_button.show()
+                self.apply_button.setText("Accepter le raccord")
+            else:
+                self.summary.setText(
+                    f"{pair.from_clip.clip_id} → {pair.to_clip.clip_id}\n"
+                    "Le réel reste transformé après la fin du blend."
+                )
+                self.diagnostic.hide()
+                self.restore_button.hide()
+                self.reject_button.hide()
+                self.apply_button.setText("Appliquer le match")
             self.duration.setMaximum(project.settings.duration_frames)
             self.duration.setValue(transition.duration_frames)
             if pair.to_clip.kind == ClipKind.VIDEO and pair.to_clip.asset_id is not None:
@@ -286,10 +357,10 @@ class StudioMatchInspector(QWidget):
                 minimum = 0
                 maximum = 0
             self.reference_frame.setRange(minimum, maximum)
-            self.reference_frame.setValue(settings.reference_source_frame)
-            self.overlay_opacity.setValue(settings.overlay_opacity * 100.0)
-            self.easing.setCurrentIndex(max(0, self.easing.findData(settings.easing)))
-            self.set_transform(settings.transform)
+            self.reference_frame.setValue(reference_source_frame)
+            self.overlay_opacity.setValue(overlay_opacity * 100.0)
+            self.easing.setCurrentIndex(max(0, self.easing.findData(easing)))
+            self.set_transform(transform)
         finally:
             self._loading = False
         self._set_enabled(True)
@@ -371,3 +442,19 @@ class StudioMatchInspector(QWidget):
             str(self.preview_mode.currentData()),
             self.overlay_opacity.value() / 100.0,
         )
+
+    def _emit_reject(self) -> None:
+        if self._transition_id is not None:
+            self.rejectRequested.emit(self._transition_id)
+
+    def _emit_restore(self) -> None:
+        if self._transition_id is not None:
+            self.restoreRequested.emit(self._transition_id)
+
+    def _emit_reference_frame(self, frame: int) -> None:
+        if (
+            not self._loading
+            and self._transition_id is not None
+            and self._transition_kind == TransitionKind.SPATIAL_MATCH
+        ):
+            self.referenceFrameRequested.emit(self._transition_id, int(frame))

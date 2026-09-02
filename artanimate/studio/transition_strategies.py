@@ -68,6 +68,16 @@ class SpatialRevealStrategy:
         progress: float,
     ) -> np.ndarray:
         first, second = _frames(outgoing, incoming)
+        from .spatial_match import SpatialMatchSettings
+
+        settings = SpatialMatchSettings.from_transition(transition)
+        if settings.comparison_overlay:
+            return CrossDissolveStrategy().compose(
+                transition,
+                first,
+                second,
+                settings.overlay_opacity,
+            )
         if progress <= 0.0:
             return first.copy()
         if progress >= 1.0:

@@ -8,9 +8,14 @@ import numpy as np
 from PIL import Image, ImageDraw
 import pytest
 
+from artanimate.core.video import VideoFrameEncoder
 from artanimate.studio.model import Easing, Transition, TransitionKind
 from artanimate.studio.recipe import build_portable_project
-from artanimate.studio.spatial_match import SpatialMatchSettings
+from artanimate.studio.spatial_match import (
+    SpatialMatchSettings,
+    spatial_solution_from_transform,
+    spatial_transform_from_solution,
+)
 from artanimate.studio.transition_matching import (
     AkazeArtworkMatchSolver,
     SpatialMatchSolution,
@@ -60,6 +65,55 @@ def _wall_with_artwork(
     return Image.fromarray(wall, "RGB"), normalized
 
 
+def _solution_for_quad(
+    quad: tuple[tuple[float, float], ...],
+    *,
+    confidence: float = 0.83,
+) -> SpatialMatchSolution:
+    source = np.float32(((0, 0), (1, 0), (1, 1), (0, 1)))
+    target = np.asarray(quad, dtype=np.float32)
+    matrix = cv2.getPerspectiveTransform(source, target)
+    return SpatialMatchSolution(
+        quad,
+        tuple(tuple(float(value) for value in row) for row in matrix),
+        120,
+        160,
+        72,
+        48,
+        39,
+        0.8125,
+        1.4,
+        confidence,
+    ).validate()
+
+
+@pytest.mark.parametrize(
+    "quad",
+    (
+        ((0.14, 0.18), (0.82, 0.11), (0.88, 0.86), (0.09, 0.91)),
+        ((0.84, 0.16), (0.18, 0.14), (0.13, 0.88), (0.89, 0.91)),
+        ((-0.12, 0.08), (0.78, 0.02), (0.91, 0.82), (-0.18, 0.94)),
+    ),
+    ids=("perspective", "reflection", "partial-framing"),
+)
+def test_editor_contract_preserves_difficult_automatic_quads(
+    quad: tuple[tuple[float, float], ...],
+) -> None:
+    automatic = _solution_for_quad(quad)
+
+    transform = spatial_transform_from_solution(automatic)
+    restored = spatial_solution_from_transform(automatic, transform)
+
+    assert np.asarray(restored.target_quad) == pytest.approx(
+        np.asarray(automatic.target_quad), abs=1.0e-6
+    )
+    assert np.asarray(restored.homography) == pytest.approx(
+        np.asarray(automatic.homography), abs=1.0e-5
+    )
+    assert restored.confidence == automatic.confidence
+    assert restored.inliers == automatic.inliers
+
+
 def test_akaze_solves_a_projective_artwork_match() -> None:
     artwork = _textured_artwork()
     wall, expected = _wall_with_artwork(artwork)
@@ -82,6 +136,29 @@ def test_akaze_rejects_an_unrelated_uniform_photo() -> None:
             _textured_artwork(),
             Image.new("RGB", (800, 600), (210, 195, 180)),
         )
+
+
+def test_akaze_keeps_the_artwork_geometry_under_a_bright_reflection() -> None:
+    artwork = _textured_artwork()
+    wall, expected = _wall_with_artwork(artwork)
+    reflected = np.asarray(wall, dtype=np.uint8).copy()
+    glare = np.zeros(reflected.shape[:2], dtype=np.uint8)
+    cv2.fillConvexPoly(
+        glare,
+        np.asarray(((250, 70), (360, 60), (570, 535), (445, 540)), dtype=np.int32),
+        255,
+    )
+    selected = glare > 0
+    reflected[selected] = np.rint(
+        reflected[selected].astype(np.float32) * 0.62 + 255.0 * 0.38
+    ).astype(np.uint8)
+
+    solution = AkazeArtworkMatchSolver().solve(artwork, reflected)
+
+    assert solution.confidence >= 0.65
+    assert np.asarray(solution.target_quad) == pytest.approx(
+        np.asarray(expected), abs=0.035
+    )
 
 
 def test_spatial_strategy_reveals_the_real_frame_without_opacity_fade() -> None:
@@ -122,6 +199,34 @@ def test_spatial_strategy_reveals_the_real_frame_without_opacity_fade() -> None:
     assert np.array_equal(reveal[-1, -1], outgoing[-1, -1])
     assert np.array_equal(end[0, 0], incoming[0, 0])
     assert np.array_equal(end[60, 80], incoming[60, 80])
+
+
+def test_spatial_comparison_overlay_uses_the_requested_opacity_only_in_preview() -> None:
+    outgoing = np.full((16, 20, 3), (200, 40, 20), dtype=np.uint8)
+    incoming = np.full((16, 20, 3), (20, 80, 180), dtype=np.uint8)
+    solution = _solution_for_quad(
+        ((0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9))
+    )
+    settings = SpatialMatchSettings(
+        solution,
+        Easing.LINEAR,
+        overlay_opacity=0.25,
+        comparison_overlay=True,
+    )
+    transition = Transition(
+        "overlay",
+        TransitionKind.SPATIAL_MATCH,
+        "virtual",
+        "real",
+        10,
+        11,
+        settings.to_dict(),
+    ).validate()
+
+    compared = compose_transition_frames(transition, outgoing, incoming, 0.5)
+
+    expected = np.rint(outgoing * 0.75 + incoming * 0.25).astype(np.uint8)
+    assert np.array_equal(compared, expected)
 
 
 def test_recipe_persists_the_automatic_spatial_solution(tmp_path: Path) -> None:
@@ -169,3 +274,82 @@ def test_recipe_persists_the_automatic_spatial_solution(tmp_path: Path) -> None:
     second = build_portable_project(recipe_path, tmp_path / "portable")
     assert second.changed is False
     assert second.project.transitions[0].parameters == result.project.transitions[0].parameters
+
+
+def test_recipe_uses_one_selected_video_frame_for_the_spatial_solution(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source-video"
+    source.mkdir()
+    artwork = _textured_artwork(320, 240)
+    wall, _quad = _wall_with_artwork(artwork, width=640, height=480)
+    artwork_path = source / "artwork.png"
+    video_path = source / "wall.mp4"
+    artwork.save(artwork_path)
+    wall_rgb = np.asarray(wall, dtype=np.uint8)
+    encoder = VideoFrameEncoder(
+        video_path,
+        640,
+        480,
+        30,
+        quality="studio",
+        crf=12,
+        total_frames=30,
+    )
+    try:
+        for index in range(30):
+            frame = np.clip(
+                wall_rgb.astype(np.int16) + index % 3,
+                0,
+                255,
+            ).astype(np.uint8)
+            encoder.write(frame)
+        encoder.finish()
+    except BaseException:
+        encoder.abort()
+        raise
+    recipe = {
+        "schema_version": 1,
+        "name": "Raccord spatial vidéo",
+        "artwork": str(artwork_path),
+        "project": {"width": 640, "height": 480, "fps": 30},
+        "media": {"wall": {"path": str(video_path), "kind": "video"}},
+        "shots": [
+            {"id": "virtual", "kind": "artwork_3d", "duration_frames": 20},
+            {
+                "id": "real",
+                "kind": "video",
+                "asset": "wall",
+                "duration_frames": 20,
+                "source_in_frame": 5,
+            },
+        ],
+        "transitions": [
+            {
+                "kind": "spatial_match",
+                "from": "virtual",
+                "to": "real",
+                "duration_frames": 8,
+                "settings": {"reference_source_frame": 7},
+            }
+        ],
+    }
+    recipe_path = source / "recipe.json"
+    recipe_path.write_text(json.dumps(recipe), encoding="utf-8")
+
+    result = build_portable_project(recipe_path, tmp_path / "portable-video")
+
+    transition = result.project.transitions[0]
+    settings = SpatialMatchSettings.from_transition(transition)
+    assert settings.reference_source_frame == 7
+    assert settings.solution.confidence >= 0.7
+    assert settings.original_solution.to_dict() == settings.solution.to_dict()
+    expected_transform = spatial_transform_from_solution(settings.solution)
+    assert np.asarray(
+        [(point.x, point.y) for point in settings.editor_transform.target_corner_offsets]
+    ) == pytest.approx(
+        np.asarray(
+            [(point.x, point.y) for point in expected_transform.target_corner_offsets]
+        ),
+        abs=1.0e-7,
+    )

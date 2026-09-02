@@ -73,6 +73,13 @@ from ..studio.explore import (
     create_explore_project,
     explore_clip,
 )
+from ..studio.spatial_match import (
+    SpatialMatchSettings,
+    restore_automatic_spatial_match,
+    solve_spatial_match_reference,
+    spatial_transform_from_solution,
+    update_spatial_match,
+)
 from ..studio.semantic_actions import (
     add_semantic_action_clip,
     is_semantic_action_capability,
@@ -788,6 +795,7 @@ class StudioPanel(QWidget):
 
         self._analysis_project_id: str | None = None
         self._explore_proposal: ExploreBuildResult | None = None
+        self._match_proposal: tuple[str, StudioProject] | None = None
         self._preview_project_override: StudioProject | None = None
         page = QVBoxLayout(self)
         page.setContentsMargins(8, 10, 8, 4)
@@ -994,6 +1002,11 @@ class StudioPanel(QWidget):
         self.match_inspector.previewRequested.connect(
             self._match_preview_requested
         )
+        self.match_inspector.rejectRequested.connect(self._reject_spatial_match)
+        self.match_inspector.restoreRequested.connect(self._restore_spatial_match)
+        self.match_inspector.referenceFrameRequested.connect(
+            self._preview_spatial_match_reference
+        )
 
         self.explore_panel.createRequested.connect(self._preview_explore)
         self.explore_panel.acceptRequested.connect(self._accept_explore)
@@ -1034,6 +1047,7 @@ class StudioPanel(QWidget):
         self.preview_controller.cancel_pending()
         self.analysis_controller.cancel_pending(notify=False)
         self._explore_proposal = None
+        self._match_proposal = None
         self._preview_project_override = None
         validated = project.validate() if project is not None else None
         self.waveform_controller.cancel_pending(notify=False)
@@ -2390,6 +2404,11 @@ class StudioPanel(QWidget):
 
     def _timeline_transition_changed(self, value: object) -> None:
         transition_id = str(value) if isinstance(value, str) and value else None
+        if (
+            self._match_proposal is not None
+            and self._match_proposal[0] != transition_id
+        ):
+            self._reject_spatial_match(self._match_proposal[0])
         self._sync_match_editor(transition_id)
         if self.match_inspector.selected_transition_id is not None:
             self.inspector_tabs.setCurrentWidget(self.match_inspector)
@@ -2405,11 +2424,18 @@ class StudioPanel(QWidget):
                 transition = transition_by_id(project, transition_id)
             except KeyError:
                 transition = None
-            if transition is not None and transition.kind == TransitionKind.MATCH:
-                settings = ManualMatchSettings.from_transition(transition)
+            if transition is not None and transition.kind in {
+                TransitionKind.MATCH,
+                TransitionKind.SPATIAL_MATCH,
+            }:
+                settings = (
+                    SpatialMatchSettings.from_transition(transition).editor_transform
+                    if transition.kind == TransitionKind.SPATIAL_MATCH
+                    else ManualMatchSettings.from_transition(transition).transform
+                )
                 self.canvas.set_match_editor(
                     transition.transition_id,
-                    settings.transform,
+                    settings,
                     output_width=project.settings.width,
                     output_height=project.settings.height,
                 )
@@ -2421,10 +2447,143 @@ class StudioPanel(QWidget):
         if transition_id is None or not isinstance(value, ManualMatchTransform):
             return
         self.match_inspector.set_transform(value)
+        project = self._project
+        if project is not None:
+            try:
+                transition = transition_by_id(project, transition_id)
+            except KeyError:
+                transition = None
+            if transition is not None and transition.kind == TransitionKind.SPATIAL_MATCH:
+                self._preview_spatial_match_transform(transition_id, value)
+                return
         self.timeline_actions.apply_match_transform(transition_id, value)
 
-    def _match_preview_requested(self, mode: str, opacity: float) -> None:
+    def _match_context_path(self) -> Path:
+        if self.asset_panel.project_path is not None:
+            return self.asset_panel.project_path
         project = self._project
+        if project is None:
+            return Path.cwd() / "untitled.artanimate"
+        artwork = Path(project.artwork.path)
+        parent = artwork.parent if artwork.is_absolute() else Path.cwd()
+        return parent / f".{project.project_id}.artanimate"
+
+    def _set_spatial_match_proposal(
+        self,
+        transition_id: str,
+        candidate: StudioProject,
+        message: str,
+    ) -> None:
+        self._match_proposal = (transition_id, candidate)
+        self._preview_project_override = candidate
+        self.match_inspector.set_selection(candidate, transition_id)
+        settings = SpatialMatchSettings.from_transition(
+            transition_by_id(candidate, transition_id)
+        )
+        self.canvas.set_match_editor(
+            transition_id,
+            settings.editor_transform,
+            output_width=candidate.settings.width,
+            output_height=candidate.settings.height,
+        )
+        self.project_status.setText(message)
+        self._request_preview(self.transport.current_frame)
+
+    def _preview_spatial_match_transform(
+        self,
+        transition_id: str,
+        transform: ManualMatchTransform,
+    ) -> None:
+        project = self._project
+        if project is None:
+            return
+        base = (
+            self._match_proposal[1]
+            if self._match_proposal is not None
+            and self._match_proposal[0] == transition_id
+            else project
+        )
+        try:
+            candidate = update_spatial_match(
+                base,
+                transition_id,
+                transform=transform,
+                review_status="adjusted",
+            )
+            self._set_spatial_match_proposal(
+                transition_id,
+                candidate,
+                "Aperçu du raccord · projet et historique intacts jusqu’à Accepter",
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Correction de raccord impossible · {exc}")
+
+    def _preview_spatial_match_reference(
+        self,
+        transition_id: str,
+        reference_source_frame: int,
+    ) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            self.project_status.setText("Analyse AKAZE de la frame vidéo…")
+            solution = solve_spatial_match_reference(
+                project,
+                transition_id,
+                project_path=self._match_context_path(),
+                reference_source_frame=reference_source_frame,
+            )
+            candidate = update_spatial_match(
+                project,
+                transition_id,
+                reference_source_frame=reference_source_frame,
+                solution=solution,
+                automatic_solution=solution,
+                transform=spatial_transform_from_solution(solution),
+                review_status="automatic",
+            )
+            self._set_spatial_match_proposal(
+                transition_id,
+                candidate,
+                "Nouvelle frame de référence analysée · raccord à accepter ou refuser",
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Analyse de frame inchangée · {exc}")
+            self._sync_match_editor(transition_id)
+
+    def _restore_spatial_match(self, transition_id: str) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            candidate = restore_automatic_spatial_match(project, transition_id)
+            self._set_spatial_match_proposal(
+                transition_id,
+                candidate,
+                "Solution AKAZE restaurée en aperçu · cliquez Accepter pour la conserver",
+            )
+        except (KeyError, TypeError, ValueError, PermissionError) as exc:
+            self.project_status.setText(f"Restauration impossible · {exc}")
+
+    def _clear_spatial_match_proposal(self) -> None:
+        self._match_proposal = None
+        if self._explore_proposal is None:
+            self._preview_project_override = None
+
+    def _reject_spatial_match(self, transition_id: str) -> None:
+        if self._match_proposal is None or self._match_proposal[0] != transition_id:
+            return
+        self._clear_spatial_match_proposal()
+        self.preview_controller.cancel_pending()
+        self._sync_match_editor(transition_id)
+        self._request_preview(self.transport.current_frame)
+        self.project_status.setText(
+            "Proposition de raccord refusée · projet et historique inchangés"
+        )
+
+    def _match_preview_requested(self, mode: str, opacity: float) -> None:
+        project = self._preview_project_override or self._project
         transition_id = self.match_inspector.selected_transition_id
         if project is None or transition_id is None:
             return
@@ -2432,9 +2591,32 @@ class StudioPanel(QWidget):
             transition = transition_by_id(project, transition_id)
         except KeyError:
             return
-        if transition.kind != TransitionKind.MATCH:
+        if transition.kind not in {TransitionKind.MATCH, TransitionKind.SPATIAL_MATCH}:
             return
-        settings = ManualMatchSettings.from_transition(transition)
+        settings = (
+            SpatialMatchSettings.from_transition(transition)
+            if transition.kind == TransitionKind.SPATIAL_MATCH
+            else ManualMatchSettings.from_transition(transition)
+        )
+        if transition.kind == TransitionKind.SPATIAL_MATCH and (
+            mode == "overlay" or self._match_proposal is not None
+        ):
+            base = (
+                self._match_proposal[1]
+                if self._match_proposal is not None
+                and self._match_proposal[0] == transition_id
+                else project
+            )
+            project = update_spatial_match(
+                base,
+                transition_id,
+                overlay_opacity=min(1.0, max(0.0, float(opacity))),
+                comparison_overlay=mode == "overlay",
+            )
+            self._match_proposal = (transition_id, project)
+            self._preview_project_override = project
+            transition = transition_by_id(project, transition_id)
+            settings = SpatialMatchSettings.from_transition(transition)
         pair = transition_clip_pair(project, transition)
         if mode == "before":
             frame = transition.start_frame

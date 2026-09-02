@@ -29,7 +29,7 @@ from .image_io import load_normalized_image
 from .artwork_rectification import rectify_artwork
 from .audio import AudioClipSettings
 from .manual_match import ManualMatchTransform, add_manual_match, update_manual_match
-from .media import StillClipSettings
+from .media import StillClipSettings, transform_still_frame
 from .prologue import DiscoverySettings, PrologueSettings, add_discovery
 from .model import (
     AssetKind,
@@ -60,11 +60,11 @@ from .transition_matching import (
 )
 from .persistence import load_project, project_digest, save_project
 from .transitions import add_dissolve
-from .video import VideoClipSettings
+from .video import VideoClipSettings, VideoFrameSource
 
 
 RECIPE_SCHEMA_VERSION = 1
-RECIPE_COMPILER_VERSION = 4
+RECIPE_COMPILER_VERSION = 5
 PROJECT_FILENAME = "project.artanimate"
 RECIPE_FILENAME = "recipe.json"
 ASSETS_DIRECTORY = "assets"
@@ -706,11 +706,29 @@ class StudioRecipe:
             if transition.kind == "spatial_match":
                 if first.kind not in {ClipKind.ARTWORK_2D, ClipKind.ARTWORK_3D}:
                     raise ValueError("Le raccord spatial doit partir de l’œuvre")
-                if second.kind != ClipKind.STILL:
-                    raise ValueError("Le raccord spatial doit arriver sur une photo")
+                if second.kind not in {ClipKind.STILL, ClipKind.VIDEO}:
+                    raise ValueError("Le raccord spatial doit arriver sur une photo ou vidéo")
                 settings = transition.settings or {}
-                _known(settings, {"solver"}, "recipe.transition.spatial_match.settings")
+                _known(
+                    settings,
+                    {"solver", "reference_source_frame"},
+                    "recipe.transition.spatial_match.settings",
+                )
                 AkazeMatchSettings.from_dict(settings.get("solver"))
+                reference = _integer(
+                    settings.get("reference_source_frame", second.source_in_frame),
+                    "recipe.transition.spatial_match.settings.reference_source_frame",
+                )
+                if second.kind == ClipKind.STILL and reference != 0:
+                    raise ValueError("Une photo de raccord utilise la frame de référence 0")
+                if second.kind == ClipKind.VIDEO and not (
+                    second.source_in_frame
+                    <= reference
+                    < second.source_in_frame + second.duration_frames
+                ):
+                    raise ValueError(
+                        "La frame de référence doit rester dans le plan vidéo réel"
+                    )
         duration = self.duration_frames
         for audio in self.audio:
             asset = media.get(audio.asset)
@@ -951,6 +969,7 @@ def _solve_spatial_match(
     transition: RecipeTransition,
     artwork_path: Path,
     project_path: Path,
+    media_assets: Mapping[str, Any],
 ) -> Any:
     target_shot = next(
         shot for shot in recipe.shots if shot.shot_id == transition.to_shot
@@ -960,12 +979,31 @@ def _solve_spatial_match(
     )
     target_path = _resolved_media_path(target_media.path, project_path.parent)
     artwork_image, _artwork_inspection = load_normalized_image(artwork_path)
-    target_image, _target_inspection = load_normalized_image(target_path)
-    target_rgb = np.asarray(target_image, dtype=np.uint8)
+    settings = transition.settings or {}
+    reference_source_frame = int(
+        settings.get("reference_source_frame", target_shot.source_in_frame)
+    )
+    if target_shot.kind == ClipKind.VIDEO:
+        source = VideoFrameSource(
+            media_assets[target_shot.asset or ""],
+            target_path,
+            recipe.project.fps,
+            VideoClipSettings.from_mapping(target_shot.settings),
+        )
+        try:
+            target_rgb = source.frame_at(reference_source_frame)
+        finally:
+            source.close()
+    else:
+        target_image, _target_inspection = load_normalized_image(target_path)
+        target_rgb = transform_still_frame(
+            np.asarray(target_image, dtype=np.uint8),
+            StillClipSettings.from_mapping(target_shot.settings),
+        )
     output_width = recipe.project.width
     output_height = recipe.project.height
     # The last transition frame is the exact geometry visible immediately before the cut.
-    target_local_frame = transition.duration_frames - transition.duration_frames // 2 - 1
+    target_local_frame = reference_source_frame - target_shot.source_in_frame
     camera = target_shot.camera()
     if camera is not None:
         target_canvas = render_camera_frame(
@@ -982,7 +1020,6 @@ def _solve_spatial_match(
             output_height,
             target_shot.fit,
         )
-    settings = transition.settings or {}
     solver = AkazeArtworkMatchSolver(
         AkazeMatchSettings.from_dict(settings.get("solver"))
     )
@@ -1029,6 +1066,7 @@ def compile_studio_recipe(
             transition,
             artwork_path,
             path,
+            media_by_id,
         )
         spatial_solutions[(transition.from_shot, transition.to_shot)] = solution
         source_shot = shots_by_id[transition.from_shot]
@@ -1212,6 +1250,12 @@ def compile_studio_recipe(
                 solution,
                 duration_frames=transition_recipe.duration_frames,
                 easing=transition_recipe.easing,
+                reference_source_frame=int(
+                    (transition_recipe.settings or {}).get(
+                        "reference_source_frame",
+                        shots_by_id[transition_recipe.to_shot].source_in_frame,
+                    )
+                ),
             )
         stable_id = f"transition-{transition_recipe.from_shot}-{transition_recipe.to_shot}"
         project = replace(

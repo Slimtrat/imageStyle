@@ -341,7 +341,12 @@ class SemanticPlanCompositor:
         )
         if asset is None or asset.width is None or asset.height is None:
             raise ValueError("Le média réel de projection ne possède pas de dimensions")
-        reference_frame = int(projection.get("reference_camera_frame", 0))
+        reference_frame = int(
+            projection.get(
+                "reference_camera_frame",
+                settings.reference_source_frame - target_clip.source_in_frame,
+            )
+        )
         current_frame = project_frame - target_clip.start_frame
         return project_canonical_mask(
             rendered.alpha,

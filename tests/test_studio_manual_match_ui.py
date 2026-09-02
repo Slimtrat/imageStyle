@@ -17,10 +17,15 @@ from PySide6.QtWidgets import QApplication
 
 from artanimate.desktop.studio import StudioPanel
 from artanimate.studio.assets import import_media_asset
-from artanimate.studio.manual_match import ManualMatchSettings
+from artanimate.studio.manual_match import ManualMatchSettings, MatchPoint
 from artanimate.studio.media import add_still_clip
 from artanimate.studio.model import AssetKind, Easing, StudioProject, TransitionKind
 from artanimate.studio.transitions import transition_progress
+from artanimate.studio.spatial_match import (
+    SpatialMatchSettings,
+    add_spatial_match,
+)
+from artanimate.studio.transition_matching import SpatialMatchSolution
 
 
 @pytest.fixture(scope="module")
@@ -209,4 +214,80 @@ def test_manual_match_ui_edits_previews_canvas_and_history(
     assert panel.canvas.match_transition_id is None
     panel.undo()
     assert panel.project.transitions[0].kind == TransitionKind.MATCH
+    panel.close()
+
+
+def test_spatial_match_ui_previews_rejects_accepts_and_restores_history(
+    app,
+    tmp_path: Path,
+) -> None:
+    project, real_clip_id = _project(tmp_path)
+    solution = SpatialMatchSolution(
+        ((-0.08, 0.12), (0.82, 0.08), (0.88, 0.86), (-0.04, 0.92)),
+        ((0.9, 0.04, -0.08), (-0.04, 0.8, 0.12), (0.0, 0.0, 1.0)),
+        90,
+        110,
+        45,
+        25,
+        14,
+        0.56,
+        3.8,
+        0.48,
+    ).validate()
+    project, transition = add_spatial_match(
+        project,
+        "virtual",
+        real_clip_id,
+        solution,
+    )
+    panel = StudioPanel()
+    panel.resize(1400, 1000)
+    panel.show()
+    panel.set_project(project, reset_history=True)
+    panel.timeline.scene.set_transition_selection(transition.transition_id)
+
+    inspector = panel.match_inspector
+    assert inspector.selected_transition_kind == TransitionKind.SPATIAL_MATCH
+    assert "faible" in inspector.diagnostic.text()
+    assert "cadrage partiel" in inspector.diagnostic.text()
+    assert inspector.restore_button.isVisible()
+    original = panel.project.to_dict()
+    settings = SpatialMatchSettings.from_transition(panel.project.transitions[0])
+    inspector.overlay_opacity.setValue(35.0)
+    inspector.preview_mode.setCurrentIndex(inspector.preview_mode.findData("overlay"))
+    assert panel.project.to_dict() == original
+    assert panel._match_proposal is not None
+    overlay_settings = SpatialMatchSettings.from_transition(
+        panel._match_proposal[1].transitions[0]
+    )
+    assert overlay_settings.comparison_overlay is True
+    assert overlay_settings.overlay_opacity == pytest.approx(0.35)
+    inspector.reject_button.click()
+    assert panel.project.to_dict() == original
+    offsets = list(settings.editor_transform.target_corner_offsets)
+    offsets[0] = MatchPoint(offsets[0].x + 0.03, offsets[0].y + 0.02)
+    adjusted = replace(settings.editor_transform, target_corner_offsets=tuple(offsets))
+
+    panel._canvas_match_transform_changed(adjusted)
+
+    assert panel.project.to_dict() == original
+    assert panel._match_proposal is not None
+    inspector.reject_button.click()
+    assert panel._match_proposal is None
+    assert panel.project.to_dict() == original
+
+    panel._canvas_match_transform_changed(adjusted)
+    inspector.apply_button.click()
+
+    accepted = SpatialMatchSettings.from_transition(panel.project.transitions[0])
+    assert accepted.review_status == "adjusted"
+    assert accepted.comparison_overlay is False
+    assert accepted.solution.target_quad != settings.solution.target_quad
+    assert panel._match_proposal is None
+    assert panel.history.can_undo
+    reopened = StudioProject.from_dict(panel.project.to_dict())
+    reopened_settings = SpatialMatchSettings.from_transition(reopened.transitions[0])
+    assert reopened_settings.solution.to_dict() == accepted.solution.to_dict()
+    assert panel.undo()
+    assert panel.project.to_dict() == original
     panel.close()
