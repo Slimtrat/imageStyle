@@ -50,5 +50,12 @@ masque, enregistre la provenance `manual.recipe-regions`, puis reprojette ce mê
 sur la photo réelle avec l’homographie du raccord spatial. `region.blink` peut ainsi
 s’exécuter à la fin du plan réel tout en suivant son animation de caméra.
 
+Pour une région œil, le contrat conserve aussi une géométrie de paupière indépendante
+du timing de l’action : axe local, courbure, amplitude, zone de protection de la matière
+et largeur du trait fermé. Le renderer prélève la couleur dominante du visage, conserve
+sa microtexture et déplace deux fronts de paupière vers l’axe. Il ne rebouche plus l’œil
+par inpainting et ne réduit plus sa texture en bande. Une planche headless 2×4 compare
+automatiquement les quatre états dans l’œuvre canonique et dans la photo réelle.
+
 La détection automatique reste une capacité d’analyse séparée. Elle alimentera le même
 contrat et ne changera ni la sauvegarde du projet, ni les actions existantes.

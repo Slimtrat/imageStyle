@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 
 from .camera import resolve_camera_pose
+from .eyelids import EyelidGeometry, compose_eyelid_blink
 from .model import CameraAnimation, CameraPose
 
 
@@ -187,53 +188,10 @@ def blink_amount(
     return float(np.clip(amount * intensity, 0.0, 1.0))
 
 
-def compose_blink(image: np.ndarray, mask: np.ndarray, amount: float) -> np.ndarray:
-    frame = np.asarray(image)
-    alpha = np.asarray(mask, dtype=np.float32)
-    if frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype != np.uint8:
-        raise TypeError("Le blink exige une frame RGB uint8")
-    if alpha.shape != frame.shape[:2]:
-        raise ValueError("Le masque du blink doit correspondre à la frame")
-    amount = float(np.clip(amount, 0.0, 1.0))
-    if amount <= 1.0e-8 or not np.any(alpha > 0.02):
-        return frame.copy()
-    binary = (alpha > 0.04).astype(np.uint8)
-    ys, xs = np.nonzero(binary)
-    x0, x1 = int(xs.min()), int(xs.max()) + 1
-    y0, y1 = int(ys.min()), int(ys.max()) + 1
-    height = y1 - y0
-    width = x1 - x0
-    if height < 2 or width < 2:
-        return frame.copy()
-    radius = max(1, round(min(width, height) * 0.12))
-    expanded = cv2.dilate(binary, np.ones((radius * 2 + 1, radius * 2 + 1), np.uint8))
-    base = cv2.inpaint(
-        cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
-        expanded * 255,
-        max(1.0, radius * 0.8),
-        cv2.INPAINT_TELEA,
-    )
-    base = cv2.cvtColor(base, cv2.COLOR_BGR2RGB)
-    source = frame[y0:y1, x0:x1]
-    source_alpha = alpha[y0:y1, x0:x1]
-    compressed_height = max(1, round(height * (1.0 - amount * 0.94)))
-    compressed = cv2.resize(source, (width, compressed_height), interpolation=cv2.INTER_AREA)
-    compressed_alpha = cv2.resize(
-        source_alpha,
-        (width, compressed_height),
-        interpolation=cv2.INTER_AREA,
-    )
-    layer = np.zeros_like(frame)
-    layer_alpha = np.zeros_like(alpha)
-    center = (y0 + y1) // 2
-    target_y0 = max(0, center - compressed_height // 2)
-    target_y1 = min(frame.shape[0], target_y0 + compressed_height)
-    used = target_y1 - target_y0
-    layer[target_y0:target_y1, x0:x1] = compressed[:used]
-    layer_alpha[target_y0:target_y1, x0:x1] = compressed_alpha[:used]
-    result = base.astype(np.float32)
-    blend = np.clip(layer_alpha, 0.0, 1.0)[..., None]
-    result = result * (1.0 - blend) + layer.astype(np.float32) * blend
-    outside = np.clip(alpha, 0.0, 1.0)[..., None]
-    final = frame.astype(np.float32) * (1.0 - outside) + result * outside
-    return np.ascontiguousarray(np.rint(np.clip(final, 0.0, 255.0)).astype(np.uint8))
+def compose_blink(
+    image: np.ndarray,
+    mask: np.ndarray,
+    amount: float,
+    geometry: EyelidGeometry | dict[str, object] | None = None,
+) -> np.ndarray:
+    return compose_eyelid_blink(image, mask, amount, geometry)

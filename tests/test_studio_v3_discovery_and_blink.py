@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw
+import pytest
 
 from artanimate.studio.model import ClipKind, TransitionKind
 from artanimate.studio.persistence import load_project
@@ -144,6 +145,13 @@ def test_recipe_projects_a_manual_eye_region_and_blinks_at_the_real_shot_end(
                 "label": "Œil gauche",
                 "bounds": [0.15, 0.30, 0.15, 0.15],
                 "mask": {"shape": "ellipse", "feather": 0.06},
+                "blink": {
+                    "axis": [0.04, 0.68, 0.96, 0.78],
+                    "curvature": -0.08,
+                    "amplitude": 0.96,
+                    "protection": 0.12,
+                    "seam_width": 0.014,
+                },
             }
         ],
         "semantic_actions": [
@@ -170,6 +178,8 @@ def test_recipe_projects_a_manual_eye_region_and_blinks_at_the_real_shot_end(
     eye = result.project.scene.object_by_id("region-left-eye")
     assert eye is not None
     assert "blinkable" in eye.affordance_ids
+    assert eye.attributes["blink_model"]["axis"] == (0.04, 0.68, 0.96, 0.78)
+    assert eye.attributes["blink_model"]["amplitude"] == pytest.approx(0.96)
     action = next(item for item in result.project.invocations if item.capability_id == "region.blink")
     assert (action.start_frame, action.duration_frames) == (42, 18)
     assert result.project.triggers[0].offset_frames == -18

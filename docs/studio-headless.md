@@ -179,8 +179,15 @@ photo réelle :
       "id": "profile-eye",
       "type": "eye",
       "label": "Œil du visage de profil",
-      "bounds": [0.118, 0.335, 0.050, 0.095],
-      "mask": {"shape": "ellipse", "feather": 0.045}
+      "bounds": [0.114, 0.325, 0.060, 0.120],
+      "mask": {"shape": "ellipse", "feather": 0.025},
+      "blink": {
+        "axis": [0.04, 0.84, 0.96, 0.90],
+        "curvature": 0.015,
+        "amplitude": 1.0,
+        "protection": 0.12,
+        "seam_width": 0.010
+      }
     }
   ],
   "semantic_actions": [
@@ -202,7 +209,11 @@ photo réelle :
 ```
 
 Le projet persiste la région, son masque, la provenance de l’analyse, l’action et son
-trigger. Le compositeur ne modifie que les pixels couverts par la région projetée. La
+trigger. La géométrie *blink* appartient à la région : *axis* place le trait fermé,
+*curvature* le courbe, *amplitude* borne la fermeture, *protection* éloigne la zone
+d’échantillonnage et *seam_width* règle l’épaisseur du trait. Le compositeur construit
+deux paupières à partir de la matière dominante de la région ; il ne compresse plus
+les pixels de l’œil et ne modifie rien hors du masque projeté. La
 stratégie de détection automatique est décrite dans `studio-semantic-regions.md`.
 
 ## Reconstruction et sauvegardes
@@ -222,6 +233,11 @@ d’erreur et son message.
 transitions, avec leur numéro de frame et leur timecode. `export` encode le film complet
 avec les réglages du projet. Les deux sorties passent par le pipeline canonique du
 Studio ; elles ne sont donc pas des aperçus alternatifs.
+
+Chaque action *region.blink* ajoute aussi une planche agrandie
+*controls-blink-region.jpg*. Ses quatre colonnes montrent l’œil ouvert, à mi-course,
+fermé et rouvert ; ses deux lignes comparent l’œuvre canonique et la photo réelle
+reprojetée. Le rapport expose ces preuves dans *controls.blink_previews*.
 
 Les options CLI `--controls` et `--export` peuvent remplacer ponctuellement les sorties
 de la recette. Le projet portable reste alors identique.

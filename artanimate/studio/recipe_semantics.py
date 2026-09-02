@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from PIL import Image, ImageDraw, ImageFilter
 
 from .assets import import_media_asset
+from .eyelids import EyelidGeometry
 from .model import AssetKind, MediaAsset, StudioProject
 from .semantic import (
     Affordance,
@@ -55,13 +56,14 @@ class RecipeSemanticRegion:
     mask_shape: str = "ellipse"
     mask_asset: str | None = None
     feather: float = 0.08
+    blink_geometry: EyelidGeometry = EyelidGeometry()
 
     @classmethod
     def from_dict(cls, payload: Any, index: int) -> RecipeSemanticRegion:
         where = f"recipe.semantic_regions[{index}]"
         values = _object(payload, where)
         unknown = sorted(
-            set(values) - {"id", "type", "label", "bounds", "mask"}
+            set(values) - {"id", "type", "label", "bounds", "mask", "blink"}
         )
         if unknown:
             raise ValueError(f"Clé(s) inconnue(s) dans {where} : " + ", ".join(unknown))
@@ -91,6 +93,7 @@ class RecipeSemanticRegion:
             str(mask.get("shape", "ellipse")),
             asset,
             float(mask.get("feather", 0.08)),
+            EyelidGeometry.from_mapping(values.get("blink")),
         )
         return result.validate()
 
@@ -104,6 +107,7 @@ class RecipeSemanticRegion:
             raise ValueError("Le masque manuel doit être ellipse ou rectangle")
         if not 0.0 <= self.feather <= 0.35:
             raise ValueError("Le feather du masque doit être compris entre 0 et 0,35")
+        self.blink_geometry.validate()
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -113,13 +117,16 @@ class RecipeSemanticRegion:
         }
         if self.mask_asset is not None:
             mask["asset"] = self.mask_asset
-        return {
+        result = {
             "id": self.region_id,
             "type": self.region_type,
             "label": self.label,
             "bounds": list(self.bounds),
             "mask": mask,
         }
+        if self.region_type == "eye":
+            result["blink"] = self.blink_geometry.to_dict()
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,6 +333,8 @@ def compile_recipe_semantics(
                 "editable": True,
             },
         }
+        if region.region_type == "eye":
+            attributes["blink_model"] = region.blink_geometry.to_dict()
         if projection_transition is not None:
             reference_camera_frame = (
                 projection_transition.duration_frames

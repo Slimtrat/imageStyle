@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 from hashlib import sha256
 import json
@@ -9,6 +10,7 @@ from pathlib import Path
 import time
 from typing import Any
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -18,11 +20,18 @@ from .studio.color_fidelity import (
     FAITHFUL_MEDIAN_DELTA_E00,
     FAITHFUL_P95_DELTA_E00,
 )
+from .studio.eyelids import EyelidGeometry
 from .studio.export import StudioExportResult, export_studio_project, frame_digest
 from .studio.model import ClipKind, StudioProject, TrackKind
 from .studio.persistence import project_digest
 from .studio.recipe import RecipeBuildResult, StudioRecipe, build_portable_project
 from .studio.render_session import StudioRenderSession
+from .studio.semantic_projection import (
+    blink_amount,
+    compose_blink,
+    project_canonical_mask,
+)
+from .studio.spatial_match import SpatialMatchSettings
 
 
 HEADLESS_REPORT_SCHEMA_VERSION = 1
@@ -328,6 +337,252 @@ def _render_color_comparison(
     }
 
 
+def _eye_crop(
+    image: np.ndarray,
+    alpha: np.ndarray,
+    *,
+    width: int = 300,
+    height: int = 220,
+) -> Image.Image:
+    selected = np.argwhere(alpha > 0.04)
+    if not len(selected):
+        raise ValueError("Le masque de la région blink est vide")
+    ys, xs = selected[:, 0], selected[:, 1]
+    center_x = (float(xs.min()) + float(xs.max())) * 0.5
+    center_y = (float(ys.min()) + float(ys.max())) * 0.5
+    region_width = max(2.0, float(xs.max() - xs.min() + 1))
+    region_height = max(2.0, float(ys.max() - ys.min() + 1))
+    crop_width = max(region_width * 2.1, region_height * 2.1 * width / height)
+    crop_height = crop_width * height / width
+    source = Image.fromarray(image)
+    crop = source.crop(
+        (
+            round(center_x - crop_width * 0.5),
+            round(center_y - crop_height * 0.5),
+            round(center_x + crop_width * 0.5),
+            round(center_y + crop_height * 0.5),
+        )
+    )
+    return crop.resize((width, height), Image.Resampling.LANCZOS)
+
+
+def _project_blink_mask(
+    project: StudioProject,
+    target: Any,
+    mask: np.ndarray,
+    project_frame: int,
+    *,
+    output_width: int,
+    output_height: int,
+) -> np.ndarray:
+    projection = target.attributes.get("projection")
+    if not isinstance(projection, Mapping):
+        raise ValueError("La preview réelle du blink exige une projection spatiale")
+    transition_id = str(projection.get("transition_id", ""))
+    target_clip_id = str(projection.get("target_clip_id", ""))
+    transition = next(
+        item for item in project.transitions if item.transition_id == transition_id
+    )
+    target_clip = next(
+        clip
+        for track in project.tracks
+        for clip in track.clips
+        if clip.clip_id == target_clip_id
+    )
+    asset = next(
+        item for item in project.assets if item.asset_id == target_clip.asset_id
+    )
+    if asset.width is None or asset.height is None:
+        raise ValueError("Le média réel du blink ne possède pas de dimensions")
+    settings = SpatialMatchSettings.from_transition(transition)
+    return project_canonical_mask(
+        mask,
+        settings.solution.homography,
+        output_width=output_width,
+        output_height=output_height,
+        camera=target_clip.camera,
+        reference_camera_frame=int(projection.get("reference_camera_frame", 0)),
+        current_camera_frame=project_frame - target_clip.start_frame,
+        camera_source_width=asset.width,
+        camera_source_height=asset.height,
+    )
+
+
+def _blink_comparison_sheet(
+    path: Path,
+    canonical: list[Image.Image],
+    projected: list[Image.Image],
+    labels: list[str],
+) -> None:
+    label_height = 36
+    row_label_width = 112
+    cell_width, cell_height = canonical[0].size
+    sheet = Image.new(
+        "RGB",
+        (
+            row_label_width + cell_width * len(labels),
+            label_height + cell_height * 2,
+        ),
+        (15, 16, 21),
+    )
+    draw = ImageDraw.Draw(sheet)
+    for index, label in enumerate(labels):
+        draw.text(
+            (row_label_width + index * cell_width + 10, 11),
+            label,
+            fill=(238, 239, 244),
+        )
+        sheet.paste(canonical[index], (row_label_width + index * cell_width, label_height))
+        sheet.paste(
+            projected[index],
+            (row_label_width + index * cell_width, label_height + cell_height),
+        )
+    draw.text((10, label_height + cell_height // 2), "CANONIQUE", fill=(225, 177, 106))
+    draw.text(
+        (10, label_height + cell_height + cell_height // 2),
+        "PHOTO RÉELLE",
+        fill=(143, 214, 203),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    options = (
+        {"quality": 95}
+        if path.suffix.lower() in {".jpg", ".jpeg", ".webp"}
+        else {}
+    )
+    sheet.save(path, **options)
+
+
+def _render_blink_comparisons(
+    result: RecipeBuildResult,
+    control_path: Path,
+    *,
+    width: int,
+    height: int,
+    environment: _RenderEnvironment,
+) -> list[dict[str, Any]]:
+    scene = result.project.scene
+    invocations = [
+        item
+        for item in result.project.invocations
+        if item.capability_id == "region.blink"
+    ]
+    if scene is None or not invocations:
+        return []
+    with Image.open(environment.artwork_path) as source:
+        artwork = np.asarray(source.convert("RGB"), dtype=np.uint8)
+    records: list[dict[str, Any]] = []
+    with StudioRenderSession(
+        result.project,
+        environment.artwork_path,
+        output_width=width,
+        output_height=height,
+        resource_base=result.project_path.parent,
+        extra_renderers=environment.renderers,
+    ) as session:
+        for invocation in invocations:
+            target = scene.object_by_id(invocation.target_id or "")
+            if target is None:
+                raise ValueError("La preview blink ne trouve pas sa région")
+            reference = next(
+                item for item in target.resource_refs if item.kind == "mask"
+            )
+            asset = next(
+                item for item in result.project.assets
+                if item.asset_id == reference.asset_id
+            )
+            mask_path = resolve_asset_path(asset.path, result.project_path)
+            with Image.open(mask_path) as source:
+                mask = np.asarray(source.convert("L"), dtype=np.float32) / 255.0
+            if mask.shape != artwork.shape[:2]:
+                mask = cv2.resize(
+                    mask,
+                    (artwork.shape[1], artwork.shape[0]),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+            geometry = EyelidGeometry.from_mapping(
+                target.attributes.get("blink_model")
+            )
+            parameters = invocation.parameters
+            close_frames = int(parameters.get("close_frames", 6))
+            local_frames = [
+                0,
+                max(1, (close_frames - 1) // 2),
+                close_frames - 1,
+                invocation.duration_frames - 1,
+            ]
+            labels = ["OUVERT", "MI-COURSE", "FERMÉ", "RÉOUVERT"]
+            amounts = [
+                blink_amount(
+                    local,
+                    close_frames=close_frames,
+                    hold_frames=int(parameters.get("hold_frames", 2)),
+                    open_frames=int(parameters.get("open_frames", 8)),
+                    easing=str(parameters.get("easing", "ease-in-out")),
+                    intensity=float(parameters.get("intensity", 1.0)),
+                )
+                for local in local_frames
+            ]
+            canonical_panels = [
+                _eye_crop(
+                    compose_blink(artwork, mask, amount, geometry),
+                    mask,
+                )
+                for amount in amounts
+            ]
+            projected_panels: list[Image.Image] = []
+            project_frames: list[int] = []
+            for local in local_frames:
+                project_frame = invocation.start_frame + local
+                project_frames.append(project_frame)
+                rendered = np.ascontiguousarray(session.frame_at(project_frame)).copy()
+                projected_mask = _project_blink_mask(
+                    result.project,
+                    target,
+                    mask,
+                    project_frame,
+                    output_width=width,
+                    output_height=height,
+                )
+                projected_panels.append(_eye_crop(rendered, projected_mask))
+            safe_target = (invocation.target_id or invocation.invocation_id).replace(":", "-")
+            path = control_path.with_name(
+                f"{control_path.stem}-blink-{safe_target}{control_path.suffix}"
+            )
+            _blink_comparison_sheet(
+                path,
+                canonical_panels,
+                projected_panels,
+                labels,
+            )
+            records.append(
+                {
+                    "path": str(path),
+                    "sha256": _sha256_file(path),
+                    "size_bytes": path.stat().st_size,
+                    "invocation_id": invocation.invocation_id,
+                    "target_id": invocation.target_id,
+                    "geometry": geometry.to_dict(),
+                    "states": [
+                        {
+                            "label": label.lower(),
+                            "local_frame": local,
+                            "project_frame": project_frame,
+                            "amount": round(amount, 6),
+                        }
+                        for label, local, project_frame, amount in zip(
+                            labels,
+                            local_frames,
+                            project_frames,
+                            amounts,
+                            strict=True,
+                        )
+                    ],
+                    "artist_review": "pending",
+                }
+            )
+    return records
+
+
 def render_control_sheet(
     result: RecipeBuildResult,
     destination: str | Path,
@@ -359,6 +614,13 @@ def render_control_sheet(
         height=proxy_height,
         environment=environment,
     )
+    blink_comparisons = _render_blink_comparisons(
+        result,
+        path,
+        width=proxy_width,
+        height=proxy_height,
+        environment=environment,
+    )
     return {
         "path": str(path),
         "sha256": _sha256_file(path),
@@ -370,6 +632,7 @@ def render_control_sheet(
         ],
         "execution_mode": execution_mode,
         "color_fidelity": color_comparison,
+        "blink_previews": blink_comparisons,
     }
 
 

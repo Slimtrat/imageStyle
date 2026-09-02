@@ -79,16 +79,47 @@
   ],
   "transitions": [
     {
-      "kind": "cut",
+      "kind": "spatial_match",
       "from": "virtual",
       "to": "mur3",
-      "duration_frames": 1
+      "duration_frames": 60
     },
     {
       "kind": "cut",
       "from": "mur3",
       "to": "mur2",
       "duration_frames": 1
+    }
+  ],
+  "semantic_regions": [
+    {
+      "id": "profile-eye",
+      "type": "eye",
+      "label": "Œil du visage de profil",
+      "bounds": [0.114, 0.325, 0.060, 0.120],
+      "mask": {"shape": "ellipse", "feather": 0.025},
+      "blink": {
+        "axis": [0.04, 0.84, 0.96, 0.90],
+        "curvature": 0.015,
+        "amplitude": 1.0,
+        "protection": 0.12,
+        "seam_width": 0.010
+      }
+    }
+  ],
+  "semantic_actions": [
+    {
+      "id": "final-blink",
+      "capability": "region.blink",
+      "target": "profile-eye",
+      "trigger": {"event": "shot_end", "shot": "mur3"},
+      "parameters": {
+        "close_frames": 6,
+        "hold_frames": 2,
+        "open_frames": 10,
+        "intensity": 1.0,
+        "easing": "ease-in-out"
+      }
     }
   ],
   "outputs": {

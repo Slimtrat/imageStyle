@@ -430,6 +430,12 @@ class SemanticPlanCompositor:
             return alpha_composite_rgb(cleared, shifted, shifted_alpha)
         if blend_mode == "semantic.region-blink":
             alpha = self._projected_region_resource(rendered, project_frame)
+            target_attributes = metadata.get("target_attributes", {})
+            blink_geometry = (
+                target_attributes.get("blink_model")
+                if isinstance(target_attributes, dict)
+                else None
+            )
             amount = blink_amount(
                 int(metadata["local_frame"]),
                 close_frames=int(parameters["close_frames"]),
@@ -438,7 +444,12 @@ class SemanticPlanCompositor:
                 easing=str(parameters["easing"]),
                 intensity=float(parameters["intensity"]),
             )
-            return compose_blink(background, alpha, amount)
+            return compose_blink(
+                background,
+                alpha,
+                amount,
+                blink_geometry,
+            )
         if blend_mode == "semantic.scene-parallax":
             depth = self._fitted_semantic_resource(rendered, fit)
             return _depth_warp(
