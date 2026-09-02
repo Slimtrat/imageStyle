@@ -263,6 +263,7 @@ _EVENT_LABELS = {
 class StudioMusicAnalysisPanel(QFrame):
     analysisRequested = Signal(str, object)
     cancelRequested = Signal()
+    markersRequested = Signal(str, object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -338,6 +339,13 @@ class StudioMusicAnalysisPanel(QFrame):
         )
         self.events.setMinimumHeight(150)
         layout.addWidget(self.events, 1)
+        self.add_markers_button = QPushButton(
+            "Ajouter ces propositions à la timeline"
+        )
+        self.add_markers_button.setObjectName("studioMusicAddMarkers")
+        self.add_markers_button.clicked.connect(self._request_markers)
+        self.add_markers_button.setEnabled(False)
+        layout.addWidget(self.add_markers_button)
         note = QLabel(
             "Les propositions « à vérifier » restent visibles. "
             "La prochaine étape permettra de les accepter et de les corriger."
@@ -392,6 +400,7 @@ class StudioMusicAnalysisPanel(QFrame):
         self.asset_combo.blockSignals(False)
         self._result = None
         self.events.clear()
+        self.add_markers_button.setEnabled(False)
         if self.asset_combo.count():
             self.status.setText(
                 "Prêt · l’analyse reste sur cette machine et ne modifie pas l’audio."
@@ -411,6 +420,9 @@ class StudioMusicAnalysisPanel(QFrame):
             and self._project_path is not None
         )
         self.cancel_button.setEnabled(busy)
+        self.add_markers_button.setEnabled(
+            not busy and self._result is not None and bool(self._result.events)
+        )
         if busy:
             self.status.setText(
                 "Analyse locale en cours… tempo, beats, temps forts et drops."
@@ -457,6 +469,7 @@ class StudioMusicAnalysisPanel(QFrame):
         )
         self.events.resizeColumnToContents(0)
         self.events.resizeColumnToContents(1)
+        self.add_markers_button.setEnabled(bool(result.events))
 
     def set_feedback(self, message: str) -> None:
         self.status.setText(message)
@@ -464,6 +477,7 @@ class StudioMusicAnalysisPanel(QFrame):
     def _source_changed(self, _index: int) -> None:
         self._result = None
         self.events.clear()
+        self.add_markers_button.setEnabled(False)
         self._update_enabled_state()
 
     def _sensitivity_changed(self, value: int) -> None:
@@ -476,11 +490,17 @@ class StudioMusicAnalysisPanel(QFrame):
         self.sensitivity_value.setText(f"{value} % · {qualifier}")
         self._result = None
         self.events.clear()
+        self.add_markers_button.setEnabled(False)
 
     def _request_analysis(self) -> None:
         asset_id = self.selected_asset_id
         if asset_id is not None:
             self.analysisRequested.emit(asset_id, self.settings)
+
+    def _request_markers(self) -> None:
+        asset_id = self.selected_asset_id
+        if asset_id is not None and self._result is not None:
+            self.markersRequested.emit(asset_id, self._result)
 
     def _update_enabled_state(self) -> None:
         enabled = (
@@ -491,3 +511,6 @@ class StudioMusicAnalysisPanel(QFrame):
         self.sensitivity_slider.setEnabled(self._project is not None)
         self.analyze_button.setEnabled(enabled)
         self.cancel_button.setEnabled(False)
+        self.add_markers_button.setEnabled(
+            self._result is not None and bool(self._result.events)
+        )

@@ -7,6 +7,7 @@ from .audio import AudioClipSettings, validate_audio_source_range
 from .camera import resolve_camera_pose
 from .effect_2d import MIN_EFFECT_DURATION_SECONDS, settings_for_effect_clip
 from .legacy_semantics import invocation_bindings
+from .markers import TimelineMarkerState
 from .model import (
     CameraAnimation,
     CameraKeyframe,
@@ -189,8 +190,10 @@ def timeline_snap_targets(
     *,
     playhead: int | None = None,
     exclude_clip_ids: tuple[str, ...] = (),
+    exclude_marker_ids: tuple[str, ...] = (),
 ) -> tuple[int, ...]:
     excluded = set(exclude_clip_ids)
+    excluded_markers = set(exclude_marker_ids)
     targets = {0, project.settings.duration_frames}
     if playhead is not None:
         targets.add(int(playhead))
@@ -205,6 +208,11 @@ def timeline_snap_targets(
                     clip.start_frame + keyframe.frame
                     for keyframe in clip.camera.keyframes
                 )
+    targets.update(
+        marker.frame
+        for marker in TimelineMarkerState.from_project(project).visible_markers()
+        if marker.marker_id not in excluded_markers
+    )
     return tuple(sorted(targets))
 
 

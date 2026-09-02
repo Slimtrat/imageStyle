@@ -26,6 +26,11 @@ from PySide6.QtWidgets import (
 from ..studio.audio import AudioClipSettings, AudioMixSettings, audio_envelope_gain
 from ..studio.clock import StudioClock
 from ..studio.explore import ExplorePlanRole, explore_clip_label, explore_clip_role
+from ..studio.markers import (
+    MarkerKind,
+    TimelineMarker,
+    TimelineMarkerState,
+)
 from ..studio.model import (
     Clip,
     ClipKind,
@@ -42,6 +47,13 @@ HEADER_WIDTH = 190
 RULER_HEIGHT = 30
 BASE_TRACK_HEIGHT = 56
 CLIP_HEIGHT = 21
+
+_MARKER_COLORS = {
+    MarkerKind.BEAT: QColor("#69a7ff"),
+    MarkerKind.DOWNBEAT: QColor("#b78cff"),
+    MarkerKind.DROP: QColor("#ff6f91"),
+    MarkerKind.CUSTOM: QColor("#ffd166"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +124,8 @@ class StudioTimelineScene(QWidget):
     audioFadeRequested = Signal(str, int, int)
     transitionSelectionChanged = Signal(object)
     transitionResizeRequested = Signal(str, int, int)
+    markerSelectionChanged = Signal(object)
+    markerMoveRequested = Signal(str, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -129,6 +143,7 @@ class StudioTimelineScene(QWidget):
         self._transition_layouts: tuple[TimelineTransitionLayout, ...] = ()
         self._selected_track_id: str | None = None
         self._selected_transition_id: str | None = None
+        self._selected_marker_id: str | None = None
         self._drag_clip: TimelineClipLayout | None = None
         self._drag_transition: TimelineTransitionLayout | None = None
         self._drag_mode: str | None = None
@@ -138,6 +153,9 @@ class StudioTimelineScene(QWidget):
         self._transition_target_end = 0
         self._drag_target_track_id: str | None = None
         self._drag_started = False
+        self._drag_marker: TimelineMarker | None = None
+        self._marker_drag_press_frame = 0
+        self._marker_drag_target_frame = 0
 
     @property
     def pixels_per_frame(self) -> float:
@@ -168,6 +186,10 @@ class StudioTimelineScene(QWidget):
         return self._selected_track_id
 
     @property
+    def selected_marker_id(self) -> str | None:
+        return self._selected_marker_id
+
+    @property
     def waveform_asset_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._waveforms))
 
@@ -190,6 +212,15 @@ class StudioTimelineScene(QWidget):
             self._selected_transition_id = None
             if changed:
                 self.transitionSelectionChanged.emit(None)
+        visible_marker_ids = {
+            marker.marker_id
+            for marker in TimelineMarkerState.from_project(project).visible_markers()
+        } if project is not None else set()
+        if self._selected_marker_id not in visible_marker_ids:
+            changed = self._selected_marker_id is not None
+            self._selected_marker_id = None
+            if changed:
+                self.markerSelectionChanged.emit(None)
         self._rebuild_geometry()
 
     def set_waveforms(self, waveforms: dict[str, WaveformEnvelope]) -> None:
@@ -214,6 +245,9 @@ class StudioTimelineScene(QWidget):
         if selection and self._selected_transition_id is not None:
             self._selected_transition_id = None
             self.transitionSelectionChanged.emit(None)
+        if selection and self._selected_marker_id is not None:
+            self._selected_marker_id = None
+            self.markerSelectionChanged.emit(None)
         self.selectionChanged.emit(self._selected)
         self.update()
 
@@ -228,7 +262,31 @@ class StudioTimelineScene(QWidget):
         if selected is not None and self._selected:
             self._selected = ()
             self.selectionChanged.emit(())
+        if selected is not None and self._selected_marker_id is not None:
+            self._selected_marker_id = None
+            self.markerSelectionChanged.emit(None)
         self.transitionSelectionChanged.emit(selected)
+        self.update()
+
+    def set_marker_selection(self, marker_id: str | None) -> None:
+        visible = (
+            TimelineMarkerState.from_project(self._project).visible_markers()
+            if self._project is not None
+            else ()
+        )
+        known = {marker.marker_id for marker in visible}
+        selected = marker_id if marker_id in known else None
+        if selected == self._selected_marker_id:
+            return
+        self._selected_marker_id = selected
+        if selected is not None:
+            if self._selected:
+                self._selected = ()
+                self.selectionChanged.emit(())
+            if self._selected_transition_id is not None:
+                self._selected_transition_id = None
+                self.transitionSelectionChanged.emit(None)
+        self.markerSelectionChanged.emit(selected)
         self.update()
 
     def frame_x(self, frame: int) -> float:
@@ -345,6 +403,41 @@ class StudioTimelineScene(QWidget):
             ),
             None,
         )
+
+    def _visible_markers(self) -> tuple[TimelineMarker, ...]:
+        if self._project is None:
+            return ()
+        return TimelineMarkerState.from_project(
+            self._project
+        ).visible_markers()
+
+    def _display_marker_frame(self, marker: TimelineMarker) -> int:
+        if (
+            self._drag_marker is not None
+            and self._drag_marker.marker_id == marker.marker_id
+            and self._drag_started
+        ):
+            return self._marker_drag_target_frame
+        return marker.frame
+
+    def _marker_at(self, point: QPointF) -> TimelineMarker | None:
+        if point.y() > RULER_HEIGHT:
+            return None
+        candidates = sorted(
+            self._visible_markers(),
+            key=lambda marker: (
+                abs(self.frame_x(self._display_marker_frame(marker)) - point.x()),
+                marker.marker_id != self._selected_marker_id,
+                marker.marker_id,
+            ),
+        )
+        if not candidates:
+            return None
+        nearest = candidates[0]
+        distance = abs(
+            self.frame_x(self._display_marker_frame(nearest)) - point.x()
+        )
+        return nearest if distance <= 7.0 else None
 
     def _display_transition_rect(
         self,
@@ -583,6 +676,8 @@ class StudioTimelineScene(QWidget):
                 f"{label} · {layout.transition.duration_frames}f",
             )
 
+        self._paint_markers(painter)
+
         if self._drag_clip is not None and self._drag_started:
             preview = QRectF(self._drag_clip.rect)
             if self._drag_mode == "move":
@@ -616,6 +711,35 @@ class StudioTimelineScene(QWidget):
             ]
         )
 
+    def _paint_markers(self, painter: QPainter) -> None:
+        for marker in self._visible_markers():
+            frame = self._display_marker_frame(marker)
+            x = self.frame_x(frame)
+            selected = marker.marker_id == self._selected_marker_id
+            color = _MARKER_COLORS[marker.kind]
+            line = QColor(color)
+            line.setAlpha(145 if selected else 58)
+            pen = QPen(line, 2 if selected else 1)
+            if marker.uncertain and not marker.adjusted:
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.drawLine(
+                QPointF(x, RULER_HEIGHT - 1),
+                QPointF(x, self.height()),
+            )
+            painter.setBrush(
+                color if not marker.uncertain or marker.adjusted
+                else QColor("#202633")
+            )
+            painter.setPen(QPen(QColor("#ffffff") if selected else color, 2))
+            painter.drawPolygon(
+                [
+                    QPointF(x - 6, RULER_HEIGHT - 11),
+                    QPointF(x + 6, RULER_HEIGHT - 11),
+                    QPointF(x, RULER_HEIGHT - 2),
+                ]
+            )
+
     def _paint_ruler(self, painter: QPainter) -> None:
         project = self._project
         if project is None:
@@ -643,6 +767,18 @@ class StudioTimelineScene(QWidget):
             return
         point = event.position()
         row = self._track_at(point)
+        if point.x() >= HEADER_WIDTH and point.y() <= RULER_HEIGHT:
+            marker = self._marker_at(point)
+            if marker is not None:
+                self.set_marker_selection(marker.marker_id)
+                self._drag_marker = marker
+                self._marker_drag_press_frame = marker.frame
+                self._marker_drag_target_frame = marker.frame
+                self._drag_started = False
+                self.seekRequested.emit(marker.frame)
+                event.accept()
+                return
+            self.set_marker_selection(None)
         if point.x() < HEADER_WIDTH and row is not None:
             for field, rect in self._state_rects(row).items():
                 if rect.contains(point):
@@ -684,6 +820,7 @@ class StudioTimelineScene(QWidget):
                 event.accept()
                 return
             self.set_transition_selection(None)
+            self.set_marker_selection(None)
             clip = self._clip_at(point)
             ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             if clip is None:
@@ -737,6 +874,15 @@ class StudioTimelineScene(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._drag_marker is not None:
+            frame = self.frame_at_x(event.position().x())
+            self._marker_drag_target_frame = frame
+            self._drag_started = self._drag_started or (
+                frame != self._marker_drag_press_frame
+            )
+            self.update()
+            event.accept()
+            return
         if self._drag_transition is not None and self._drag_mode in {
             "transition-left",
             "transition-right",
@@ -818,6 +964,20 @@ class StudioTimelineScene(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._drag_marker is not None
+        ):
+            marker = self._drag_marker
+            target = self._marker_drag_target_frame
+            started = self._drag_started
+            self._drag_marker = None
+            self._drag_started = False
+            if started:
+                self.markerMoveRequested.emit(marker.marker_id, target)
+            self.update()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._drag_transition is not None:
             layout = self._drag_transition
             started = self._drag_started
@@ -886,6 +1046,9 @@ class StudioTimeline(QWidget):
     transitionResizeRequested = Signal(str, int, int)
     matchRequested = Signal(object)
     transitionDeleteRequested = Signal(str)
+    markerSelectionChanged = Signal(object)
+    markerMoveRequested = Signal(str, int)
+    markerDeleteRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -987,6 +1150,8 @@ class StudioTimeline(QWidget):
             self.transitionSelectionChanged
         )
         self.scene.transitionResizeRequested.connect(self.transitionResizeRequested)
+        self.scene.markerSelectionChanged.connect(self.markerSelectionChanged)
+        self.scene.markerMoveRequested.connect(self.markerMoveRequested)
         self._shortcuts = (
             QShortcut(
                 QKeySequence(Qt.Key.Key_Delete),
@@ -1007,10 +1172,18 @@ class StudioTimeline(QWidget):
         return self.scene.selected_transition_id
 
     @property
+    def selected_marker_id(self) -> str | None:
+        return self.scene.selected_marker_id
+
+    @property
     def snapping_enabled(self) -> bool:
         return self.snap_button.isChecked()
 
     def _delete_selection(self) -> None:
+        marker_id = self.scene.selected_marker_id
+        if marker_id is not None:
+            self.markerDeleteRequested.emit(marker_id)
+            return
         transition_id = self.scene.selected_transition_id
         if transition_id is not None:
             self.transitionDeleteRequested.emit(transition_id)
@@ -1038,4 +1211,7 @@ class StudioTimeline(QWidget):
             bar.setValue(max(0, x - HEADER_WIDTH))
         elif x > viewport_right - 24:
             bar.setValue(x - self.scroll.viewport().width() + 24)
+
+    def set_marker_selection(self, marker_id: str | None) -> None:
+        self.scene.set_marker_selection(marker_id)
 

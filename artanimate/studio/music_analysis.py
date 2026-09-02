@@ -11,6 +11,9 @@ from tempfile import NamedTemporaryFile
 from threading import Event
 
 import numpy as np
+import numpy.fft as np_fft
+import numpy.linalg as np_linalg
+import numpy.ma as np_ma  # noqa: F401 - preload NumPy's lazy median dependency
 
 from .audio_decode import AudioDecodeCancelled, decode_mono_audio
 from .clock import StudioClock
@@ -255,7 +258,7 @@ class _FeatureBuilder:
         self.frame_size = max(256, int(round(sample_rate * 0.046)))
         self.hop_size = max(128, int(round(sample_rate * 0.0115)))
         self.window = np.hanning(self.frame_size).astype(np.float32)
-        self.frequencies = np.fft.rfftfreq(
+        self.frequencies = np_fft.rfftfreq(
             self.frame_size, d=1.0 / sample_rate
         )
         self.buffer = np.empty(0, dtype=np.float32)
@@ -277,7 +280,7 @@ class _FeatureBuilder:
             if len(self.rms) % 128 == 0 and self.cancelled.is_set():
                 raise MusicAnalysisCancelled("Analyse musicale annulée")
             frame = values[offset : offset + self.frame_size]
-            spectrum = np.abs(np.fft.rfft(frame * self.window)).astype(np.float32)
+            spectrum = np.abs(np_fft.rfft(frame * self.window)).astype(np.float32)
             power = spectrum * spectrum
             self.rms.append(float(np.sqrt(np.mean(frame * frame))))
             if self.previous_spectrum is None:
@@ -344,7 +347,7 @@ def _tempo_from_onsets(
     for lag in range(minimum_lag, maximum_lag + 1):
         left = signal[:-lag]
         right = signal[lag:]
-        denominator = float(np.linalg.norm(left) * np.linalg.norm(right))
+        denominator = float(np_linalg.norm(left) * np_linalg.norm(right))
         correlation = (
             float(np.dot(left, right) / denominator)
             if denominator

@@ -165,6 +165,21 @@ annulation ne publie ni résultat partiel ni entrée de cache. Ces propositions 
 deviennent des marqueurs persistants qu’après l’étape d’édition dédiée ; elles ne
 pilotent donc jamais automatiquement le montage ou les effets.
 
+Les marqueurs validés vivent dans l’extension de projet versionnée
+`timeline_markers`, indépendamment des clips et du mode d’export audio. Une détection
+est d’abord projetée depuis sa position dans le fichier à travers le trim et la
+position de chaque clip audio. L’utilisateur doit ensuite accepter explicitement les
+propositions. Leur provenance, confiance et position source restent conservées, mais
+la frame du projet devient la vérité éditoriale : déplacement, changement de type ou
+de libellé ne relancent jamais l’analyse.
+
+La règle de timeline affiche les marqueurs beat, temps fort, drop et personnalisés.
+Le filtre de type limite à la fois l’affichage, la navigation et les cibles de
+snapping ; le bouton Aimant global permet toujours de désactiver ce dernier. Ajout,
+correction, glisser-déposer, suppression et filtre passent par l’historique du projet.
+Supprimer la piste ou le fichier audio ne supprime donc jamais silencieusement les
+repères déjà validés.
+
 ## Décisions encore ouvertes
 
 1. V3.0 s'arrête-t-elle au Studio complet avec audio et match manuel, les fonctions

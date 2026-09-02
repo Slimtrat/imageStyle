@@ -72,6 +72,15 @@ from ..studio.music_analysis import (
     MusicAnalysisSettings,
     set_music_analysis_settings,
 )
+from ..studio.markers import (
+    MarkerKind,
+    add_custom_marker,
+    delete_timeline_marker,
+    import_music_analysis_markers,
+    marker_by_id,
+    set_marker_visibility,
+    update_timeline_marker,
+)
 from ..studio.explore import (
     ExploreBuildResult,
     ExplorePlanRole,
@@ -116,12 +125,19 @@ from .studio_music_analysis import (
     StudioMusicAnalysisController,
     StudioMusicAnalysisPanel,
 )
+from .studio_markers import StudioMarkerPanel
 from .studio_video_inspector import StudioVideoInspector, VideoInspectorEdit
 from .studio_explore import StudioExplorePanel
 from .studio_transition_inspector import StudioTransitionInspector
 from .studio_waveform import StudioWaveformController
 from .problems import UserProblem, translate_studio_exception
-from ..studio.timeline import add_track, delete_clips, set_track_state
+from ..studio.timeline import (
+    add_track,
+    delete_clips,
+    set_track_state,
+    snap_frame,
+    timeline_snap_targets,
+)
 from ..studio.transitions import (
     transition_by_id,
     transition_end_frame,
@@ -971,6 +987,19 @@ class StudioPanel(QWidget):
         self.music_analysis_panel.cancelRequested.connect(
             self.music_analysis_controller.cancel_pending
         )
+        self.music_analysis_panel.markersRequested.connect(
+            self._import_music_markers
+        )
+        self.marker_panel = StudioMarkerPanel()
+        self.marker_panel.addRequested.connect(self._add_timeline_marker)
+        self.marker_panel.updateRequested.connect(self._update_timeline_marker)
+        self.marker_panel.deleteRequested.connect(self._delete_timeline_marker)
+        self.marker_panel.visibilityRequested.connect(
+            self._set_marker_visibility
+        )
+        self.marker_panel.selectionRequested.connect(
+            self._marker_panel_selection_requested
+        )
         self.transition_inspector = StudioTransitionInspector()
         self.match_inspector = StudioMatchInspector()
         self.inspector_tabs.addTab(self.semantic_panel, "Scène & actions")
@@ -987,6 +1016,7 @@ class StudioPanel(QWidget):
         self.inspector_tabs.addTab(self.video_inspector, "Vidéo réelle")
         self.inspector_tabs.addTab(self.audio_inspector, "Audio")
         self.inspector_tabs.addTab(self.music_analysis_panel, "Rythme")
+        self.inspector_tabs.addTab(self.marker_panel, "Marqueurs")
         self.inspector_tabs.addTab(self.transition_inspector, "Transition")
         self.inspector_tabs.addTab(self.match_inspector, "Match réel")
         self.inspector_tabs.addTab(self.explore_panel, "Explore")
@@ -1001,6 +1031,7 @@ class StudioPanel(QWidget):
         self.transport.playbackChanged.connect(self._audio_playback_changed)
 
         self.transport.frameChanged.connect(self._frame_changed)
+        self.marker_panel.seekRequested.connect(self.transport.seek)
         self.canvas.cameraPoseChanged.connect(self._camera_pose_edited)
         self.canvas.matchTransformChanged.connect(self._canvas_match_transform_changed)
         page.addWidget(self.transport)
@@ -1022,6 +1053,11 @@ class StudioPanel(QWidget):
         self.timeline.transitionSelectionChanged.connect(
             self._timeline_transition_changed
         )
+        self.timeline.markerSelectionChanged.connect(
+            self._timeline_marker_selected
+        )
+        self.timeline.markerMoveRequested.connect(self._move_timeline_marker)
+        self.timeline.markerDeleteRequested.connect(self._delete_timeline_marker)
         self.timeline_actions = StudioTimelineActions(self)
         self.transition_inspector.applyRequested.connect(
             self.timeline_actions.apply_transition_edit
@@ -1111,6 +1147,7 @@ class StudioPanel(QWidget):
             self._project,
             self.asset_panel.project_path,
         )
+        self.marker_panel.set_project(self._project)
         self.explore_panel.set_project(self._project)
         self.timeline.set_project(self._project)
         self.export_panel.set_project(self._project)
@@ -1192,6 +1229,7 @@ class StudioPanel(QWidget):
             validated,
             self.asset_panel.project_path,
         )
+        self.marker_panel.set_project(validated)
         self.explore_panel.set_project(validated)
         self.timeline.set_project(validated)
         self.export_panel.set_project(validated)
@@ -1322,6 +1360,7 @@ class StudioPanel(QWidget):
             self.camera_presets.set_remaining_frames(1, fps=fps)
         self.keyframe_strip.set_playhead(frame)
         self.timeline.set_playhead(frame)
+        self.marker_panel.set_playhead(frame)
         self._request_preview(frame)
         self.audio_monitor.sync_frame(frame, playing=self.transport.is_playing)
         self.frame_requested.emit(frame)
@@ -1430,6 +1469,157 @@ class StudioPanel(QWidget):
         self.music_analysis_panel.set_feedback(
             "Analyse musicale annulée · aucun résultat partiel conservé."
         )
+
+    def _import_music_markers(
+        self,
+        asset_id: str,
+        result: object,
+    ) -> None:
+        project = self._project
+        if project is None or not isinstance(result, MusicAnalysis):
+            return
+        try:
+            updated, added = import_music_analysis_markers(
+                project,
+                asset_id,
+                result,
+            )
+            if not added:
+                self.music_analysis_panel.set_feedback(
+                    "Aucun nouveau repère dans la portion de musique montée."
+                )
+                return
+            self.commit_project(
+                updated,
+                "Ajouter les repères musicaux",
+            )
+            first = added[0]
+            self.timeline.set_marker_selection(first.marker_id)
+            self.marker_panel.set_selection(first.marker_id)
+            self.inspector_tabs.setCurrentWidget(self.marker_panel)
+            self.transport.seek(first.frame)
+            self.project_status.setText(
+                f"{len(added)} repère(s) musical(aux) ajouté(s) · éditables"
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            self.music_analysis_panel.set_feedback(
+                f"Repères non ajoutés · {exc}"
+            )
+
+    def _add_timeline_marker(self, frame: int, label: str) -> None:
+        if self._project is None:
+            return
+        try:
+            updated, marker = add_custom_marker(
+                self._project,
+                frame,
+                label=label,
+            )
+            self.commit_project(updated, "Ajouter un marqueur")
+            self.timeline.set_marker_selection(marker.marker_id)
+            self.marker_panel.set_selection(marker.marker_id)
+        except (TypeError, ValueError) as exc:
+            self.marker_panel.set_feedback(f"Marqueur non ajouté · {exc}")
+
+    def _update_timeline_marker(
+        self,
+        marker_id: str,
+        frame: int,
+        kind: MarkerKind,
+        label: str,
+    ) -> None:
+        if self._project is None:
+            return
+        try:
+            updated = update_timeline_marker(
+                self._project,
+                marker_id,
+                frame=frame,
+                kind=kind,
+                label=label,
+            )
+            self.commit_project(
+                updated,
+                "Modifier un marqueur",
+                merge_key=f"marker-edit:{marker_id}",
+            )
+            self.timeline.set_marker_selection(marker_id)
+            self.marker_panel.set_selection(marker_id)
+            self.transport.seek(frame)
+        except (KeyError, TypeError, ValueError) as exc:
+            self.marker_panel.set_feedback(f"Marqueur inchangé · {exc}")
+
+    def _move_timeline_marker(self, marker_id: str, frame: int) -> None:
+        project = self._project
+        if project is None:
+            return
+        try:
+            marker = marker_by_id(project, marker_id)
+            targets = timeline_snap_targets(
+                project,
+                playhead=self.transport.current_frame,
+                exclude_marker_ids=(marker_id,),
+            )
+            target = snap_frame(
+                frame,
+                targets,
+                threshold_frames=max(1, project.settings.fps // 10),
+                enabled=self.timeline.snapping_enabled,
+            )
+            if target == marker.frame:
+                return
+            updated = update_timeline_marker(
+                project,
+                marker_id,
+                frame=target,
+            )
+            self.commit_project(
+                updated,
+                "Déplacer un marqueur",
+                merge_key=f"marker-move:{marker_id}",
+            )
+            self.timeline.set_marker_selection(marker_id)
+            self.marker_panel.set_selection(marker_id)
+            self.transport.seek(target)
+        except (KeyError, TypeError, ValueError) as exc:
+            self.marker_panel.set_feedback(f"Marqueur inchangé · {exc}")
+
+    def _delete_timeline_marker(self, marker_id: str) -> None:
+        if self._project is None:
+            return
+        try:
+            updated = delete_timeline_marker(self._project, marker_id)
+            self.commit_project(updated, "Supprimer un marqueur")
+            self.timeline.set_marker_selection(None)
+            self.marker_panel.set_selection(None)
+        except (KeyError, TypeError, ValueError) as exc:
+            self.marker_panel.set_feedback(f"Marqueur non supprimé · {exc}")
+
+    def _set_marker_visibility(self, value: object) -> None:
+        if self._project is None:
+            return
+        kind = value if isinstance(value, MarkerKind) else None
+        try:
+            updated = set_marker_visibility(self._project, kind)
+            if updated == self._project:
+                return
+            self.commit_project(
+                updated,
+                "Filtrer les marqueurs",
+                merge_key="marker-visibility",
+            )
+        except (TypeError, ValueError) as exc:
+            self.marker_panel.set_feedback(f"Filtre inchangé · {exc}")
+
+    def _timeline_marker_selected(self, value: object) -> None:
+        marker_id = str(value) if isinstance(value, str) and value else None
+        self.marker_panel.set_selection(marker_id)
+        if marker_id is not None:
+            self.inspector_tabs.setCurrentWidget(self.marker_panel)
+
+    def _marker_panel_selection_requested(self, value: object) -> None:
+        marker_id = str(value) if isinstance(value, str) and value else None
+        self.timeline.set_marker_selection(marker_id)
 
     def _audio_monitor_failed(self, message: str) -> None:
         self.asset_panel.set_feedback(message)
