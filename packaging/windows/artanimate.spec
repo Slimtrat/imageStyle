@@ -1,12 +1,16 @@
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 
 WINDOWS_DIR = Path(SPECPATH).resolve()
 PROJECT_ROOT = WINDOWS_DIR.parents[1]
 
 imageio_datas, imageio_binaries, imageio_hiddenimports = collect_all("imageio_ffmpeg")
+opencv_detection_datas = collect_data_files(
+    "cv2",
+    includes=["data/haarcascade_frontalface_default.xml"],
+)
 branding_datas = [
     (
         str(
@@ -48,7 +52,14 @@ analysis = Analysis(
     [str(WINDOWS_DIR / "launcher.py")],
     pathex=[str(PROJECT_ROOT)],
     binaries=imageio_binaries,
-    datas=branding_datas + documentation_datas + qml_datas + material_datas + imageio_datas,
+    datas=(
+        branding_datas
+        + documentation_datas
+        + qml_datas
+        + material_datas
+        + imageio_datas
+        + opencv_detection_datas
+    ),
     hiddenimports=imageio_hiddenimports + qt_quick_hiddenimports,
     hookspath=[],
     hooksconfig={},

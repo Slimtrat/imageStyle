@@ -427,6 +427,32 @@ class StudioCanvas(QWidget):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                 self._artwork_name,
             )
+        if self._semantic_scene is not None and not self._artwork.isNull():
+            proposal_colors = {
+                "contrast": QColor("#4cd2c4"),
+                "edges": QColor("#ffc857"),
+                "color": QColor("#a77cff"),
+                "face": QColor("#ff78ad"),
+                "composition": QColor("#93a4bd"),
+            }
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for scene_object in self._semantic_scene.objects:
+                if scene_object.attributes.get("proposal_status") != "proposed":
+                    continue
+                proposal = self._semantic_selection_rect(scene_object.object_id, frame)
+                if proposal.isEmpty():
+                    continue
+                reason = str(scene_object.attributes.get("reason", "composition"))
+                color = proposal_colors.get(reason, QColor("#93a4bd"))
+                painter.setPen(QPen(color, 1, Qt.PenStyle.DashLine))
+                painter.drawRoundedRect(proposal, 3, 3)
+                rank = int(scene_object.attributes.get("rank", 0))
+                painter.setPen(color)
+                painter.drawText(
+                    proposal.adjusted(4, 3, -4, -3),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                    str(rank),
+                )
         if self._semantic_target_id is not None and not self._artwork.isNull():
             selection = self._semantic_selection_rect(self._semantic_target_id, frame)
             if not selection.isEmpty():
@@ -1322,10 +1348,18 @@ class StudioPanel(QWidget):
             updated = apply_scene_analysis(project, result)
             self.commit_project(updated, "Analyser l’œuvre localement")
             source = "cache local" if result.cache_hit else "calcul local"
-            self.analysis_panel.set_feedback(
-                f"Scène enrichie · masque + profondeur · {source}."
+            proposals = tuple(
+                item
+                for item in result.objects
+                if item.attributes.get("proposal_status") == "proposed"
             )
-            self.semantic_panel.select_target("auto-foreground")
+            self.analysis_panel.set_feedback(
+                f"Scène enrichie · {len(proposals)} région(s) proposée(s) "
+                f"+ masque + profondeur · {source}."
+            )
+            self.semantic_panel.select_target(
+                proposals[0].object_id if proposals else "auto-foreground"
+            )
         except (OSError, TypeError, ValueError) as exc:
             self.analysis_panel.set_feedback(f"Analyse non appliquée · {exc}")
 

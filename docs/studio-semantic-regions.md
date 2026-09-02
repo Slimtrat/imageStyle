@@ -57,5 +57,31 @@ sa microtexture et déplace deux fronts de paupière vers l’axe. Il ne rebouch
 par inpainting et ne réduit plus sa texture en bande. Une planche headless 2×4 compare
 automatiquement les quatre états dans l’œuvre canonique et dans la photo réelle.
 
-La détection automatique reste une capacité d’analyse séparée. Elle alimentera le même
-contrat et ne changera ni la sauvegarde du projet, ni les actions existantes.
+## Propositions automatiques locales
+
+`LocalInterestRegionDetector` implémente le port neutre
+`SemanticRegionDetector`. L’analyse combine cinq indices sans réseau : contraste
+local, densité de contours, couleur distinctive, visage frontal probable et centre de
+composition. Elle ne nomme donc jamais arbitrairement un objet qu’elle ne sait pas
+reconnaître. Sur une œuvre uniforme ou trop peu structurée, elle produit uniquement
+une région de composition centrale explicitement marquée comme repli.
+
+Le classement est déterministe. Chaque proposition contient :
+
+- des coordonnées normalisées dans le repère canonique de l’œuvre ;
+- un masque PNG local, référencé comme asset plutôt qu’encodé dans le projet ;
+- un rang, une confiance et la raison principale de la proposition ;
+- les sous-scores `contrast`, `edge_density`, `color_saliency` et
+  `centrality` ;
+- les affordances `camera-inspectable` et `mask-animatable`.
+
+La sélection finale limite le recouvrement entre régions et commence par diversifier
+les raisons. Le Studio affiche toutes les propositions sur le canvas, puis détaille le
+score de la région sélectionnée. Une proposition peut être renommée, recadrée ou
+ignorée avec les mêmes commandes annulables que les régions manuelles.
+
+Le détecteur est exécuté par l’analyseur de scène existant : worker unique annulable,
+cache indexé par empreinte de l’œuvre et version d’analyse, écritures atomiques, puis
+provenance persistée dans le projet. Une nouvelle analyse remplace seulement les faits
+appartenant à l’analyseur ; les régions manuelles restent intactes. Les pixels, masques
+et métadonnées ne quittent jamais la machine.

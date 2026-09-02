@@ -15,6 +15,11 @@ from PIL import Image, ImageFilter, ImageOps
 
 from .assets import fingerprint_file, import_media_asset
 from .model import AssetKind, MediaAsset, StudioProject
+from .semantic_detection import (
+    LocalInterestRegionDetector,
+    SemanticDetectionCancelled,
+    SemanticRegionDetector,
+)
 from .semantic import (
     Affordance,
     AffordanceSet,
@@ -29,8 +34,8 @@ from .semantic import (
 
 
 LOCAL_ANALYZER_ID = "analyzer.local-composition"
-LOCAL_ANALYZER_VERSION = "1"
-ANALYSIS_MANIFEST_VERSION = 1
+LOCAL_ANALYZER_VERSION = "2"
+ANALYSIS_MANIFEST_VERSION = 2
 
 
 class AnalysisCancelled(RuntimeError):
@@ -158,10 +163,17 @@ def _derived_asset(
 
 
 class LocalCompositionAnalyzer:
-    """Deterministic, model-free foreground and depth enrichment."""
+    """Deterministic foreground, depth and interest-region enrichment."""
 
     analyzer_id = LOCAL_ANALYZER_ID
     version = LOCAL_ANALYZER_VERSION
+
+    def __init__(
+        self,
+        *,
+        interest_detector: SemanticRegionDetector | None = None,
+    ) -> None:
+        self.interest_detector = interest_detector or LocalInterestRegionDetector()
 
     def analyze(self, request: SceneAnalysisRequest) -> SceneAnalysisResult:
         _check_cancelled(request.cancelled)
@@ -176,10 +188,15 @@ class LocalCompositionAnalyzer:
         if manifest_path.is_file() and mask_path.is_file() and depth_path.is_file():
             try:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                interest_masks = tuple(
+                    cache / str(item["mask_file"])
+                    for item in manifest.get("interest_regions", [])
+                )
                 if (
                     manifest.get("manifest_version") == ANALYSIS_MANIFEST_VERSION
                     and manifest.get("source_fingerprint") == identity.fingerprint
                     and manifest.get("analyzer_version") == self.version
+                    and all(path.is_file() for path in interest_masks)
                 ):
                     return self._result_from_manifest(
                         manifest,
@@ -274,6 +291,38 @@ class LocalCompositionAnalyzer:
         _atomic_png(mask, mask_path)
         _check_cancelled(request.cancelled)
         _atomic_png(depth, depth_path)
+        try:
+            interest_detection = self.interest_detector.detect(
+                np.asarray(image, dtype=np.uint8),
+                should_cancel=request.cancelled.is_set,
+            )
+        except SemanticDetectionCancelled as exc:
+            raise AnalysisCancelled("Analyse locale annulée") from exc
+        interest_regions: list[dict[str, object]] = []
+        for rank, candidate in enumerate(interest_detection.candidates, start=1):
+            _check_cancelled(request.cancelled)
+            region_path = cache / f"interest-region-{rank:02d}-mask.png"
+            region_mask = Image.fromarray(
+                np.clip(candidate.mask, 0, 255).astype(np.uint8),
+                mode="L",
+            )
+            if region_mask.size != (width, height):
+                region_mask = region_mask.resize(
+                    (width, height),
+                    Image.Resampling.NEAREST,
+                )
+            _atomic_png(region_mask, region_path)
+            interest_regions.append(
+                {
+                    "rank": rank,
+                    "region_type": candidate.region_type,
+                    "label": candidate.label,
+                    "bounds": candidate.bounds.to_dict(),
+                    "confidence": candidate.confidence,
+                    "mask_file": region_path.name,
+                    "metadata": candidate.metadata.to_dict(),
+                }
+            )
 
         manifest: dict[str, object] = {
             "manifest_version": ANALYSIS_MANIFEST_VERSION,
@@ -285,6 +334,12 @@ class LocalCompositionAnalyzer:
             "bounds": bounds.to_dict(),
             "confidence": confidence,
             "fallback": fallback,
+            "interest_detector": {
+                "analyzer_id": interest_detection.analyzer_id,
+                "analyzer_version": interest_detection.analyzer_version,
+                "metadata": interest_detection.metadata.to_dict(),
+            },
+            "interest_regions": interest_regions,
             "parameters": request.parameters.to_dict(),
         }
         _atomic_json(manifest, manifest_path)
@@ -330,6 +385,92 @@ class LocalCompositionAnalyzer:
             source_fingerprint=fingerprint,
         )
         source = self.analyzer_id
+        interest_assets: list[MediaAsset] = []
+        interest_objects: list[SceneObject] = []
+        interest_relations: list[SceneRelation] = []
+        detector_info = manifest.get("interest_detector", {})
+        detector_id = (
+            str(detector_info.get("analyzer_id", "detector.unknown"))
+            if isinstance(detector_info, Mapping)
+            else "detector.unknown"
+        )
+        for raw_region in manifest.get("interest_regions", []):
+            if not isinstance(raw_region, Mapping):
+                continue
+            rank = int(raw_region["rank"])
+            mask_file = str(raw_region["mask_file"])
+            region_path = mask_path.parent / mask_file
+            asset_id = f"analysis:interest-mask:{rank:02d}"
+            region_asset = _derived_asset(
+                asset_id,
+                region_path,
+                width=width,
+                height=height,
+                resource_kind="mask",
+                analyzer_id=self.analyzer_id,
+                analyzer_version=self.version,
+                source_fingerprint=fingerprint,
+            )
+            metadata = (
+                dict(raw_region.get("metadata", {}))
+                if isinstance(raw_region.get("metadata", {}), Mapping)
+                else {}
+            )
+            metadata.update(
+                {
+                    "analysis_owner": self.analyzer_id,
+                    "detected_by": detector_id,
+                    "proposal_status": "proposed",
+                    "editable": True,
+                }
+            )
+            region_object = SceneObject(
+                f"auto-interest-{rank:02d}",
+                str(raw_region["region_type"]),
+                str(raw_region["label"]),
+                confidence=float(raw_region["confidence"]),
+                bounds=Bounds.from_dict(raw_region["bounds"]),
+                resource_refs=(
+                    ResourceRef(
+                        f"analysis:interest-region:{rank:02d}",
+                        "mask",
+                        region_asset.asset_id,
+                        metadata=FrozenJsonObject(
+                            {
+                                "editable": True,
+                                "proposal": True,
+                            }
+                        ),
+                    ),
+                ),
+                attributes=FrozenJsonObject(metadata),
+                affordances=(
+                    Affordance(
+                        "camera-inspectable",
+                        float(raw_region["confidence"]),
+                        source=source,
+                    ),
+                    Affordance(
+                        "mask-animatable",
+                        float(raw_region["confidence"]),
+                        source=source,
+                    ),
+                ),
+            )
+            interest_assets.append(region_asset)
+            interest_objects.append(region_object)
+            interest_relations.append(
+                SceneRelation(
+                    f"analysis:interest-{rank:02d}-on-artwork",
+                    "part-of",
+                    region_object.object_id,
+                    "artwork",
+                    confidence=float(raw_region["confidence"]),
+                    attributes=FrozenJsonObject(
+                        {"analysis_owner": self.analyzer_id}
+                    ),
+                )
+            )
         foreground = SceneObject(
             "auto-foreground",
             "subject.foreground",
@@ -371,9 +512,9 @@ class LocalCompositionAnalyzer:
             fingerprint,
             width,
             height,
-            (foreground,),
-            (relation,),
-            (mask_asset, depth_asset),
+            (foreground, *interest_objects),
+            (relation, *interest_relations),
+            (mask_asset, depth_asset, *interest_assets),
             (
                 ResourceRef(
                     "analysis:depth-map",

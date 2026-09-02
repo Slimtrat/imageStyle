@@ -63,8 +63,9 @@ def test_async_analysis_enriches_scene_and_is_undoable(
         artwork_object = panel.project.scene.object_by_id("artwork")
         assert {item.kind for item in artwork_object.resource_refs} >= {"depth"}
         assert panel.history.undo_label == "Analyser l’œuvre localement"
-        assert panel.semantic_panel.selected_target_id == "auto-foreground"
-        assert "masque + profondeur" in panel.analysis_panel.status.text()
+        assert panel.semantic_panel.selected_target_id.startswith("auto-interest-")
+        assert "région(s) proposée(s)" in panel.analysis_panel.status.text()
+        assert "score" in panel.analysis_panel.selection_summary.text()
 
         assert panel.undo()
         assert panel.project.scene.object_by_id("auto-foreground") is None

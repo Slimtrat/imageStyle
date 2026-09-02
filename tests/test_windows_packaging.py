@@ -30,6 +30,8 @@ def test_windows_package_includes_studio_materials() -> None:
     assert material.is_file()
     assert "dark-walnut-v2.png" in spec
     assert "material_datas" in spec
+    assert "opencv_detection_datas" in spec
+    assert "haarcascade_frontalface_default.xml" in spec
 
 
 def test_windows_package_collects_and_self_tests_bundled_codecs() -> None:

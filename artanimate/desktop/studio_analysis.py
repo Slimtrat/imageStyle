@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor, TimeoutError
 import logging
 from pathlib import Path
@@ -220,8 +221,9 @@ class StudioAnalysisPanel(QFrame):
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
         explanation = QLabel(
-            "Détecte une zone principale, un masque et une profondeur sans réseau. "
-            "Toute proposition reste corrigeable ou ignorable."
+            "Propose des détails intéressants par contraste, contours, couleurs, "
+            "visage probable et composition — entièrement en local. Chaque région "
+            "reste sélectionnable, corrigeable ou ignorable."
         )
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
@@ -238,6 +240,12 @@ class StudioAnalysisPanel(QFrame):
         self.status.setObjectName("studioAnalysisStatus")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.selection_summary = QLabel(
+            "Sélectionnez une proposition sur l’œuvre pour lire son score."
+        )
+        self.selection_summary.setObjectName("studioAnalysisSelectionSummary")
+        self.selection_summary.setWordWrap(True)
+        layout.addWidget(self.selection_summary)
 
         form = QFormLayout()
         self.label_edit = QLineEdit("Zone manuelle")
@@ -301,9 +309,14 @@ class StudioAnalysisPanel(QFrame):
             self.status.setText("Importez une œuvre pour commencer l’analyse locale.")
         elif project.scene.analyzer_provenance:
             latest = project.scene.analyzer_provenance[-1]
+            proposal_count = sum(
+                item.attributes.get("proposal_status") == "proposed"
+                for item in project.scene.objects
+            )
             self.status.setText(
                 f"Analyse {latest.analyzer_id} · version {latest.version} · "
-                f"source {latest.source_fingerprint[-12:]}"
+                f"{proposal_count} proposition(s) · source "
+                f"{latest.source_fingerprint[-12:]}"
             )
         else:
             self.status.setText(
@@ -327,12 +340,33 @@ class StudioAnalysisPanel(QFrame):
         )
         self.correct_button.setEnabled(editable and scene_object.bounds is not None)
         self.ignore_button.setEnabled(editable)
+        self.selection_summary.setText(
+            "Sélectionnez une proposition sur l’œuvre pour lire son score."
+        )
         if editable and scene_object.bounds is not None:
             self.label_edit.setText(scene_object.label)
             self.bounds_x.setValue(scene_object.bounds.x)
             self.bounds_y.setValue(scene_object.bounds.y)
             self.bounds_width.setValue(scene_object.bounds.width)
             self.bounds_height.setValue(scene_object.bounds.height)
+            attributes = scene_object.attributes
+            scores = attributes.get("scores", {})
+            global_score = (
+                float(scores.get("global", scene_object.confidence))
+                if isinstance(scores, Mapping)
+                else scene_object.confidence
+            )
+            reason = str(
+                attributes.get("reason_label", attributes.get("reason", "Zone manuelle"))
+            )
+            if attributes.get("proposal_status") == "proposed":
+                rank = int(attributes.get("rank", 0))
+                self.selection_summary.setText(
+                    f"Proposition {rank} · {reason} · score "
+                    f"{global_score * 100:.0f}% · modifiable"
+                )
+            elif attributes.get("manual"):
+                self.selection_summary.setText("Zone manuelle · modifiable")
 
     def set_busy(self, busy: bool) -> None:
         self.cancel_button.setEnabled(bool(busy))

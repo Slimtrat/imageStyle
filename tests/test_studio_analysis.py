@@ -52,6 +52,19 @@ def test_local_analysis_is_deterministic_cached_and_resource_backed(
     assert {resource.kind for resource in first.artwork_resources} == {"depth"}
     assert {resource.kind for resource in first.objects[0].resource_refs} == {"mask"}
     assert all(Path(asset.path).is_file() for asset in first.assets)
+    proposals = tuple(
+        item
+        for item in first.objects
+        if item.attributes.get("proposal_status") == "proposed"
+    )
+    assert proposals
+    assert all(item.bounds is not None for item in proposals)
+    assert all(item.resource_kinds == {"mask"} for item in proposals)
+    assert all(
+        item.affordance_ids >= {"camera-inspectable", "mask-animatable"}
+        for item in proposals
+    )
+    assert all(item.attributes["generated"] is False for item in proposals)
 
     project = apply_scene_analysis(StudioProject.new(artwork), first)
     assert project.artwork.fingerprint == first.source_fingerprint
@@ -85,6 +98,13 @@ def test_changed_fingerprint_invalidates_cache_and_abstract_art_has_fallback(
     first = analyzer.analyze(request)
     assert first.objects[0].attributes["fallback"] is True
     assert first.objects[0].confidence >= 0.28
+    proposal = next(
+        item
+        for item in first.objects
+        if item.attributes.get("proposal_status") == "proposed"
+    )
+    assert proposal.semantic_type == "artwork.region.composition"
+    assert proposal.attributes["fallback"] is True
 
     Image.new("RGB", (96, 96), (10, 190, 80)).save(artwork)
     changed = analyzer.analyze(
